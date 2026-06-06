@@ -1,0 +1,4 @@
+# Supabase CLI local-state (commit edilmez)
+.branches/
+.temp/
+.env

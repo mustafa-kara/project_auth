@@ -1,0 +1,85 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
+
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+/coverage/
+
+# Symbolication related
+app.*.symbols
+
+# Obfuscation related
+app.*.map.json
+
+# Android Studio will place build artifacts here
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Proje-özel eklemeler (güvenlik + hijyen)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Sırlar / ortam dosyaları — ASLA commit edilmez.
+# Publishable key (sb_publishable_) client'a gömülür = sır değildir; ama secret
+# key (sb_secret_), service_role, DATABASE_URL, signing key vb. yalnızca env'de.
+.env
+.env.*
+!.env.example
+*.local.env
+secrets.json
+**/signing_keys.json          # Supabase JWT signing key (config.toml: "DO NOT commit")
+*.pem
+*.p12
+*.p8                          # Apple APNs auth key (Faz 4 push)
+google-services.json          # Firebase Android (Faz 4) — gerçek proje config'i
+GoogleService-Info.plist       # Firebase iOS (Faz 4)
+
+# Claude Code / editör yerel ayarları (kullanıcıya özel)
+.claude/
+
+# macOS / OS
+.DS_Store
+**/.DS_Store
+Thumbs.db
+
+# Dart/Flutter ek üretilenler (codegen — pubspec'ten her zaman yeniden üretilebilir)
+*.g.dart
+*.freezed.dart
+*.config.dart                  # injectable codegen (manuel DI'a geçilirse de zararsız)
+*.mocks.dart                   # mockito codegen
+coverage/
+.test_coverage.dart
+
+# Supabase CLI lokal state (supabase/.gitignore'a ek güvence — köke de yaz)
+supabase/.branches/
+supabase/.temp/
+supabase/.env
