@@ -13,7 +13,13 @@ enum VaultLockStatus {
 }
 
 /// Unlock/recover ekranlarında gösterilen inline hata sebebi.
-enum VaultLockError { wrongPassword, wrongRecovery, weakPassword }
+enum VaultLockError {
+  wrongPassword,
+  wrongRecovery,
+  weakPassword,
+  biometricFailed,
+  biometricLockout,
+}
 
 class VaultLockState extends Equatable {
   final VaultLockStatus status;
@@ -24,23 +30,57 @@ class VaultLockState extends Equatable {
   /// Yalnız `locked` iken dolu olabilir — son unlock/recover denemesi hatası.
   final VaultLockError? error;
 
-  const VaultLockState._(this.status, {this.mnemonic = const [], this.error});
+  /// Bu cihazda biyometri enroll edilmiş mi (`attrs.bmk != null`). Patch 5.
+  /// Settings switch'in AÇIK/KAPALI değeri = bu (enrolled durumu).
+  final bool biometricEnrolled;
+
+  /// Cihaz biyometri YETENEĞİ (donanım+enrolled+strong+API≥28), enrollment'tan
+  /// BAĞIMSIZ. Settings enable switch'inin etkin olup olmadığını belirler. Patch 5.
+  final bool deviceBiometricAvailable;
+
+  const VaultLockState._(
+    this.status, {
+    this.mnemonic = const [],
+    this.error,
+    this.biometricEnrolled = false,
+    this.deviceBiometricAvailable = false,
+  });
 
   const VaultLockState.uninitialized() : this._(VaultLockStatus.uninitialized);
 
   const VaultLockState.setupPending({required List<String> mnemonic})
       : this._(VaultLockStatus.setupPending, mnemonic: mnemonic);
 
-  const VaultLockState.locked({VaultLockError? error})
-      : this._(VaultLockStatus.locked, error: error);
+  const VaultLockState.locked({
+    VaultLockError? error,
+    bool biometricEnrolled = false,
+    bool deviceBiometricAvailable = false,
+  }) : this._(
+          VaultLockStatus.locked,
+          error: error,
+          biometricEnrolled: biometricEnrolled,
+          deviceBiometricAvailable: deviceBiometricAvailable,
+        );
 
-  const VaultLockState.unlocked() : this._(VaultLockStatus.unlocked);
+  const VaultLockState.unlocked({
+    bool biometricEnrolled = false,
+    bool deviceBiometricAvailable = false,
+  }) : this._(
+          VaultLockStatus.unlocked,
+          biometricEnrolled: biometricEnrolled,
+          deviceBiometricAvailable: deviceBiometricAvailable,
+        );
 
   const VaultLockState.locking() : this._(VaultLockStatus.locking);
 
   const VaultLockState.keyAttributesCorrupted()
       : this._(VaultLockStatus.keyAttributesCorrupted);
 
+  /// UnlockPage biyometri butonu görünürlüğü: enrolled VE cihaz uygun.
+  bool get biometricUnlockAvailable =>
+      biometricEnrolled && deviceBiometricAvailable;
+
   @override
-  List<Object?> get props => [status, mnemonic, error];
+  List<Object?> get props =>
+      [status, mnemonic, error, biometricEnrolled, deviceBiometricAvailable];
 }

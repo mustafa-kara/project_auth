@@ -30,6 +30,14 @@ class KeyAttributes {
   final int kdfMem;
   final EncryptedBlob encryptedMasterKey;
   final EncryptedBlob recoveryEncryptedMasterKey;
+
+  /// masterKey'in biyometri-anahtarı ile sarmalanmış hâli (Patch 5). Opsiyonel:
+  /// `null` = biyometri bu cihazda enroll edilmemiş. Sarmalama anahtarı (biometricKey)
+  /// OS keystore'da biyometrik erişim kontrolüyle ayrı saklanır — bu blob tek başına
+  /// işe yaramaz. `bmk` JSON anahtarı yalnız non-null iken yazılır → mevcut vault'lar
+  /// byte-identical kalır (geriye dönük uyumlu, sürüm bump YOK).
+  final EncryptedBlob? biometricEncryptedMasterKey;
+
   final int version;
 
   KeyAttributes({
@@ -38,6 +46,7 @@ class KeyAttributes {
     required this.kdfMem,
     required this.encryptedMasterKey,
     required this.recoveryEncryptedMasterKey,
+    this.biometricEncryptedMasterKey,
     this.version = supportedVersion,
   }) : _kdfSalt = Uint8List.fromList(kdfSalt) {
     _validate(version, _kdfSalt, kdfOps, kdfMem);
@@ -68,20 +77,35 @@ class KeyAttributes {
 
   /// Aynı masterKey ile yeni KDF/encryptedMasterKey'e kopya (changePassword).
   /// `recoveryEncryptedMasterKey` ve diğer alanlar korunur.
+  ///
+  /// [biometricEncryptedMasterKey] verilirse set edilir; [clearBiometric] true ise
+  /// `null`'a çekilir (biyometriyi kapat). İkisi birden verilemez (assert).
+  /// `changePassword` bu metodu yalnız KDF/emk için çağırır → bmk KORUNUR
+  /// (masterKey değişmediği için biyometri sarması geçerli kalır).
   KeyAttributes copyWith({
     Uint8List? kdfSalt,
     int? kdfOps,
     int? kdfMem,
     EncryptedBlob? encryptedMasterKey,
-  }) =>
-      KeyAttributes(
-        kdfSalt: kdfSalt ?? _kdfSalt,
-        kdfOps: kdfOps ?? this.kdfOps,
-        kdfMem: kdfMem ?? this.kdfMem,
-        encryptedMasterKey: encryptedMasterKey ?? this.encryptedMasterKey,
-        recoveryEncryptedMasterKey: recoveryEncryptedMasterKey,
-        version: version,
-      );
+    EncryptedBlob? biometricEncryptedMasterKey,
+    bool clearBiometric = false,
+  }) {
+    assert(
+      !(clearBiometric && biometricEncryptedMasterKey != null),
+      'copyWith: clearBiometric ile biometricEncryptedMasterKey aynı anda verilemez',
+    );
+    return KeyAttributes(
+      kdfSalt: kdfSalt ?? _kdfSalt,
+      kdfOps: kdfOps ?? this.kdfOps,
+      kdfMem: kdfMem ?? this.kdfMem,
+      encryptedMasterKey: encryptedMasterKey ?? this.encryptedMasterKey,
+      recoveryEncryptedMasterKey: recoveryEncryptedMasterKey,
+      biometricEncryptedMasterKey: clearBiometric
+          ? null
+          : (biometricEncryptedMasterKey ?? this.biometricEncryptedMasterKey),
+      version: version,
+    );
+  }
 
   Map<String, dynamic> toJson() => {
         'v': version,
@@ -90,6 +114,8 @@ class KeyAttributes {
         'mem': kdfMem,
         'emk': encryptedMasterKey.toJson(),
         'remk': recoveryEncryptedMasterKey.toJson(),
+        if (biometricEncryptedMasterKey != null)
+          'bmk': biometricEncryptedMasterKey!.toJson(),
       };
 
   /// [toJson] çıktısından geri kurar. Eksik/yanlış tip/geçersiz base64 →
@@ -104,6 +130,8 @@ class KeyAttributes {
       throw const FormatException(
           'KeyAttributes.fromJson: zorunlu alan eksik (salt/ops/mem/emk/remk)');
     }
+    // bmk opsiyonel: yoksa null (eski/biyometrisiz vault). Doluysa EncryptedBlob.
+    final bmk = _asMap(json['bmk'], 'bmk');
     final Uint8List salt;
     try {
       salt = base64Decode(saltStr);
@@ -116,6 +144,7 @@ class KeyAttributes {
       kdfMem: mem,
       encryptedMasterKey: EncryptedBlob.fromJson(emk),
       recoveryEncryptedMasterKey: EncryptedBlob.fromJson(remk),
+      biometricEncryptedMasterKey: bmk == null ? null : EncryptedBlob.fromJson(bmk),
       version: _asInt(json['v'], 'v') ?? supportedVersion,
     );
   }

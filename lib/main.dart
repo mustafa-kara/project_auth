@@ -7,6 +7,7 @@ import 'core/di/locator.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
 import 'features/auth/data/key_attributes_store.dart';
+import 'features/auth/domain/biometric_service.dart';
 import 'features/auth/domain/key_manager.dart';
 import 'features/auth/presentation/bloc/vault_lock_cubit.dart';
 import 'features/vault/data/encrypted_vault_repository.dart';
@@ -41,6 +42,7 @@ class _AuthenticatorAppState extends State<AuthenticatorApp>
     _lock = VaultLockCubit(
       keyManager: locator<KeyManager>(),
       attrsStore: locator<KeyAttributesStore>(),
+      biometric: locator<BiometricService>(),
       migrate: (masterKey) => migration.migrateIfNeeded(masterKey: masterKey),
       deleteKeys: (keys) async {
         final storage = locator<FlutterSecureStorage>();
@@ -64,9 +66,13 @@ class _AuthenticatorAppState extends State<AuthenticatorApp>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused ||
-        state == AppLifecycleState.inactive) {
-      _lock.onAppBackgrounded();
+    // Patch 5: paused/inactive AYRI iletilir. `inactive` biyometri sistem prompt'u
+    // sırasında da gelebilir → cubit prompt-in-flight ise onu abort'tan muaf tutar
+    // (reviewer 2.tur [P1]). `paused` (gerçek arka plan) her zaman kilit/abort.
+    if (state == AppLifecycleState.paused) {
+      _lock.onAppBackgrounded(paused: true);
+    } else if (state == AppLifecycleState.inactive) {
+      _lock.onAppBackgrounded(paused: false);
     }
   }
 

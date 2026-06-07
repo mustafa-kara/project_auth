@@ -7,7 +7,9 @@ library;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:get_it/get_it.dart';
 
+import '../../features/auth/data/biometric_service_impl.dart';
 import '../../features/auth/data/key_attributes_store.dart';
+import '../../features/auth/domain/biometric_service.dart';
 import '../../features/auth/domain/key_manager.dart';
 import '../../features/vault/data/vault_migration.dart';
 import '../../features/vault/data/view_mode_store.dart';
@@ -44,6 +46,11 @@ Future<void> configureDependencies() async {
   // Görünüm tercihi (kart/liste) — secure_storage'da kalıcı.
   locator.registerLazySingleton<ViewModeStore>(
       () => ViewModeStore(storage: locator<FlutterSecureStorage>()));
+
+  // Biyometrik kilit açma (Patch 5). KENDİ options'lı/namespace'li storage'ı var
+  // (BiometricServiceImpl içinde) — paylaşılan no-options singleton DEĞİL, çünkü
+  // bmk anahtarı OS-keystore biyometrik erişim kontrolü ister.
+  locator.registerLazySingleton<BiometricService>(() => BiometricServiceImpl());
 
   // Faz 3: SupabaseClient wrapper + AuthRepository.
 }

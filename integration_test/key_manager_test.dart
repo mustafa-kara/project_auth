@@ -15,6 +15,7 @@ import 'package:project_auth/core/crypto/crypto_exceptions.dart';
 import 'package:project_auth/core/crypto/encrypted_blob.dart';
 import 'package:project_auth/core/crypto/key_handle.dart';
 import 'package:project_auth/core/crypto/sodium_crypto_service.dart';
+import 'package:project_auth/features/auth/domain/biometric_exceptions.dart';
 import 'package:project_auth/features/auth/domain/key_manager.dart';
 
 void main() {
@@ -148,5 +149,67 @@ void main() {
       throwsA(isA<WeakPasswordException>()),
     );
     s.masterKey.dispose();
+  });
+
+  // --- Biyometri (Patch 5) ---
+
+  test('enrollBiometric → biometricUnlock round-trip: aynı masterKey', () async {
+    final s = await km.setup('parola123');
+    final token = sealToken(s.masterKey, 'SEED-DATA');
+
+    final enroll = km.enrollBiometric(s.attrs, s.masterKey);
+    expect(enroll.biometricKeyBytes.length, 32);
+    expect(enroll.attrs.biometricEncryptedMasterKey, isNotNull);
+
+    final unlocked = km.biometricUnlock(enroll.attrs, enroll.biometricKeyBytes);
+    expect(canOpen(unlocked, token, 'SEED-DATA'), isTrue);
+
+    enroll.biometricKeyBytes.fillRange(0, enroll.biometricKeyBytes.length, 0);
+    s.masterKey.dispose();
+    unlocked.dispose();
+  });
+
+  test('biometricUnlock bmk yok attrs → BiometricUnwrapException', () async {
+    final s = await km.setup('parola123');
+    final dummyKey = crypto.randomBytes(32);
+    expect(
+      () => km.biometricUnlock(s.attrs, dummyKey),
+      throwsA(isA<BiometricUnwrapException>()),
+    );
+    dummyKey.fillRange(0, dummyKey.length, 0);
+    s.masterKey.dispose();
+  });
+
+  test('yanlış biometricKey → BiometricUnwrapException', () async {
+    final s = await km.setup('parola123');
+    final enroll = km.enrollBiometric(s.attrs, s.masterKey);
+    final wrongKey = crypto.randomBytes(32);
+    expect(
+      () => km.biometricUnlock(enroll.attrs, wrongKey),
+      throwsA(isA<BiometricUnwrapException>()),
+    );
+    wrongKey.fillRange(0, wrongKey.length, 0);
+    enroll.biometricKeyBytes.fillRange(0, enroll.biometricKeyBytes.length, 0);
+    s.masterKey.dispose();
+  });
+
+  test('enrollBiometric changePassword sonrası hâlâ geçerli (masterKey aynı)',
+      () async {
+    final s = await km.setup('eski-parola');
+    final token = sealToken(s.masterKey, 'SEED-DATA');
+    final enroll = km.enrollBiometric(s.attrs, s.masterKey);
+
+    // Parola değişir; copyWith bmk'yı korur
+    final afterChange =
+        await km.changePassword(enroll.attrs, s.masterKey, 'yeni-parola');
+    expect(afterChange.biometricEncryptedMasterKey, isNotNull);
+
+    // Aynı biometricKey ile hâlâ açılır (masterKey değişmedi)
+    final unlocked = km.biometricUnlock(afterChange, enroll.biometricKeyBytes);
+    expect(canOpen(unlocked, token, 'SEED-DATA'), isTrue);
+
+    enroll.biometricKeyBytes.fillRange(0, enroll.biometricKeyBytes.length, 0);
+    s.masterKey.dispose();
+    unlocked.dispose();
   });
 }

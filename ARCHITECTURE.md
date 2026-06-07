@@ -69,6 +69,11 @@ Master Parola (kullanıcı belirler — login parolasından AYRI)
 5. Parola unutuldu: recovery key ile `masterKey` açılır, yeni parola → yeni KEK → yeniden sarmala.
 
 ### 2.3 Cihazda saklama
+> **Faz 2 Patch 5'te UYGULANDI** — bu bölümdeki hızlı-unlock planı birebir gerçekleşti
+> (iOS `biometryCurrentSet`+Secure Enclave, Android `setUserAuthenticationRequired`/
+> `strongBiometricOnly`, `local_auth` yalnız prompt değil—availability, gerçek geçit
+> `flutter_secure_storage.read` OS access-control'ü). Detay + tehdit modeli: [docs/CRYPTO.md §11](docs/CRYPTO.md).
+
 - `KEK` ve açık `masterKey` **diskte plaintext tutulmaz.**
 - Oturum boyunca `masterKey` bellekte tutulur; uygulama arka plana/kilide geçince temizlenir.
 - **Hızlı unlock mekanizması (netleştirme):** master key, OS keystore'da **access-control'lü** bir anahtar tarafından sarmalanmış saklanır:

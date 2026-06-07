@@ -18,11 +18,13 @@ import '../../../core/crypto/crypto_exceptions.dart';
 import '../../../core/crypto/crypto_service.dart';
 import '../../../core/crypto/key_attributes.dart';
 import '../../../core/crypto/key_handle.dart';
+import 'biometric_exceptions.dart';
 
 /// AAD (Additional Authenticated Data) sabitleri — wrap bağlamını bağlar →
 /// bir blob başka bağlamda (örn. token olarak) çözülemez.
 const _aadMasterKek = 'masterkey-kek|1';
 const _aadMasterRecovery = 'masterkey-recovery|1';
+const _aadMasterBiometric = 'masterkey-biometric|1';
 
 /// [KeyManager.setup] sonucu: persist edilecek attrs + kullanıcıya gösterilecek
 /// mnemonic + oturum içi masterKey.
@@ -30,6 +32,15 @@ typedef SetupResult = ({
   KeyAttributes attrs,
   List<String> recoveryMnemonic,
   KeyHandle masterKey,
+});
+
+/// [KeyManager.enrollBiometric] sonucu: bmk eklenmiş attrs + OS keystore'a
+/// yazılacak ham biometricKey byte'ları. **Çağıran, [biometricKeyBytes]'ı
+/// `BiometricService.enroll`'a verdikten SONRA zero-fill etmelidir** (bu metot
+/// içinde silinmez — çağırana taşınır; tıpkı `setup`'ın masterKey'i döndürmesi gibi).
+typedef BiometricEnrollResult = ({
+  KeyAttributes attrs,
+  Uint8List biometricKeyBytes,
 });
 
 class KeyManager {
@@ -203,6 +214,59 @@ class KeyManager {
       );
     } finally {
       newKek?.dispose();
+    }
+  }
+
+  /// Biyometrik kilit açma için masterKey'i taze bir biometricKey ile sarmalar
+  /// (Patch 5). masterKey AYNI kalır (sahipliği çağırandadır — dispose ETMEZ).
+  /// Dönen [BiometricEnrollResult.attrs] `bmk` içerir; [biometricKeyBytes] OS
+  /// keystore'a yazılmak üzere çağırana verilir.
+  ///
+  /// **Yalnız `unlocked` iken (masterKey bellekte) çağrılmalı.** Argon2id YOK →
+  /// senkron (yavaş kısım yok); yine de `Future` API tutarlılığı için sync döner.
+  BiometricEnrollResult enrollBiometric(KeyAttributes attrs, KeyHandle masterKey) {
+    final biometricKeyBytes = _crypto.randomBytes(32);
+    KeyHandle? biometricKey;
+    try {
+      biometricKey = _crypto.keyFromBytes(biometricKeyBytes);
+      final blob = _crypto.wrapKey(
+        keyToWrap: masterKey,
+        wrappingKey: biometricKey,
+        aad: _aad(_aadMasterBiometric),
+      );
+      return (
+        attrs: attrs.copyWith(biometricEncryptedMasterKey: blob),
+        biometricKeyBytes: biometricKeyBytes,
+      );
+    } finally {
+      // NB: biometricKeyBytes zero-fill EDİLMEZ — çağırana taşınır (enroll sonrası
+      // çağıran siler). Yalnız ara KeyHandle dispose edilir.
+      biometricKey?.dispose();
+    }
+  }
+
+  /// OS keystore'dan (biyometri geçidi ardından) okunan [biometricKeyBytes] ile
+  /// masterKey'i açar (Patch 5). bmk yok / yanlış key / bozuk → [BiometricUnwrapException].
+  /// **Çağıran [biometricKeyBytes]'ı bu çağrıdan SONRA zero-fill etmelidir.**
+  KeyHandle biometricUnlock(KeyAttributes attrs, Uint8List biometricKeyBytes) {
+    final blob = attrs.biometricEncryptedMasterKey;
+    if (blob == null) {
+      throw const BiometricUnwrapException('Bu cihazda biyometri enroll edilmemiş');
+    }
+    KeyHandle? biometricKey;
+    try {
+      biometricKey = _crypto.keyFromBytes(biometricKeyBytes);
+      try {
+        return _crypto.unwrapKey(
+          blob: blob,
+          wrappingKey: biometricKey,
+          aad: _aad(_aadMasterBiometric),
+        );
+      } on DecryptException {
+        throw const BiometricUnwrapException();
+      }
+    } finally {
+      biometricKey?.dispose();
     }
   }
 }

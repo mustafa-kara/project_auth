@@ -98,6 +98,11 @@ class _VaultPageState extends State<VaultPage> {
                 : 'Kart görünümü',
             onPressed: _toggleViewMode,
           ),
+          IconButton(
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: 'Ayarlar',
+            onPressed: () => context.pushNamed('settings'),
+          ),
         ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(60),

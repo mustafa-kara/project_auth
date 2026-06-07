@@ -37,7 +37,7 @@ E2E (uçtan uca) şifreli, çoklu cihaz senkronize **TOTP/HOTP authenticator** �
 | Flutter — Faz 1 OTP çekirdeği | ✅ TOTP/HOTP/Steam/Base32 + `otpauth://` (validasyonlu, stabil token id) + vault UI + QR tarama (mobile_scanner) + secure_storage kalıcılık + arama · `analyze` temiz |
 | Flutter — Faz 2 E2E kripto (Patch 1–3) | ✅ `CryptoService`/SodiumSumo (XChaCha20-Poly1305 IETF + Argon2id), `KeyManager` (setup/unlock/recovery/changePassword), kendi BIP39 (MIT, resmi vektörler), `EncryptedVaultRepository` (token-bazlı, unchanged-blob + bozuk-kayıt koruması, integrity), Faz 1→2 migration (commit-marker, upsert) · **host 122/122 + integration 34/34** (sim) |
 | Flutter — Faz 2 UI/oturum (Patch 4) | ✅ Setup/Unlock/Recovery UI + route guard (lock state'ine göre) + lifecycle lock (paused/inactive) + corruption banner/integrity ekranı + `KeyAttributesStore`/`resetVault` + DI/main rewiring + **tam UI/UX redesign** (Geist/GeistMono gömülü, simple-icons CC0, CountdownRing, IssuerAvatar, kart/liste toggle, tap-to-copy, a11y) · **host 186/186** · bkz. [docs/Design.md](docs/Design.md) |
-| Flutter — Faz 2 kalanı (Patch 5–6) | ⏳ biyometri ayrı mini-faz (Patch 5, ertelendi) · doküman finalizasyonu (Patch 6) |
+| Flutter — Faz 2 biyometri (Patch 5) | ✅ Biyometrik unlock kısayolu: 3. wrap (`biometricEncryptedMasterKey`) + OS-keystore erişim kontrolü (iOS Secure Enclave + `biometryCurrentSet`, Android `strongBiometricOnly`+`enforceBiometrics`), gerçek geçit = `storage.read` (çift prompt yok; `local_auth` yalnız availability), Settings enable/disable + UnlockPage butonu, `device_info_plus` API<28 gate, lifecycle inactive-vs-paused ayrımı, parola+recovery her zaman çalışır · **host 220/220** · bkz. [docs/CRYPTO.md §11](docs/CRYPTO.md) |
 | Admin paneli (Next.js) | ⏳ Faz 6 |
 
 **Backend canlı proje:** `authenticator-dev` (Supabase, eu-central-1, PG17). Detay: [PROJECT_INFO.md](supabase/PROJECT_INFO.md).
@@ -84,7 +84,7 @@ Proje kökü Flutter uygulamasıdır (`lib/`, `pubspec.yaml`). Gereken: Flutter 
 ```bash
 flutter pub get
 flutter analyze          # lint — şu an temiz
-flutter test             # 186/186 host (OTP RFC vektörleri + URI validasyon + VaultCubit + crypto blob/attrs/BIP39 + VaultLockCubit/guard/KeyAttributesStore + lifecycle arka-plan-yarışı + corruption/integrity-guard/a11y widget + CountdownColors + recovery-verify/textScaler)
+flutter test             # 220/220 host (OTP RFC vektörleri + URI validasyon + VaultCubit + crypto blob/attrs/BIP39 + VaultLockCubit/guard/KeyAttributesStore + lifecycle arka-plan-yarışı + corruption/integrity-guard/a11y widget + CountdownColors + recovery-verify/textScaler + biyometri: bmk attrs/cubit enable-disable-unlock atomikliği/inactive-vs-paused + Settings/UnlockPage widget)
 flutter run              # cihaz/emülatörde çalıştır
 ```
 

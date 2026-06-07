@@ -19,6 +19,7 @@
 library;
 
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -26,6 +27,8 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../../core/crypto/crypto_exceptions.dart';
 import '../../../../core/crypto/key_attributes.dart';
 import '../../../../core/crypto/key_handle.dart';
+import '../../../auth/domain/biometric_exceptions.dart';
+import '../../../auth/domain/biometric_service.dart';
 import '../../../auth/domain/key_manager.dart';
 import '../../data/key_attributes_store.dart';
 import 'vault_lock_state.dart';
@@ -39,12 +42,19 @@ class VaultStorageKeys {
   static const migrationMarker = 'vault_migration_v1';
   static const viewMode = 'vault_view_mode_v1';
 
+  /// Patch 5: biyometrik anahtar. Ayrı options'lı/namespace'li storage'da olduğu
+  /// için `_deleteKeys` (default storage) ona ULAŞAMAYABİLİR → asıl temizlik
+  /// `resetVault` içinde `biometric.disable()` ile yapılır. Burada listede olması
+  /// savunma katmanı (default storage'a düşmüş bir kalıntı için).
+  static const biometricKey = 'vault_biometric_key_v1';
+
   static const all = [
     encryptedVault,
     keyAttributes,
     plaintextVault,
     migrationMarker,
     viewMode,
+    biometricKey,
   ];
 }
 
@@ -57,9 +67,23 @@ class VaultLockCubit extends Cubit<VaultLockState> {
   final KeyManager _keyManager;
   final KeyAttributesStore _attrsStore;
   final MigrationRunner _migrate;
+  final BiometricService _biometric;
 
   /// Reset / view-mode için storage anahtarlarını silen kanca (DI'dan; testte sahte).
   final Future<void> Function(List<String> keys) _deleteKeys;
+
+  /// Patch 5 — biyometri state alanları (tüm `locked`/`unlocked` emit'lerine bu
+  /// field'lardan beslenir; helper `_locked`/`_unlocked` tek noktadan tutarlılık
+  /// sağlar — reviewer 4.tur [P1]). `_biometricEnrolled` = `attrs.bmk != null`;
+  /// `_deviceBiometricAvailable` = cihaz yeteneği (enrollment'tan bağımsız).
+  bool _biometricEnrolled = false;
+  bool _deviceBiometricAvailable = false;
+
+  /// Biyometri prompt'u (`storage.read` OS geçidi) DEVAM ediyor mu? (reviewer 2.tur [P1])
+  /// Sistem biyometri prompt'u açılırken app kısa süre `inactive` üretebilir; bu flag
+  /// true iken `inactive` abort'tan MUAF tutulur (başarılı unlock yarıda kesilmesin).
+  /// `paused` (gerçek arka plan) YİNE kesin abort eder. `_commitInFlight` simetriği.
+  bool _biometricPromptInFlight = false;
 
   /// Oturum içi masterKey — yalnız `unlocked`/`setupPending`/`locking` state'lerinde
   /// non-null. Çift-dispose guard idempotent (`KeyHandle.dispose` zaten idempotent).
@@ -85,12 +109,34 @@ class VaultLockCubit extends Cubit<VaultLockState> {
     required KeyManager keyManager,
     required KeyAttributesStore attrsStore,
     required MigrationRunner migrate,
+    required BiometricService biometric,
     required Future<void> Function(List<String> keys) deleteKeys,
   })  : _keyManager = keyManager,
         _attrsStore = attrsStore,
         _migrate = migrate,
+        _biometric = biometric,
         _deleteKeys = deleteKeys,
         super(const VaultLockState.uninitialized());
+
+  /// `locked` emit'i biyometri field'larını taşıyarak yapar (tek nokta — reviewer 4.tur [P1]).
+  VaultLockState _locked({VaultLockError? error}) => VaultLockState.locked(
+        error: error,
+        biometricEnrolled: _biometricEnrolled,
+        deviceBiometricAvailable: _deviceBiometricAvailable,
+      );
+
+  /// `unlocked` emit'i biyometri field'larını taşıyarak yapar (tek nokta — reviewer 4.tur [P1]).
+  VaultLockState _unlocked() => VaultLockState.unlocked(
+        biometricEnrolled: _biometricEnrolled,
+        deviceBiometricAvailable: _deviceBiometricAvailable,
+      );
+
+  /// Biyometri field'larını mevcut attrs + cihaz yeteneğinden günceller. unlock/
+  /// commitSetup/recover/bootstrap sonrası çağrılır → her emit doğru değeri taşır.
+  Future<void> _refreshBiometricState(KeyAttributes? attrs) async {
+    _biometricEnrolled = attrs?.biometricEncryptedMasterKey != null;
+    _deviceBiometricAvailable = await _biometric.isAvailable();
+  }
 
   /// Oturum içi masterKey'i UI subtree'sine (EncryptedVaultRepository kurmak için)
   /// vermek için. Yalnız `unlocked` iken çağrılmalı; sahiplik BU cubit'te kalır.
@@ -116,7 +162,9 @@ class VaultLockCubit extends Cubit<VaultLockState> {
       if (attrs == null) {
         emit(const VaultLockState.uninitialized());
       } else {
-        emit(const VaultLockState.locked());
+        // Patch 5: biyometri enrolled mı (attrs.bmk) + cihaz uygun mu → state'e taşı.
+        await _refreshBiometricState(attrs);
+        emit(_locked());
       }
     } on FormatException {
       emit(const VaultLockState.keyAttributesCorrupted());
@@ -173,6 +221,9 @@ class VaultLockCubit extends Cubit<VaultLockState> {
         emit(const VaultLockState.uninitialized()); // diske yazılmadı → kurulmadı
         rethrow;
       }
+      // Setup attrs'ında bmk yok → enrolled=false; cihaz yeteneğini hesapla ki
+      // unlocked sonrası Settings'ten biyometri açılabilsin (reviewer 4.tur [P1]).
+      await _refreshBiometricState(attrs);
       // 2) attrs DİSKE YAZILDI: vault GERÇEKTEN var. Bundan sonra hata olsa bile
       //    setupPending/uninitialized'a GERİ DÖNME → `locked` (vault kurulu; migration
       //    commit-marker'lı/idempotent → sonraki unlock yeniden dener). Hata rethrow.
@@ -181,7 +232,7 @@ class VaultLockCubit extends Cubit<VaultLockState> {
       } catch (_) {
         _disposeKey();
         _pendingAttrs = null;
-        emit(const VaultLockState.locked());
+        emit(_locked());
         rethrow;
       }
       _pendingAttrs = null;
@@ -191,10 +242,10 @@ class VaultLockCubit extends Cubit<VaultLockState> {
       if (_abortToBackground) {
         _abortToBackground = false;
         _disposeKey();
-        emit(const VaultLockState.locked());
+        emit(_locked());
         return;
       }
-      emit(const VaultLockState.unlocked());
+      emit(_unlocked());
     } finally {
       _commitInFlight = false;
     }
@@ -219,11 +270,12 @@ class VaultLockCubit extends Cubit<VaultLockState> {
   Future<void> unlock(String password) async {
     _abortToBackground = false; // hassas işlem başı (review P1)
     final attrs = await _readAttrsOrThrow();
+    await _refreshBiometricState(attrs); // biyometri state'i (her emit'e taşınır)
     final KeyHandle key;
     try {
       key = await _keyManager.unlock(attrs, password);
     } on WrongPasswordException {
-      emit(const VaultLockState.locked(error: VaultLockError.wrongPassword));
+      emit(_locked(error: VaultLockError.wrongPassword));
       return;
     }
     var owned = false;
@@ -233,12 +285,12 @@ class VaultLockCubit extends Cubit<VaultLockState> {
       // olduysa key'i sahiplenme + unlocked emit ETME → arka planda kilitli kal.
       if (_abortToBackground) {
         _abortToBackground = false;
-        emit(const VaultLockState.locked());
+        emit(_locked());
         return; // finally key'i dispose eder (owned=false)
       }
       _masterKey = key;
       owned = true;
-      emit(const VaultLockState.unlocked());
+      emit(_unlocked());
     } finally {
       if (!owned) key.dispose(); // migration fail / background-abort → key sızmaz
     }
@@ -257,6 +309,7 @@ class VaultLockCubit extends Cubit<VaultLockState> {
       final newAttrs =
           await _keyManager.changePassword(attrs, key, newPassword);
       await _attrsStore.write(newAttrs);
+      await _refreshBiometricState(newAttrs); // bmk korunmuşsa enrolled true kalır
       // Migration BAŞARIYLA bitmeden sahiplenme (review P1): _migrate fırlatırsa
       // key finally'de dispose edilir, _masterKey null kalır (locked invariant'ı korunur).
       await _migrate(key);
@@ -264,16 +317,16 @@ class VaultLockCubit extends Cubit<VaultLockState> {
       // unlocked'a GEÇME → arka planda kilitli kal (key finally'de dispose).
       if (_abortToBackground) {
         _abortToBackground = false;
-        emit(const VaultLockState.locked());
+        emit(_locked());
         return;
       }
       _masterKey = key;
       owned = true;
-      emit(const VaultLockState.unlocked());
+      emit(_unlocked());
     } on WrongRecoveryKeyException {
-      emit(const VaultLockState.locked(error: VaultLockError.wrongRecovery));
+      emit(_locked(error: VaultLockError.wrongRecovery));
     } on WeakPasswordException {
-      emit(const VaultLockState.locked(error: VaultLockError.weakPassword));
+      emit(_locked(error: VaultLockError.weakPassword));
     } finally {
       if (!owned) key?.dispose(); // hata/iptal/migration-fail yolunda ara key sızmaz
     }
@@ -297,7 +350,7 @@ class VaultLockCubit extends Cubit<VaultLockState> {
     emit(const VaultLockState.locking());
     if (immediate) {
       _disposeKey(); // arka plan: frame bekleme — güvenlik öncelikli (review P2)
-      emit(const VaultLockState.locked());
+      emit(_locked());
       return;
     }
     // İnteraktif: subtree teardown router redirect ile başlar; sonraki frame'de dispose.
@@ -307,7 +360,7 @@ class VaultLockCubit extends Cubit<VaultLockState> {
       // edip `locked`'a geçmiştir (review P1/P2) → bu stale callback no-op.
       if (state.status != VaultLockStatus.locking) return;
       _disposeKey();
-      emit(const VaultLockState.locked());
+      emit(_locked());
     });
   }
 
@@ -325,7 +378,18 @@ class VaultLockCubit extends Cubit<VaultLockState> {
   ///   bu state'lerde bir hassas async işlem (unlock/recover/commit/beginSetup)
   ///   DEVAM EDİYOR olabilir → `_abortToBackground = true` ki işlem bitince
   ///   `unlocked`/`setupPending` EMİT ETMESİN (review P1 — complete-after-background).
-  void onAppBackgrounded() {
+  ///
+  /// **[paused] (Patch 5 — reviewer 2.tur [P1]):** `true` = gerçek arka plan
+  /// (`AppLifecycleState.paused`) → HER ZAMAN kesin abort/lock. `false` = `inactive`
+  /// (geçici sistem durumu; biyometri/sistem prompt'u da bunu üretir) → eğer
+  /// `_biometricPromptInFlight` ise abort ETME (başarılı biyometri unlock'u sistem
+  /// prompt'unun ürettiği inactive yüzünden yarıda kesilmesin). Diğer durumlarda
+  /// `inactive` de güvenlik-strict davranır (önceki Faz 2 kararı korunur).
+  void onAppBackgrounded({required bool paused}) {
+    // Biyometri prompt'u devam ederken gelen `inactive` (paused=false) → MUAF.
+    // Bu sistem prompt'unun kendisinin ürettiği geçici durum; gerçek arka plan değil.
+    if (!paused && _biometricPromptInFlight) return;
+
     switch (state.status) {
       case VaultLockStatus.unlocked:
         lock(immediate: true); // senkron dispose (review P2)
@@ -338,12 +402,12 @@ class VaultLockCubit extends Cubit<VaultLockState> {
         // İnteraktif lock()'un post-frame dispose'una bel bağlama — paused'ta frame
         // gelmeyebilir (review P1/P2). Hemen senkron dispose + locked.
         _disposeKey();
-        emit(const VaultLockState.locked());
+        emit(_locked());
       case VaultLockStatus.uninitialized:
       case VaultLockStatus.locked:
       case VaultLockStatus.keyAttributesCorrupted:
-        // Devam eden unlock/recover/beginSetup async işlemi varsa unlocked/
-        // setupPending'e geçmesini engelle.
+        // Devam eden unlock/recover/beginSetup/biometricUnlock async işlemi varsa
+        // unlocked/setupPending'e geçmesini engelle.
         _abortToBackground = true;
     }
   }
@@ -356,8 +420,151 @@ class VaultLockCubit extends Cubit<VaultLockState> {
   Future<void> resetVault() async {
     _disposeKey();
     _pendingAttrs = null;
+    // Biyometrik OS anahtarı ayrı options'lı/namespace'li storage'da → `_deleteKeys`
+    // (default storage) ona ulaşamayabilir. Doğru options ile sil (reviewer [P1]).
+    // disable() idempotent; hata yutulur (reset her durumda tamamlanmalı).
+    try {
+      await _biometric.disable();
+    } catch (_) {/* reset best-effort: biyometri silinemese de devam */}
+    _biometricEnrolled = false;
     await _deleteKeys(VaultStorageKeys.all);
     emit(const VaultLockState.uninitialized());
+  }
+
+  // --- Biyometri (Patch 5) ---
+
+  /// Biyometriyi etkinleştir (unlocked-only): masterKey'i taze biometricKey ile
+  /// sarmala → OS keystore'a yaz → attrs'a bmk ekle. **Atomik (reviewer 2.tur [P2]):**
+  /// OS key yazıldı ama attrs.write FAIL ederse → `biometric.disable()` ile orphan
+  /// OS anahtarını temizle + rethrow (state DEĞİŞMEZ). Sıra: önce OS key, sonra attrs.
+  Future<void> enableBiometric() async {
+    final key = _masterKey;
+    if (state.status != VaultLockStatus.unlocked || key == null) {
+      throw StateError('enableBiometric: unlocked değil');
+    }
+    if (!await _biometric.isAvailable()) {
+      throw const BiometricUnavailable();
+    }
+    final attrs = await _readAttrsOrThrow();
+    final enroll = _keyManager.enrollBiometric(attrs, key);
+    try {
+      await _biometric.enroll(enroll.biometricKeyBytes); // 1) OS key
+      try {
+        await _attrsStore.write(enroll.attrs); // 2) attrs (bmk)
+      } catch (_) {
+        // attrs yazılamadı → orphan OS key'i temizle, state değişmeden rethrow.
+        try {
+          await _biometric.disable();
+        } catch (_) {/* temizlik best-effort */}
+        rethrow;
+      }
+    } finally {
+      enroll.biometricKeyBytes
+          .fillRange(0, enroll.biometricKeyBytes.length, 0); // zero-fill
+    }
+    _biometricEnrolled = true;
+    _deviceBiometricAvailable = true;
+    emit(_unlocked()); // Settings switch yansısın
+  }
+
+  /// Biyometriyi kapat (unlocked-only): OS anahtarını sil → attrs'tan bmk temizle.
+  /// **Sıra/hata (reviewer 2.tur [P3]):** `disable()` fail ederse attrs clear'e GEÇME
+  /// (state aynı kalır, kullanıcıya hata göster — orphan attrs.bmk + canlı OS key
+  /// tutarlı). availability'den BAĞIMSIZ çalışır (lockout'ta bile kapatılabilir).
+  Future<void> disableBiometric() async {
+    if (state.status != VaultLockStatus.unlocked) {
+      throw StateError('disableBiometric: unlocked değil');
+    }
+    await _biometric.disable(); // fail ederse aşağı geçilmez (rethrow)
+    final attrs = await _readAttrsOrThrow();
+    await _attrsStore.write(attrs.copyWith(clearBiometric: true));
+    _biometricEnrolled = false;
+    emit(_unlocked());
+  }
+
+  /// Biyometri ile aç (locked-only). **`unlock()` ile birebir aynı ownership +
+  /// `_abortToBackground` guard + `_migrate` sırası.** Gerçek geçit
+  /// `biometric.retrieve()` (OS prompt). `_biometricPromptInFlight` prompt boyunca
+  /// true → sistem prompt'unun ürettiği `inactive` abort'tan muaf (reviewer 2.tur [P1]).
+  Future<void> biometricUnlock() async {
+    _abortToBackground = false; // hassas işlem başı
+    final attrs = await _readAttrsOrThrow();
+    await _refreshBiometricState(attrs);
+
+    Uint8List? bytes;
+    _biometricPromptInFlight = true;
+    try {
+      bytes = await _biometric.retrieve(); // OS biyometri prompt + gated read
+    } on BiometricCanceled {
+      _biometricPromptInFlight = false;
+      emit(_locked()); // sessizce parolaya düş
+      return;
+    } on BiometricLockout {
+      _biometricPromptInFlight = false;
+      emit(_locked(error: VaultLockError.biometricLockout));
+      return;
+    } on BiometricKeyMissing {
+      _biometricPromptInFlight = false;
+      // Enrollment kaybolmuş (biyometri seti değişti vb.) → bmk'yı PERSIST temizle
+      // ki sonraki bootstrap tekrar enrolled görüp bozuk-bmk döngüsüne girmesin
+      // (reviewer 3.tur [P2]). Write FAIL ederse: disk hâlâ bmk'lı ama UI'da kapalı
+      // göster (deviceAvail=false + biometricFailed) → döngü yok; parolayla açıp
+      // Settings'ten tekrar dener, sonraki başarılı disable/bootstrap temizler.
+      try {
+        await _attrsStore.write(attrs.copyWith(clearBiometric: true));
+        _biometricEnrolled = false;
+        emit(_locked());
+      } catch (_) {
+        _biometricEnrolled = true;
+        _deviceBiometricAvailable = false;
+        emit(_locked(error: VaultLockError.biometricFailed));
+      }
+      return;
+    } on BiometricUnavailable {
+      _biometricPromptInFlight = false;
+      _deviceBiometricAvailable = false;
+      emit(_locked());
+      return;
+    } on BiometricStorageError {
+      _biometricPromptInFlight = false;
+      emit(_locked(error: VaultLockError.biometricFailed));
+      return;
+    }
+    _biometricPromptInFlight = false;
+
+    // Prompt bittikten sonra arka-plan yarışı: paused olduysa unlocked'a GEÇME.
+    if (_abortToBackground) {
+      _abortToBackground = false;
+      bytes.fillRange(0, bytes.length, 0);
+      emit(_locked());
+      return;
+    }
+
+    final KeyHandle key;
+    try {
+      key = _keyManager.biometricUnlock(attrs, bytes);
+    } on BiometricUnwrapException {
+      bytes.fillRange(0, bytes.length, 0);
+      emit(_locked(error: VaultLockError.biometricFailed));
+      return;
+    } finally {
+      bytes.fillRange(0, bytes.length, 0); // zero-fill (idempotent)
+    }
+
+    var owned = false;
+    try {
+      await _migrate(key);
+      if (_abortToBackground) {
+        _abortToBackground = false;
+        emit(_locked());
+        return;
+      }
+      _masterKey = key;
+      owned = true;
+      emit(_unlocked());
+    } finally {
+      if (!owned) key.dispose();
+    }
   }
 
   /// keyAttributesCorrupted ekranından "Yeniden dene" (geçici okuma hatası ihtimali).

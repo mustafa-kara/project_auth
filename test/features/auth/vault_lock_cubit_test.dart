@@ -16,6 +16,8 @@ import 'package:project_auth/core/crypto/encrypted_blob.dart';
 import 'package:project_auth/core/crypto/key_attributes.dart';
 import 'package:project_auth/core/crypto/key_handle.dart';
 import 'package:project_auth/features/auth/data/key_attributes_store.dart';
+import 'package:project_auth/features/auth/domain/biometric_exceptions.dart';
+import 'package:project_auth/features/auth/domain/biometric_service.dart';
 import 'package:project_auth/features/auth/domain/key_manager.dart';
 import 'package:project_auth/features/auth/presentation/bloc/vault_lock_cubit.dart';
 import 'package:project_auth/features/auth/presentation/bloc/vault_lock_state.dart';
@@ -30,7 +32,7 @@ class FakeSecureStorage implements FlutterSecureStorage {
 
   /// Verilirse `write` bu future bitene kadar askıya alınır — gate çözüldükten
   /// SONRA (varsa) `failWrites` kontrolü yapılır. write-fail + background
-  /// kesişim testi: write askıdayken `onAppBackgrounded()` tetikle, sonra throw.
+  /// kesişim testi: write askıdayken `onAppBackgrounded(paused: true)` tetikle, sonra throw.
   Future<void>? writeGate;
 
   @override
@@ -83,6 +85,52 @@ class FakeKeyHandle implements KeyHandle {
   bool disposed = false;
   @override
   void dispose() => disposed = true;
+}
+
+/// Sahte biyometri servisi (Patch 5). Gerçek OS/local_auth gerektirmez.
+class FakeBiometricService implements BiometricService {
+  bool available;
+
+  /// retrieve() davranışı: hata fırlatmak için set edilir (Canceled/Lockout/...).
+  Exception? retrieveError;
+
+  /// retrieve() bu future bitene kadar askıya alınır (background-yarış testi:
+  /// retrieve OS prompt'unda beklerken onAppBackgrounded tetiklenir).
+  Future<void>? retrieveGate;
+
+  /// retrieve() başarılıysa dönecek byte'lar (default 32-bayt).
+  Uint8List storedKey;
+
+  /// enroll/disable çağrı sayaçları + enroll IO hatası tetiği.
+  int enrollCount = 0;
+  int disableCount = 0;
+  bool enrollThrows = false;
+
+  FakeBiometricService({
+    this.available = true,
+    this.retrieveError,
+    this.retrieveGate,
+    Uint8List? storedKey,
+  }) : storedKey = storedKey ?? Uint8List.fromList(List.filled(32, 7));
+
+  @override
+  Future<bool> isAvailable() async => available;
+
+  @override
+  Future<void> enroll(Uint8List keyBytes) async {
+    enrollCount++;
+    if (enrollThrows) throw const BiometricStorageError('enroll fail (test)');
+  }
+
+  @override
+  Future<Uint8List> retrieve() async {
+    if (retrieveGate != null) await retrieveGate;
+    if (retrieveError != null) throw retrieveError!;
+    return Uint8List.fromList(storedKey);
+  }
+
+  @override
+  Future<void> disable() async => disableCount++;
 }
 
 /// Sahte attrs — gerçek bloblar gerekmiyor (KeyManager fake'lendi). Geçerli salt
@@ -148,6 +196,25 @@ class FakeKeyManager implements KeyManager {
           KeyAttributes attrs, KeyHandle masterKey, String newPassword) async =>
       _fakeAttrs();
 
+  /// bmk eklenmiş attrs + 32-bayt sahte key. Gerçek wrap yok (KeyManager fake).
+  bool biometricUnwrapFails = false;
+
+  @override
+  BiometricEnrollResult enrollBiometric(
+      KeyAttributes attrs, KeyHandle masterKey) {
+    final bmkBlob = EncryptedBlob(nonce: Uint8List(24), ciphertext: Uint8List(16));
+    return (
+      attrs: attrs.copyWith(biometricEncryptedMasterKey: bmkBlob),
+      biometricKeyBytes: Uint8List.fromList(List.filled(32, 5)),
+    );
+  }
+
+  @override
+  KeyHandle biometricUnlock(KeyAttributes attrs, Uint8List biometricKeyBytes) {
+    if (biometricUnwrapFails) throw const BiometricUnwrapException();
+    return _newKey();
+  }
+
   @override
   noSuchMethod(Invocation invocation) =>
       throw UnimplementedError('FakeKeyManager: ${invocation.memberName}');
@@ -160,11 +227,13 @@ VaultLockCubit _build(
   List<String>? deletedSink,
   bool migrationFails = false,
   Future<void>? migrateGate,
+  BiometricService? biometric,
 }) {
   final mig = migrated ?? <String>[];
   return VaultLockCubit(
     keyManager: km,
     attrsStore: store,
+    biometric: biometric ?? FakeBiometricService(),
     migrate: (_) async {
       // migrateGate verildiyse migration burada askıya alınır (P1 yarış testleri:
       // işlem _migrate'te beklerken onAppBackgrounded tetiklenir).
@@ -260,7 +329,7 @@ void main() {
 
       final pending = cubit.beginSetup('parola123'); // setup'ta (Argon2id) asılı
       await Future<void>.delayed(Duration.zero);
-      cubit.onAppBackgrounded(); // state uninitialized iken setup devam ediyor
+      cubit.onAppBackgrounded(paused: true); // state uninitialized iken setup devam ediyor
       gate.complete();
       await pending;
 
@@ -322,7 +391,7 @@ void main() {
 
       final commit = cubit.commitSetup(); // write'ta (askıda) bekliyor
       await Future<void>.delayed(Duration.zero);
-      cubit.onAppBackgrounded(); // commit in-flight + setupPending iken background
+      cubit.onAppBackgrounded(paused: true); // commit in-flight + setupPending iken background
       gate.complete(); // write throw eder
       await expectLater(commit, throwsA(isA<Exception>()));
 
@@ -418,7 +487,7 @@ void main() {
       await cubit.bootstrap();
       await cubit.unlock('parola123');
 
-      cubit.onAppBackgrounded();
+      cubit.onAppBackgrounded(paused: true);
       // Frame PUMP ETMEDEN: key zaten dispose + locked olmalı (key arka planda
       // canlı kalmaz — ARCHITECTURE §2.3).
       expect(cubit.state.status, VaultLockStatus.locked);
@@ -454,7 +523,7 @@ void main() {
       expect(cubit.state.status, VaultLockStatus.locking);
       expect(km.issued.single.disposed, isFalse);
 
-      cubit.onAppBackgrounded(); // frame gelmeden background
+      cubit.onAppBackgrounded(paused: true); // frame gelmeden background
       // Senkron dispose: key bellekte kalmaz, locked'a geçer.
       expect(cubit.state.status, VaultLockStatus.locked);
       expect(km.issued.single.disposed, isTrue);
@@ -469,7 +538,7 @@ void main() {
       final km = FakeKeyManager();
       final cubit = _build(km, store);
       await cubit.beginSetup('parola123');
-      cubit.onAppBackgrounded();
+      cubit.onAppBackgrounded(paused: true);
       expect(cubit.state.status, VaultLockStatus.uninitialized);
       expect(km.issued.single.disposed, isTrue);
       expect(storage.data.containsKey(KeyAttributesStore.storageKey), isFalse);
@@ -486,7 +555,7 @@ void main() {
 
       final pending = cubit.unlock('parola123'); // _migrate'te asılı kalır
       await Future<void>.delayed(Duration.zero); // recoverUnlock/migrate'e gir
-      cubit.onAppBackgrounded(); // state locked iken async işlem devam ediyor
+      cubit.onAppBackgrounded(paused: true); // state locked iken async işlem devam ediyor
       gate.complete(); // migration tamamlanır
       await pending;
 
@@ -506,7 +575,7 @@ void main() {
       final pending = cubit.recoverWithNewPassword(
           List.generate(24, (i) => 'word$i'), 'yeniParola1');
       await Future<void>.delayed(Duration.zero);
-      cubit.onAppBackgrounded();
+      cubit.onAppBackgrounded(paused: true);
       gate.complete();
       await pending;
 
@@ -524,7 +593,7 @@ void main() {
 
       final pending = cubit.commitSetup(); // attrs write OK → _migrate'te asılı
       await Future<void>.delayed(Duration.zero);
-      cubit.onAppBackgrounded(); // setupPending + commit in-flight
+      cubit.onAppBackgrounded(paused: true); // setupPending + commit in-flight
       gate.complete();
       await pending;
 
@@ -537,17 +606,23 @@ void main() {
   });
 
   group('reset', () {
-    test('resetVault → tüm 5 anahtar silinir, uninitialized', () async {
+    test('resetVault → tüm anahtarlar silinir, biometric.disable çağrılır, '
+        'uninitialized', () async {
       // Dolu storage simüle et.
       for (final k in VaultStorageKeys.all) {
         storage.data[k] = 'x';
       }
       final deleted = <String>[];
-      final cubit = _build(FakeKeyManager(), store, deletedSink: deleted);
+      final bio = FakeBiometricService();
+      final cubit =
+          _build(FakeKeyManager(), store, deletedSink: deleted, biometric: bio);
       await cubit.resetVault();
       expect(cubit.state.status, VaultLockStatus.uninitialized);
       expect(deleted.toSet(), VaultStorageKeys.all.toSet());
-      expect(VaultStorageKeys.all.length, 5);
+      // Biyometrik anahtar ayrı storage'da → asıl temizlik disable() ile (reviewer P1).
+      expect(bio.disableCount, 1);
+      // Kırılgan length==N yerine biometric key dahil mi (reviewer 5.tur notu).
+      expect(VaultStorageKeys.all, contains(VaultStorageKeys.biometricKey));
     });
   });
 
@@ -559,6 +634,241 @@ void main() {
     await cubit.unlock('parola123');
     await cubit.close();
     expect(km.issued.single.disposed, isTrue);
+  });
+
+  // --- Biyometri (Patch 5) ---
+
+  group('biyometri bootstrap state', () {
+    test('bmk yok + cihaz available → enrolled false, deviceAvailable true',
+        () async {
+      await store.write(_fakeAttrs()); // bmk yok
+      final cubit = _build(FakeKeyManager(), store,
+          biometric: FakeBiometricService(available: true));
+      await cubit.bootstrap();
+      expect(cubit.state.biometricEnrolled, isFalse);
+      expect(cubit.state.deviceBiometricAvailable, isTrue);
+      expect(cubit.state.biometricUnlockAvailable, isFalse);
+    });
+
+    test('bmk var + cihaz available → enrolled true, unlockAvailable true',
+        () async {
+      final bmk = EncryptedBlob(nonce: Uint8List(24), ciphertext: Uint8List(16));
+      await store.write(_fakeAttrs().copyWith(biometricEncryptedMasterKey: bmk));
+      final cubit = _build(FakeKeyManager(), store,
+          biometric: FakeBiometricService(available: true));
+      await cubit.bootstrap();
+      expect(cubit.state.biometricEnrolled, isTrue);
+      expect(cubit.state.deviceBiometricAvailable, isTrue);
+      expect(cubit.state.biometricUnlockAvailable, isTrue);
+    });
+
+    test('bmk var + cihaz unavailable → enrolled true ama unlockAvailable false',
+        () async {
+      final bmk = EncryptedBlob(nonce: Uint8List(24), ciphertext: Uint8List(16));
+      await store.write(_fakeAttrs().copyWith(biometricEncryptedMasterKey: bmk));
+      final cubit = _build(FakeKeyManager(), store,
+          biometric: FakeBiometricService(available: false));
+      await cubit.bootstrap();
+      expect(cubit.state.biometricEnrolled, isTrue);
+      expect(cubit.state.deviceBiometricAvailable, isFalse);
+      expect(cubit.state.biometricUnlockAvailable, isFalse);
+    });
+  });
+
+  group('unlock sonrası biyometri state korunur (reviewer 4.tur P1)', () {
+    test('parola unlock → unlocked state deviceBiometricAvailable taşır', () async {
+      await store.write(_fakeAttrs());
+      final cubit = _build(FakeKeyManager(), store,
+          biometric: FakeBiometricService(available: true));
+      await cubit.bootstrap();
+      await cubit.unlock('parola123');
+      expect(cubit.state.status, VaultLockStatus.unlocked);
+      expect(cubit.state.deviceBiometricAvailable, isTrue,
+          reason: 'Settings switch enable edilebilmeli');
+      expect(cubit.state.biometricEnrolled, isFalse);
+    });
+
+    test('commitSetup → unlocked deviceBiometricAvailable taşır', () async {
+      final cubit = _build(FakeKeyManager(), store,
+          biometric: FakeBiometricService(available: true));
+      await cubit.beginSetup('parola123');
+      await cubit.commitSetup();
+      expect(cubit.state.status, VaultLockStatus.unlocked);
+      expect(cubit.state.deviceBiometricAvailable, isTrue);
+      expect(cubit.state.biometricEnrolled, isFalse);
+    });
+  });
+
+  group('enableBiometric / disableBiometric', () {
+    Future<VaultLockCubit> unlocked(FakeBiometricService bio,
+        {FakeKeyManager? km}) async {
+      await store.write(_fakeAttrs());
+      final cubit = _build(km ?? FakeKeyManager(), store, biometric: bio);
+      await cubit.bootstrap();
+      await cubit.unlock('parola123');
+      return cubit;
+    }
+
+    test('enableBiometric → enroll + attrs.write + state enrolled', () async {
+      final bio = FakeBiometricService(available: true);
+      final cubit = await unlocked(bio);
+      await cubit.enableBiometric();
+      expect(bio.enrollCount, 1);
+      expect(cubit.state.status, VaultLockStatus.unlocked);
+      expect(cubit.state.biometricEnrolled, isTrue);
+      // attrs'a bmk yazıldı
+      final persisted = await store.read();
+      expect(persisted!.biometricEncryptedMasterKey, isNotNull);
+    });
+
+    test('enableBiometric: OS enroll OK + attrs.write FAIL → disable çağrılır, '
+        'state değişmez (reviewer 2.tur P2)', () async {
+      final bio = FakeBiometricService(available: true);
+      final cubit = await unlocked(bio);
+      storage.failWrites = true; // attrs.write patlasın (enroll'dan SONRA)
+      await expectLater(cubit.enableBiometric(), throwsA(isA<Exception>()));
+      expect(bio.enrollCount, 1);
+      expect(bio.disableCount, 1, reason: 'orphan OS key temizlenmeli');
+      expect(cubit.state.biometricEnrolled, isFalse, reason: 'state değişmedi');
+    });
+
+    test('enableBiometric: cihaz unavailable → BiometricUnavailable', () async {
+      final bio = FakeBiometricService(available: false);
+      final cubit = await unlocked(bio);
+      await expectLater(
+          cubit.enableBiometric(), throwsA(isA<BiometricUnavailable>()));
+      expect(bio.enrollCount, 0);
+    });
+
+    test('disableBiometric → disable + bmk temizlenir + state', () async {
+      final bio = FakeBiometricService(available: true);
+      final cubit = await unlocked(bio);
+      await cubit.enableBiometric();
+      await cubit.disableBiometric();
+      expect(bio.disableCount, 1);
+      expect(cubit.state.biometricEnrolled, isFalse);
+      final persisted = await store.read();
+      expect(persisted!.biometricEncryptedMasterKey, isNull);
+    });
+  });
+
+  group('biometricUnlock', () {
+    Future<VaultLockCubit> lockedEnrolled(FakeBiometricService bio,
+        {FakeKeyManager? km}) async {
+      final bmk = EncryptedBlob(nonce: Uint8List(24), ciphertext: Uint8List(16));
+      await store.write(_fakeAttrs().copyWith(biometricEncryptedMasterKey: bmk));
+      final cubit = _build(km ?? FakeKeyManager(), store, biometric: bio);
+      await cubit.bootstrap();
+      return cubit;
+    }
+
+    test('başarı → unlocked + masterKey owned', () async {
+      final km = FakeKeyManager();
+      final cubit = await lockedEnrolled(FakeBiometricService(), km: km);
+      await cubit.biometricUnlock();
+      expect(cubit.state.status, VaultLockStatus.unlocked);
+      expect(km.issued.single.disposed, isFalse); // owned
+    });
+
+    test('Canceled → sessiz locked, key owned değil', () async {
+      final km = FakeKeyManager();
+      final cubit = await lockedEnrolled(
+          FakeBiometricService(retrieveError: const BiometricCanceled()),
+          km: km);
+      await cubit.biometricUnlock();
+      expect(cubit.state.status, VaultLockStatus.locked);
+      expect(cubit.state.error, isNull);
+      expect(km.issued, isEmpty); // biometricUnlock'a hiç ulaşmadı
+    });
+
+    test('Lockout → locked + biometricLockout', () async {
+      final cubit = await lockedEnrolled(
+          FakeBiometricService(retrieveError: const BiometricLockout()));
+      await cubit.biometricUnlock();
+      expect(cubit.state.status, VaultLockStatus.locked);
+      expect(cubit.state.error, VaultLockError.biometricLockout);
+    });
+
+    test('KeyMissing → bmk PERSIST temizlenir + locked enrolled false', () async {
+      final cubit = await lockedEnrolled(
+          FakeBiometricService(retrieveError: const BiometricKeyMissing()));
+      await cubit.biometricUnlock();
+      expect(cubit.state.status, VaultLockStatus.locked);
+      expect(cubit.state.biometricEnrolled, isFalse);
+      final persisted = await store.read();
+      expect(persisted!.biometricEncryptedMasterKey, isNull,
+          reason: 'döngü önleme: bmk persist temizlendi');
+    });
+
+    test('KeyMissing + attrs.write FAIL → locked deviceAvail false + '
+        'biometricFailed (döngü yok)', () async {
+      final cubit = await lockedEnrolled(
+          FakeBiometricService(retrieveError: const BiometricKeyMissing()));
+      storage.failWrites = true; // clearBiometric write patlasın
+      await cubit.biometricUnlock();
+      expect(cubit.state.status, VaultLockStatus.locked);
+      expect(cubit.state.deviceBiometricAvailable, isFalse);
+      expect(cubit.state.error, VaultLockError.biometricFailed);
+    });
+
+    test('Unavailable → locked deviceBiometricAvailable false', () async {
+      final cubit = await lockedEnrolled(
+          FakeBiometricService(retrieveError: const BiometricUnavailable()));
+      await cubit.biometricUnlock();
+      expect(cubit.state.status, VaultLockStatus.locked);
+      expect(cubit.state.deviceBiometricAvailable, isFalse);
+    });
+
+    test('StorageError → locked + biometricFailed', () async {
+      final cubit = await lockedEnrolled(
+          FakeBiometricService(retrieveError: const BiometricStorageError()));
+      await cubit.biometricUnlock();
+      expect(cubit.state.status, VaultLockStatus.locked);
+      expect(cubit.state.error, VaultLockError.biometricFailed);
+    });
+
+    test('biometricUnlock unwrap fail → locked + biometricFailed', () async {
+      final km = FakeKeyManager()..biometricUnwrapFails = true;
+      final cubit = await lockedEnrolled(FakeBiometricService(), km: km);
+      await cubit.biometricUnlock();
+      expect(cubit.state.status, VaultLockStatus.locked);
+      expect(cubit.state.error, VaultLockError.biometricFailed);
+    });
+
+    test('retrieve askıdayken PAUSED → kesin abort: locked, key dispose', () async {
+      final km = FakeKeyManager();
+      final gate = Completer<void>();
+      final cubit = await lockedEnrolled(
+          FakeBiometricService(retrieveGate: gate.future),
+          km: km);
+      final fut = cubit.biometricUnlock();
+      await Future<void>.delayed(Duration.zero);
+      cubit.onAppBackgrounded(paused: true); // gerçek arka plan
+      gate.complete();
+      await fut;
+      expect(cubit.state.status, VaultLockStatus.locked);
+      // key biometricUnlock'tan dönmüş olsa bile owned değil → dispose.
+      for (final k in km.issued) {
+        expect(k.disposed, isTrue);
+      }
+    });
+
+    test('retrieve askıdayken INACTIVE (prompt-in-flight) → abort ETMEZ, unlocked '
+        '(reviewer 2.tur P1)', () async {
+      final km = FakeKeyManager();
+      final gate = Completer<void>();
+      final cubit = await lockedEnrolled(
+          FakeBiometricService(retrieveGate: gate.future),
+          km: km);
+      final fut = cubit.biometricUnlock();
+      await Future<void>.delayed(Duration.zero);
+      cubit.onAppBackgrounded(paused: false); // sistem prompt'unun inactive'i
+      gate.complete();
+      await fut;
+      expect(cubit.state.status, VaultLockStatus.unlocked,
+          reason: 'prompt-in-flight inactive abort etmemeli');
+      expect(km.issued.single.disposed, isFalse);
+    });
   });
 }
 

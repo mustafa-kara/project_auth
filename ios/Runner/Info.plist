@@ -43,6 +43,8 @@
 	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>QR kodlarını tarayarak doğrulama (2FA) kodu eklemek için kameraya erişilir.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Vault'u Face ID ile hızlıca açmak için kullanılır. Master parolan her zaman çalışmaya devam eder.</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>

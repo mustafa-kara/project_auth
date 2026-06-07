@@ -133,4 +133,74 @@ void main() {
     final j = _sample().toJson()..['ops'] = 3.0;
     expect(KeyAttributes.fromJson(j).kdfOps, 3);
   });
+
+  // --- Biyometri (bmk) opsiyonel alanı (Patch 5) ---
+
+  test('bmk yokken toJson "bmk" anahtarı YAZMAZ (eski vault byte-identical)', () {
+    final j = _sample().toJson();
+    expect(j.containsKey('bmk'), isFalse);
+  });
+
+  test('eski JSON (bmk yok) → biometricEncryptedMasterKey null', () {
+    final back = KeyAttributes.fromJson(_sample().toJson());
+    expect(back.biometricEncryptedMasterKey, isNull);
+  });
+
+  test('bmk ile JSON round-trip', () {
+    final bmk = _blob(33);
+    final a = KeyAttributes(
+      kdfSalt: _salt(),
+      kdfOps: 3,
+      kdfMem: 67108864,
+      encryptedMasterKey: _blob(10),
+      recoveryEncryptedMasterKey: _blob(20),
+      biometricEncryptedMasterKey: bmk,
+    );
+    final j = a.toJson();
+    expect(j.containsKey('bmk'), isTrue);
+    final back = KeyAttributes.fromJson(j);
+    expect(back.biometricEncryptedMasterKey, isNotNull);
+    expect(back.biometricEncryptedMasterKey!.ciphertext, bmk.ciphertext);
+    expect(back.biometricEncryptedMasterKey!.nonce, bmk.nonce);
+  });
+
+  test('copyWith(biometricEncryptedMasterKey:) bmk set eder', () {
+    final a = _sample();
+    expect(a.biometricEncryptedMasterKey, isNull);
+    final bmk = _blob(44);
+    final b = a.copyWith(biometricEncryptedMasterKey: bmk);
+    expect(b.biometricEncryptedMasterKey!.ciphertext, bmk.ciphertext);
+    // diğer alanlar korunur
+    expect(b.encryptedMasterKey.ciphertext, a.encryptedMasterKey.ciphertext);
+  });
+
+  test('copyWith(clearBiometric:true) bmk null yapar', () {
+    final a = _sample().copyWith(biometricEncryptedMasterKey: _blob(44));
+    expect(a.biometricEncryptedMasterKey, isNotNull);
+    final b = a.copyWith(clearBiometric: true);
+    expect(b.biometricEncryptedMasterKey, isNull);
+  });
+
+  test('changePassword benzeri copyWith (kdf+emk) bmk KORUR', () {
+    final a = _sample().copyWith(biometricEncryptedMasterKey: _blob(44));
+    final b = a.copyWith(
+        kdfSalt: _salt(8), kdfOps: 4, kdfMem: 999, encryptedMasterKey: _blob(55));
+    expect(b.biometricEncryptedMasterKey, isNotNull);
+    expect(b.biometricEncryptedMasterKey!.ciphertext,
+        a.biometricEncryptedMasterKey!.ciphertext);
+  });
+
+  test('copyWith: clearBiometric + biometricEncryptedMasterKey birlikte → assert', () {
+    final a = _sample();
+    expect(
+      () => a.copyWith(
+          biometricEncryptedMasterKey: _blob(44), clearBiometric: true),
+      throwsA(isA<AssertionError>()),
+    );
+  });
+
+  test('bmk yanlış tip → FormatException', () {
+    final j = _sample().toJson()..['bmk'] = 'notamap';
+    expect(() => KeyAttributes.fromJson(j), throwsFormatException);
+  });
 }

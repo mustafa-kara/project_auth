@@ -21,6 +21,7 @@ import '../../features/auth/presentation/pages/recovery_verify_page.dart';
 import '../../features/auth/presentation/pages/setup_password_page.dart';
 import '../../features/auth/presentation/pages/unlock_page.dart';
 import '../../features/scan/presentation/scan_page.dart';
+import '../../features/settings/presentation/settings_page.dart';
 import '../../features/vault/presentation/bloc/vault_cubit.dart';
 import '../../features/vault/presentation/pages/vault_page.dart';
 import 'cubit_refresh_notifier.dart';
@@ -29,6 +30,7 @@ abstract final class Routes {
   static const vault = '/';
   static const scan = '/scan';
   static const addManual = '/add';
+  static const settings = '/settings';
   static const setup = '/setup';
   static const recoveryShow = '/setup/recovery';
   static const recoveryVerify = '/setup/verify';
@@ -78,6 +80,11 @@ AppRouterBundle createAppRouter(
                 path: 'scan',
                 name: 'scan',
                 builder: (context, state) => const ScanPage(),
+              ),
+              GoRoute(
+                path: 'settings',
+                name: 'settings',
+                builder: (context, state) => const SettingsPage(),
               ),
             ],
           ),
@@ -143,8 +150,12 @@ String? guardRedirect(VaultLockState lock, String location) {
       if (location == Routes.unlock || location == Routes.recovery) return null;
       return Routes.unlock;
     case VaultLockStatus.unlocked:
-      // unlocked iken vault + scan'e izin; auth ekranlarından vault'a dön.
-      if (location == Routes.vault || location == Routes.scan) return null;
+      // unlocked iken vault + scan + settings'e izin; auth ekranlarından vault'a dön.
+      if (location == Routes.vault ||
+          location == Routes.scan ||
+          location == Routes.settings) {
+        return null;
+      }
       return Routes.vault;
     case VaultLockStatus.keyAttributesCorrupted:
       return location == Routes.authIntegrity ? null : Routes.authIntegrity;

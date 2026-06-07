@@ -47,12 +47,19 @@ void main() {
       expect(guardRedirect(s, Routes.unlock), isNull);
     });
 
-    test('unlocked → vault + scan serbest; auth ekranlarından vault\'a dön', () {
+    test('unlocked → vault + scan + settings serbest; auth ekranlarından vault\'a dön',
+        () {
       const s = VaultLockState.unlocked();
       expect(guardRedirect(s, Routes.vault), isNull);
       expect(guardRedirect(s, Routes.scan), isNull);
+      expect(guardRedirect(s, Routes.settings), isNull); // Patch 5
       expect(guardRedirect(s, Routes.unlock), Routes.vault);
       expect(guardRedirect(s, Routes.setup), Routes.vault);
+    });
+
+    test('locked → /settings engellenir → /unlock (Patch 5)', () {
+      const s = VaultLockState.locked();
+      expect(guardRedirect(s, Routes.settings), Routes.unlock);
     });
 
     test('keyAttributesCorrupted → /auth-integrity', () {

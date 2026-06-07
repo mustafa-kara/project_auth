@@ -1,10 +1,11 @@
 # Kripto Tasarımı — E2E Vault (Faz 2)
 
-> Kapsam (Patch 1–4 uygulandı): paket kararı, primitifler, anahtar hiyerarşisi,
+> Kapsam (Patch 1–5 uygulandı): paket kararı, primitifler, anahtar hiyerarşisi,
 > AAD şeması, BIP39 recovery, parola/normalization kararı, validasyon sınırları,
 > şifreli vault deposu + migration; **Patch 4: setup/unlock/recovery UI + oturum
 > kilidi (`VaultLockCubit`, lifecycle lock) + `KeyAttributesStore` + reset + UI
-> redesign** (tasarım tarafı: [Design.md](Design.md)). Patch 5 (biyometri) ertelendi.
+> redesign** (tasarım tarafı: [Design.md](Design.md)); **Patch 5: biyometrik unlock
+> kısayolu (3. wrap + OS-keystore erişim kontrolü)** — bkz. §11.
 
 ## 1. Paket kararı — `sodium 3.4.6` + `sodium_libs 3.4.6+4`
 
@@ -41,9 +42,11 @@ masterKey  : 32-byte rastgele — ASIL veri anahtarı (token'ları şifreler)
 
 masterPassword ──Argon2id(salt,ops,mem)──▶ KEK ──wrap──▶ encryptedMasterKey
 recoveryKey (32-byte rastgele, BIP39) ─────────wrap──▶ recoveryEncryptedMasterKey
+biometricKey (32-byte rastgele, OS-gated) ─────wrap──▶ biometricEncryptedMasterKey  (Patch 5, opsiyonel)
 ```
 
-- Parola **veya** recovery key, masterKey'i açar (ikisi de aynı masterKey'i sarmalar).
+- Parola **veya** recovery key **veya** (etkinse) biyometri, masterKey'i açar — üçü de
+  aynı masterKey'i sarmalar. Biyometri yalnız bir *kısayol*; parola+recovery her zaman çalışır.
 - **Parola değişimi** masterKey'i değiştirmez → token ciphertext'leri yeniden
   şifrelenmez; yalnız yeni salt + yeni KEK + yeni `encryptedMasterKey` yazılır.
   `recoveryEncryptedMasterKey` dokunulmaz.
@@ -59,6 +62,7 @@ bağlamda çözülemez (örn. masterKey-wrap blob'u token olarak açılamaz).
 |--------|------------------------|
 | masterKey ← KEK | `masterkey-kek\|1` |
 | masterKey ← recovery key | `masterkey-recovery\|1` |
+| masterKey ← biometricKey (Patch 5) | `masterkey-biometric\|1` |
 | Token kaydı (Patch 3) | `token\|1\|<id>` |
 
 ## 5. Recovery key — kendi BIP-39 implementasyonumuz
@@ -157,3 +161,52 @@ edilmez; tamsayı-değerli double (`3.0`) kabul edilir.
   gerekir; `sodium_libs` platform plugin'i plain `flutter test` VM host'unda
   yüklenmez (`SodiumPlatform.instance` hatası). In-memory `FakeSecureStorage`
   Keychain'e dokunmadan storage davranışını sadık modeller.
+- **Biyometri (Patch 5):** `KeyManager.enrollBiometric`/`biometricUnlock` round-trip
+  integration_test'te (gerçek wrap/unwrap). `VaultLockCubit` biyometri akışları
+  (enable/disable atomikliği, retrieve hata yolları, lifecycle inactive-vs-paused)
+  `FakeBiometricService` ile host'ta. `BiometricServiceImpl` (gerçek `local_auth` +
+  OS-keystore) GERÇEK cihaz ister → CI'da koşmaz; manuel doğrulama checklist'i §11.
+
+## 11. Biyometrik unlock (Patch 5)
+
+**Amaç:** parola yerine biyometri kısayolu — E2E modeli ZAYIFLATMADAN. masterKey her
+zaman parola+recovery ile de açılır; biyometri yalnız 3. bir wrap yolu açar.
+
+**Güvenlik sınırı = OS keystore erişim kontrolü** (`local_auth` bool'u DEĞİL):
+- `biometricKey` (32-byte rastgele) `masterKey`'i `masterkey-biometric|1` AAD'siyle sarar
+  → `biometricEncryptedMasterKey` (`KeyAttributes.bmk`, opsiyonel alan).
+- `biometricKey`'in HAM byte'ları `flutter_secure_storage`'da **ayrı options'lı/namespace'li**
+  (`vault_biometric_key_v1`) saklanır, **biyometrik erişim kontrolüyle**:
+  - **iOS:** `useSecureEnclave: true` + `AccessControlFlag.biometryCurrentSet`
+    (`KeychainAccessibility.passcode`). **`biometryCurrentSet` → biyometri seti değişince
+    (yeni parmak/yüz eklenir veya silinir) anahtar OTOMATİK geçersizleşir** → kullanıcı bir
+    kez parolayla açıp Settings'ten yeniden enroll eder (token kaybı YOK). Çalınan cihaza
+    saldırgan kendi biyometrisini eklese bile eski anahtar geçersiz.
+  - **Android:** `AndroidOptions.biometric(enforceBiometrics: true,
+    biometricType: strongBiometricOnly)` → Keystore AES anahtarı
+    `setUserAuthenticationRequired` ile **yalnız güçlü biyometriye** bağlı (PIN/pattern
+    reddedilir). `strongBiometricOnly` → `biometricPromptNegativeButton` zorunlu. API 28+.
+- **GERÇEK prompt** unlock'ta `storage.read()` OS geçidinden gelir (TEK prompt; `local_auth`
+  yalnız availability kontrolü → çift prompt yok). `biometricKey` byte'ları Dart'ta ASLA
+  cache'lenmez — her unlock geçitten yeniden okunur, kullanımdan sonra `fillRange(0)`.
+
+**Tehdit modeli:** çalınan-kilitli cihaz → geçit açılmaz; rooted → anahtar TEE/Keystore'da
+non-exportable (bool spoof'u işe yaramaz, zaten bool'a güvenmiyoruz); backup → `bmk` ciphertext'i
+yedeklense bile sarma anahtarı yedeklenemez (Secure Enclave / userAuthenticationRequired).
+
+**Availability (Android strong + SDK):** Dart'ta `flutter_secure_storage` native
+strong-availability'sine erişim yok → `local_auth.getAvailableBiometrics().contains(strong)`
++ `device_info_plus` `sdkInt >= 28`. iOS'ta Face/Touch ID zaten strong.
+
+**Lifecycle:** biyometri sistem prompt'u kısa süre `inactive` üretebilir; `_biometricPromptInFlight`
+true iken `inactive` abort'tan muaf (başarılı unlock kesilmez), `paused` (gerçek arka plan)
+yine kesin abort. `_abortToBackground` + ownership `unlock()` ile birebir aynı.
+
+**Reset/disable:** `bmk` OS anahtarı ayrı namespace'te → `resetVault` + `disableBiometric`
+açıkça `BiometricService.disable()` çağırır (default `_deleteKeys` yetmez).
+
+**Manuel cihaz doğrulama checklist'i** (CI'da koşmaz):
+1. Settings'ten enable → app kill → UnlockPage'de biyometri butonu → başarılı unlock.
+2. Biyometri seti değiştir (yeni parmak ekle) → biyometri başarısız (`KeyMissing`) → parolaya düş,
+   `bmk` temizlenir → Settings'ten yeniden enroll.
+3. Lockout (çok deneme) → parolaya düş. App<28 (Android) → buton hiç görünmez.

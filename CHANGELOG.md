@@ -2,6 +2,54 @@
 
 Proje ilerleme günlüğü. En yeni en üstte.
 
+## 2026-06-08 (Faz 2 Patch 5 — biyometrik vault unlock)
+
+Biyometrik unlock kısayolu eklendi — **E2E parola modelini zayıflatmadan**. masterKey
+her zaman parola + recovery key ile de açılır; biyometri yalnız 3. bir wrap yolu açar.
+Beş tur dış review (Codex) + her API `.pub-cache` kaynağından teyit edilerek tasarlandı
+(körü körüne kabul yok). host **186/186 → 219/219**, integration +3.
+
+- **Güvenlik sınırı = OS keystore erişim kontrolü** (`local_auth` bool'u DEĞİL).
+  `biometricKey` (32-byte rastgele) masterKey'i `masterkey-biometric|1` AAD'siyle sarar →
+  `KeyAttributes.biometricEncryptedMasterKey` (opsiyonel `bmk` alanı; mevcut vault'lar
+  byte-identical, sürüm bump yok). Ham `biometricKey` `vault_biometric_key_v1`'de **ayrı
+  options'lı/namespace'li** secure storage'da biyometrik erişim kontrolüyle:
+  - **iOS:** `useSecureEnclave: true` + `AccessControlFlag.biometryCurrentSet` →
+    biyometri seti değişince anahtar OTOMATİK geçersiz (parolayla aç + yeniden enroll;
+    token kaybı yok).
+  - **Android:** `AndroidOptions.biometric(enforceBiometrics: true,
+    strongBiometricOnly)` → Keystore'da yalnız güçlü biyometriye bağlı (PIN/pattern
+    reddedilir); `strongBiometricOnly` → `biometricPromptNegativeButton` zorunlu.
+- **Gerçek prompt = `storage.read()` OS geçidi** (TEK prompt). `local_auth` yalnız
+  availability kontrolü → **çift prompt yok** (reviewer 2.tur). `biometricKey` byte'ları
+  Dart'ta ASLA cache'lenmez; kullanımdan sonra `fillRange(0)`.
+- **State modeli:** `biometricEnrolled` (attrs.bmk) + `deviceBiometricAvailable` (cihaz
+  yeteneği, enrollment'tan bağımsız) AYRI tutulur — UnlockPage butonu ikisinin kesişimi,
+  Settings enable switch'i `deviceBiometricAvailable`'a bakar (yoksa yeni kullanıcı hiç
+  açamazdı — reviewer 3.tur deadlock). TÜM `locked`/`unlocked` emit'leri merkezi
+  `_locked()`/`_unlocked()` helper'larıyla bu alanları korur (reviewer 4.tur).
+- **Atomiklik:** `enableBiometric` OS-key-yaz → attrs-yaz sırası; attrs.write fail →
+  `biometric.disable()` ile orphan OS key temizle + state değişmez. `biometricUnlock`
+  `KeyMissing` → `bmk` PERSIST temizlenir (bootstrap döngüsü önleme); write fail →
+  UI'da kapalı göster (döngü yok). `resetVault` + `disableBiometric` açıkça
+  `BiometricService.disable()` çağırır (ayrı namespace → default `_deleteKeys` yetmez).
+- **Lifecycle:** biyometri sistem prompt'unun ürettiği `inactive` (`_biometricPromptInFlight`)
+  başarılı unlock'u abort ETMEZ; `paused` (gerçek arka plan) yine kesin abort. `main.dart`
+  `paused`/`inactive`'i ayrı iletir.
+- **Android API<28:** `device_info_plus` ile `sdkInt >= 28` gate (`getAvailableBiometrics`
+  SDK'yı gate etmez; `enforceBiometrics` <28'de native exception atardı — reviewer 4.tur).
+- **Native:** `MainActivity` → `FlutterFragmentActivity`, `AndroidManifest` `USE_BIOMETRIC`,
+  `styles.xml`+`values-night/styles.xml` `Theme.AppCompat.DayNight.NoActionBar` (local_auth
+  Android 8 crash önleme), iOS `NSFaceIDUsageDescription`. `flutter build apk --debug` geçti.
+- **[P2 review düzeltmesi] Settings switch:** `enrolled && !deviceAvailable` (biyometri
+  seti değişti/lockout) durumunda switch tamamen pasifti → kullanıcı Settings'ten
+  KAPATAMIYORDU. Yorum doğru invariant'ı yazıyordu ama `onChanged: !deviceAvailable ? null`
+  kapatmayı da kilitliyordu. Fix: açma cihaz uygunsa, **kapatma availability'den bağımsız**
+  (`enrolled || deviceAvailable`). +1 test (enrolled+unavailable → kapatılabilir).
+- **Doğrulama:** `flutter analyze` temiz · host 220/220 · integration 12/12 · `flutter build
+  apk --debug` geçti · `BiometricServiceImpl` (gerçek OS/local_auth) cihaz ister → manuel
+  checklist [docs/CRYPTO.md §11].
+
 ## 2026-06-07 (Faz 2 Patch 4 — commitSetup write-fail atomikliği, 3. tur)
 
 - **[P2] `commitSetup()` `_attrsStore.write()` fail + background.** Önceki tur migration-fail

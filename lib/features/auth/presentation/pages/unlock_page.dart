@@ -45,10 +45,39 @@ class _UnlockPageState extends State<UnlockPage> {
     }
   }
 
+  Future<void> _biometricUnlock() async {
+    setState(() => _busy = true);
+    try {
+      await context.read<VaultLockCubit>().biometricUnlock();
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  String? _errorText(VaultLockError? error) {
+    switch (error) {
+      case VaultLockError.wrongPassword:
+        return 'Parola hatalı';
+      case VaultLockError.biometricLockout:
+        return 'Biyometri kilitlendi — parola ile aç';
+      case VaultLockError.biometricFailed:
+        return 'Biyometrik doğrulama başarısız — parola ile dene';
+      case VaultLockError.wrongRecovery:
+      case VaultLockError.weakPassword:
+      case null:
+        return null;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final error = context.select<VaultLockCubit, VaultLockError?>(
         (c) => c.state.status == VaultLockStatus.locked ? c.state.error : null);
+    // Biyometri butonu: yalnız enrolled + cihaz uygun (türetilmiş kesişim).
+    final biometricAvailable = context.select<VaultLockCubit, bool>(
+        (c) => c.state.biometricUnlockAvailable);
+    // Parola alanı hatası yalnız parola/biyometri hata sebepleri için.
+    final pwdError = _errorText(error);
 
     return AuthScaffold(
       icon: Icons.lock_outline,
@@ -62,8 +91,7 @@ class _UnlockPageState extends State<UnlockPage> {
           autofocus: true,
           autocorrect: false,
           enableSuggestions: false,
-          errorText:
-              error == VaultLockError.wrongPassword ? 'Parola hatalı' : null,
+          errorText: pwdError,
           onSubmitted: (_) => _busy ? null : _unlock(),
         ),
       ],
@@ -72,6 +100,14 @@ class _UnlockPageState extends State<UnlockPage> {
           onPressed: _busy ? null : _unlock,
           child: _busy ? const BtnSpinner() : const Text('Aç'),
         ),
+        if (biometricAvailable) ...[
+          const SizedBox(height: Gap.sm),
+          OutlinedButton.icon(
+            onPressed: _busy ? null : _biometricUnlock,
+            icon: const Icon(Icons.fingerprint),
+            label: const Text('Biyometri ile aç'),
+          ),
+        ],
         const SizedBox(height: Gap.sm),
         TextButton(
           onPressed: () => context.goNamed('recovery'),

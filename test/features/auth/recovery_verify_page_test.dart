@@ -16,6 +16,7 @@ import 'package:project_auth/core/crypto/encrypted_blob.dart';
 import 'package:project_auth/core/crypto/key_attributes.dart';
 import 'package:project_auth/core/crypto/key_handle.dart';
 import 'package:project_auth/features/auth/data/key_attributes_store.dart';
+import 'package:project_auth/features/auth/domain/biometric_service.dart';
 import 'package:project_auth/features/auth/domain/key_manager.dart';
 import 'package:project_auth/features/auth/presentation/bloc/vault_lock_cubit.dart';
 import 'package:project_auth/features/auth/presentation/bloc/vault_lock_state.dart';
@@ -73,6 +74,18 @@ class _FakeKeyManager implements KeyManager {
   noSuchMethod(Invocation i) => throw UnimplementedError('$i');
 }
 
+/// Bu testler biyometriyle ilgilenmiyor → cihaz yok varsayımı.
+class _NoBiometric implements BiometricService {
+  @override
+  Future<bool> isAvailable() async => false;
+  @override
+  Future<void> enroll(Uint8List keyBytes) async {}
+  @override
+  Future<Uint8List> retrieve() async => Uint8List(0);
+  @override
+  Future<void> disable() async {}
+}
+
 void main() {
   late _FakeKeyManager km;
   late VaultLockCubit cubit;
@@ -83,6 +96,7 @@ void main() {
     cubit = VaultLockCubit(
       keyManager: km,
       attrsStore: KeyAttributesStore(storage: storage),
+      biometric: _NoBiometric(),
       migrate: (_) async {},
       deleteKeys: (_) async {},
     );

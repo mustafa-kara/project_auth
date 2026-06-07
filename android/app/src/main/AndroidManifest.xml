@@ -5,6 +5,9 @@
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
 
+    <!-- Biyometrik vault kilidi (Patch 5, local_auth_android README zorunlu). -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+
     <application
         android:label="project_auth"
         android:name="${applicationName}"
