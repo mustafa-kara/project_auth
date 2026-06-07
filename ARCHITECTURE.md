@@ -16,7 +16,7 @@
 | Routing | go_router |
 | Backend | Supabase (Auth + Postgres + Realtime + RLS) |
 | Şifreleme | **E2E** (Ente modeli) — sunucu açık secret'ı asla göremez |
-| Crypto lib | libsodium (`sodium` paketi — `sodium_libs` **discontinued**, bkz. not) — XChaCha20-Poly1305 IETF (`crypto_aead_xchacha20poly1305_ietf_*`) + Argon2id (detay §2.4) |
+| Crypto lib | libsodium — `sodium ^3.4.6` + `sodium_libs ^3.4.6+4` (Faz 2'de uygulandı; sodium 4.x Dart 3.11+ ister, proje 3.10.7 → 3.x bilinçli karar, bkz. not + docs/CRYPTO.md) — XChaCha20-Poly1305 IETF (`crypto_aead_xchacha20poly1305_ietf_*`) + Argon2id (detay §2.4) |
 | Key & kurtarma | Rastgele master key; master parola → KDF → KEK ile sarmalanır; ayrıca recovery key ile sarmalanır (detay §2.2) |
 | Senkron | Gerçek zamanlı çoklu cihaz (Supabase Realtime) |
 | Login | Faz 3: email/parola · **Faz 4**: Google + Apple Sign-In (developer hesapları gerekir) |
@@ -25,9 +25,14 @@
 
 > **Doğrulanacak paket versiyonları** (developer hesapları/kuruluma başlarken `flutter pub` ve `npm` ile teyit et): `sodium`, `flutter_secure_storage`, `mobile_scanner`, `local_auth`, `supabase_flutter`, `go_router`, `flutter_bloc`. Aşağıdaki seçimler Ocak 2026 itibarıyla geçerli, ama kuruluma başlarken son sürümleri kontrol et.
 >
-> ⚠️ **Kripto paket kararı (güncel):** `sodium_libs` paketi **discontinued**. Faz 2'de
-> doğrudan `sodium` paketi kullanılacak (FFI binding'leri içerir; API neredeyse aynı).
+> 🔐 **Kripto paket kararı (Faz 2'de uygulandı, teyitli):** `sodium: ^3.4.6` +
+> `sodium_libs: ^3.4.6+4`. `sodium 4.x` Dart SDK `^3.11.0` ister; bu proje Dart
+> `3.10.7` (Flutter 3.38.6 stable) → **4.x ÇÖZÜLEMEZ**. `sodium_libs` pub'da
+> "discontinued" görünse de pre-built binary yükler, native-assets/experiment flag
+> GEREKTİRMEZ; 3.x hattı stable Flutter'da çalışır (integration testleriyle kanıtlı).
+> İleride Dart 3.11+'a yükselince 4.x native-assets'e geçiş ayrı küçük migration.
 > XChaCha20-Poly1305 IETF + Argon2id algoritma kararı değişmez. README/PLAN ile hizalı.
+> Detay: docs/CRYPTO.md.
 
 ---
 
@@ -179,7 +184,7 @@ feature_flags (key text PK, enabled bool, payload jsonb, updated_at) -- feature 
 
 ### RLS politikaları
 - Her tabloda önce `enable row level security` (zorunlu — kapalıyken grant verilen tablo herkese açık olur).
-- `tokens`, `key_attributes`, `devices`: politikalar **`to authenticated`** hedeflenir; `using (user_id = auth.uid())` ve `with check (user_id = auth.uid())` — kullanıcı sadece kendi satırları. (Rolü `to authenticated` ile sınırlamak `anon`'u baştan eler; `auth.uid()` anon'da `null` döner ve hiçbir satıra eşleşmez, yine de rolü açıkça belirtmek best practice.)
+- `tokens`, `key_attributes`, `devices`: politikalar **`to authenticated`** hedeflenir; `using (user_id = (select auth.uid()))` ve `with check (user_id = (select auth.uid()))` — kullanıcı sadece kendi satırları. (Rolü `to authenticated` ile sınırlamak `anon`'u baştan eler; `auth.uid()` anon'da `null` döner ve hiçbir satıra eşleşmez, yine de rolü açıkça belirtmek best practice.) **`(select auth.uid())` sarmalaması zorunlu:** init-plan optimizasyonu — Postgres `auth.uid()`'i her satır yerine sorgu başına bir kez değerlendirir (yalın `auth.uid()` Supabase `auth_rls_initplan` performans uyarısı verir; bkz. migration `20260606152553`).
 - `announcements`, `catalog_services`, `feature_flags`: **`anon` + `authenticated` okur** (login öncesi de görünür — splash/login ekranı için). Okuma policy'si `to anon, authenticated` + her iki role `grant select`. **Yazma yalnızca server-side secret key** (service_role RLS'i bypass eder) → ayrı admin write policy yok, `authenticated`'a write grant yok. (Bu, "tüm yetkili yazma server-side" kararıyla tutarlı.)
 - `audit_logs`: okuma sadece admin; insert **server-side secret key (legacy service_role) / Edge Function** üzerinden (client'tan değil).
 

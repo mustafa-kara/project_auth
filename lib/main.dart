@@ -1,9 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+import 'core/crypto/crypto_service.dart';
 import 'core/di/locator.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
+import 'features/auth/data/key_attributes_store.dart';
+import 'features/auth/domain/key_manager.dart';
+import 'features/auth/presentation/bloc/vault_lock_cubit.dart';
+import 'features/vault/data/encrypted_vault_repository.dart';
+import 'features/vault/data/vault_migration.dart';
 import 'features/vault/presentation/bloc/vault_cubit.dart';
 
 Future<void> main() async {
@@ -13,18 +20,73 @@ Future<void> main() async {
   runApp(const AuthenticatorApp());
 }
 
-class AuthenticatorApp extends StatelessWidget {
+class AuthenticatorApp extends StatefulWidget {
   const AuthenticatorApp({super.key});
 
   @override
+  State<AuthenticatorApp> createState() => _AuthenticatorAppState();
+}
+
+class _AuthenticatorAppState extends State<AuthenticatorApp>
+    with WidgetsBindingObserver {
+  late final VaultLockCubit _lock;
+  late final AppRouterBundle _bundle;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+
+    final migration = locator<VaultMigration>();
+    _lock = VaultLockCubit(
+      keyManager: locator<KeyManager>(),
+      attrsStore: locator<KeyAttributesStore>(),
+      migrate: (masterKey) => migration.migrateIfNeeded(masterKey: masterKey),
+      deleteKeys: (keys) async {
+        final storage = locator<FlutterSecureStorage>();
+        for (final k in keys) {
+          await storage.delete(key: k);
+        }
+      },
+    )..bootstrap();
+
+    _bundle = createAppRouter(
+      _lock,
+      // Unlocked subtree VaultCubit'i masterKey'li EncryptedVaultRepository ile kurar.
+      // Sahiplik lock cubit'te; repo handle'ı dispose etmez.
+      vaultCubitBuilder: () => VaultCubit(EncryptedVaultRepository(
+        masterKey: _lock.masterKey,
+        crypto: locator<CryptoService>(),
+        storage: locator<FlutterSecureStorage>(),
+      )),
+    );
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive) {
+      _lock.onAppBackgrounded();
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _bundle.refresh.dispose(); // go_router refreshListenable'ı dispose etmez
+    _lock.close();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return BlocProvider(
-      create: (_) => VaultCubit(),
+    return BlocProvider<VaultLockCubit>.value(
+      value: _lock,
       child: MaterialApp.router(
         title: 'Authenticator',
         theme: AppTheme.light(),
         darkTheme: AppTheme.dark(),
-        routerConfig: appRouter,
+        routerConfig: _bundle.router,
         debugShowCheckedModeBanner: false,
       ),
     );

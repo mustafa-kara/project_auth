@@ -2,6 +2,330 @@
 
 Proje ilerleme günlüğü. En yeni en üstte.
 
+## 2026-06-07 (Faz 2 Patch 4 — commitSetup write-fail atomikliği, 3. tur)
+
+- **[P2] `commitSetup()` `_attrsStore.write()` fail + background.** Önceki tur migration-fail
+  yolunu kapatmıştı ama `write()` ayrı bir async noktaydı: write fail ederse kod migration
+  catch'ine HİÇ girmeden `finally`ye düşüyor, `finally` yalnız `_commitInFlight=false`
+  yapıyordu → `_masterKey`/`_pendingAttrs`/`setupPending` canlı kalıyordu. Bu sırada app
+  background olmuşsa (commit in-flight olduğu için `onAppBackgrounded` `cancelSetup`
+  çağırmaz) masterKey arka planda bellekte kalırdı (ARCHITECTURE §2.3 ihlali). **Fix:**
+  `write()` ayrı `try/catch` ile sarıldı → write fail'de key dispose + pending temizle +
+  `uninitialized` (write fail = diske HİÇBİR ŞEY yazılmadı → vault kurulmadı → migration-fail'in
+  aksine doğru state `uninitialized`, `locked` değil) + rethrow. Artık commitSetup'ın her
+  async çıkışında (write-fail / migration-fail / background-abort / başarı) key garanti
+  ele alınıyor.
+- **[P3] Tam kesişim regresyon testi.** İlk write-fail testi yalnız cleanup'ı doğruluyordu
+  ama background çağrısı YOKTU; mevcut background testi ise write BİTTİKTEN sonra `_migrate`'te
+  bekletiyordu — yani "`write()` askıdayken background, SONRA write fail" tam kesişimi test
+  edilmemişti. `FakeSecureStorage`'a `writeGate` (Completer) eklendi: write `_attrsStore.write()`'ta
+  asılıyken `onAppBackgrounded()` tetiklenir, sonra write throw eder. Beklenen davranış
+  doğrulandı — write-fail cleanup (uninitialized + dispose) kazanır; `_commitInFlight=true`
+  olduğu için `onAppBackgrounded` `cancelSetup` çağırmaz, temizlik tek yoldan (write catch)
+  yapılır.
+- **Doğrulama:** `flutter analyze` temiz · host **186/186** (+1: commitSetup write-fail →
+  uninitialized + dispose; +1: write-askıda-background kesişim regresyonu) · integration
+  **34/34** · `git diff --check` temiz.
+
+## 2026-06-07 (Faz 2 Patch 4 — lifecycle lock kenar durumları, 2. tur)
+
+Bir önceki lifecycle turunda kapatılmayan üç kenar durum (review, kaynaktan doğrulandı):
+
+- **[P1] `beginSetup()` arka-plan yarışı.** `KeyManager.setup()` (Argon2id/KEK) sürerken
+  app background olursa `onAppBackgrounded` (state `uninitialized`) sadece
+  `_abortToBackground=true` yapıyordu; `beginSetup` bu bayrağı kontrol etmediği için
+  işlem bitince masterKey + mnemonic'i belleğe alıp `setupPending` emit ediyordu →
+  arka planda key/mnemonic canlı. **Fix:** `beginSetup` await sonrası bayrağı kontrol
+  eder → set ise üretilen key'i dispose + `uninitialized` (persist yok).
+- **[P1/P2] `locking` sırasında frame gelmeden background.** İnteraktif `lock()`
+  dispose'u post-frame'e atıyor; bu sırada background olursa `onAppBackgrounded`
+  `locking` case'inde `break` yapıyordu → frame gelmezse key bellekte kalırdı. **Fix:**
+  `locking` case'i artık SENKRON dispose + `locked`. Stale post-frame callback
+  status-guard'lı → no-op.
+- **[P2] `commitSetup()` migration-fail atomik değildi.** `attrs` yazıldıktan sonra
+  `_migrate` fail ederse fonksiyon rethrow ediyor ama `_masterKey`/`_pendingAttrs`/
+  `setupPending` kalıyordu; attrs diskteyken kullanıcı "iptal" → `cancelSetup` attrs'ı
+  silmiyor → tutarsız "uninitialized ama bootstrap locked". **Fix:** migration-fail
+  yolunda da key dispose + pending temizle + `locked` emit (vault GERÇEKTEN kurulu —
+  attrs diskte; migration idempotent/commit-marker'lı → sonraki unlock yeniden dener)
+  + rethrow (UI hatayı gösterir). Artık `setupPending`'e geri dönülmez → cancel tutarsızlığı yok.
+- **[P3] Doküman drift:** OTP_ENGINE.md hâlâ 180/180 diyordu → 184/184.
+- **Doğrulama:** `flutter analyze` temiz · host **184/184** (+3: beginSetup background-abort,
+  locking-frame-yok senkron dispose, commitSetup migration-fail atomik-locked) · integration
+  **34/34** · `git diff --check` temiz.
+
+## 2026-06-07 (Faz 2 Patch 4 — lifecycle lock güvenlik açıkları + doküman/test hizalama)
+
+Review iki lifecycle güvenlik riski buldu (kaynaktan doğrulandı, ikisi de gerçek):
+
+- **[P1] Arka plana geçerken devam eden async unlock/recover/commit sonradan
+  `unlocked` emit ediyordu.** Senaryo: kullanıcı "Aç" der, Argon2id/migration sürerken
+  app `paused`/`inactive` olur; `onAppBackgrounded()` state'i hâlâ `locked` gördüğü
+  için bir şey yapmaz; async işlem bitince app ARKA PLANDAYKEN `unlocked` olurdu (key
+  bellekte, vault açık). **Fix:** `_abortToBackground` guard'ı. `onAppBackgrounded`
+  `locked`/`uninitialized`/`keyAttributesCorrupted`/`setupPending` görürse bayrağı set
+  eder; `unlock`/`recoverWithNewPassword`/`commitSetup` `unlocked` emit etmeden ÖNCE
+  bayrağı kontrol eder → set ise key dispose + `locked` (vault açılmaz). `commitSetup`'ta
+  attrs zaten yazılmışsa doğru state `locked` (uninitialized değil).
+- **[P2] `lock()` master key dispose'unu `addPostFrameCallback`'e bağlıyordu; `paused`'ta
+  frame garanti olmadığından key bellekte kalabilirdi.** **Fix:** `lock({bool immediate})`.
+  `onAppBackgrounded` `lock(immediate: true)` ile key'i SENKRON dispose eder (güvenlik
+  önceliği — ARCHITECTURE §2.3 "arka plana geçince temizlenir"). İnteraktif "Kilitle"
+  butonu `immediate: false` → frame'li yumuşak teardown (use-after-free yok) korunur.
+- **[P3] Doküman/test hizalama:** PLAN.md/OTP_ENGINE.md eski test sayıları güncellendi
+  (host 181/181). `MnemonicGrid` artık `SelectableText` (Design.md §3.2 kontratı +
+  textScaler 2.0'da sarılır). Design.md `OtpCard` satırı gerçeğe çekildi (ayrı kopyala
+  ikon butonu YOK, tap-to-copy). Recovery grid için textScaler 2.0 overflow test kapısı
+  eklendi (Design.md §5).
+- **Doğrulama:** `flutter analyze` temiz · host **181/181** (+5: 3 P1 yarış testi —
+  unlock/recover/commit background-abort + 1 P2 senkron-dispose/interaktif-lock ayrımı +
+  1 recovery textScaler overflow) · `git diff --check` temiz.
+
+## 2026-06-07 (Faz 2 Patch 4 — otomatik reinstall-reset GERİ ALINDI)
+
+Önce iOS'ta "uygulamayı sildim, yine parola soruyor" için bir `FirstRunGuard`
+(SharedPreferences ilk-açılış bayrağı) eklenmişti; bayrak yoksa Keychain kalıntısı
+silinip temiz setup'a düşülüyordu. **Review P0 release blocker:** tek bir boolean bayrak
+"temiz reinstall" ile "bu yamadan ÖNCE kurulmuş mevcut kullanıcı"yı ayırt edemez — her
+ikisinde de bayrak yoktur ama Keychain'de gerçek bir vault vardır. Mevcut kullanıcı bu
+yamayı alıp ilk kez açtığında bayrak yok kabul edilir → `bootstrap` `VaultStorageKeys.all`
+siler → **mevcut kullanıcının vault'u kaybolur.**
+
+- **Karar (kullanıcı):** özellik tamamen geri alındı. `iOS Keychain`'in uygulama
+  silinince temizlenmemesi Apple'ın bilinçli kararıdır ve mevcut kullanıcıları riske
+  atmadan otomatik tespit edilemez. Veri kaybı riski sıfıra indirildi.
+- **Geri alınanlar:** `FirstRunGuard` + testi silindi; `VaultLockCubit`'ten
+  `isFreshInstall` kancası + bootstrap'taki wipe kaldırıldı; `main.dart` wiring'i
+  geri alındı; `shared_preferences ^2.5.5` bağımlılığı pubspec'ten çıkarıldı.
+- **Mevcut yol:** kullanıcı vault'u temizlemek isterse zaten var olan
+  **"Vault'u sıfırla"** (çift onaylı, `resetVault()` → 5 anahtar) akışını kullanır.
+- **Doğrulama:** `flutter analyze` temiz · host 176/176 (önceki +5 geri alındı).
+
+## 2026-06-07 (Faz 2 Patch 4 — auth ekranları redesign + recovery UX)
+
+Patch 4'ün ilk turunda auth ekranları "işlevsel/cilasız" bırakılmıştı (görsel
+redesign yalnız vault/OtpCard'a uygulanmıştı). Bu tur **tüm auth akışı Design.md
+diline çekildi** + kritik bir recovery UX sorunu giderildi. Görsel doğrulama:
+iOS simulator'da 6 ekran × dark/light render edilip screenshot ile teyit edildi.
+
+- **Recovery key gösterimi (UX kritik):** 24 kelime eskiden dikey `ListTile`
+  listesindeydi → kullanıcı tek ekranda hepsini göremiyor, yarısını yazıp
+  "yazdım" checkbox'ına basıp ilerleyebiliyordu. Yeni `MnemonicGrid`: **2 sütun ×
+  12 satır numaralı grid** (sol 1–12, sağ 13–24), GeistMono kelimeler → 24'ü tek
+  ekranda görünür. Kopyala butonu + "24 kelimeyi yedekledim" onayı (işaretlenmeden
+  Devam pasif). Doğrulama davranışı (3 kelime + 3 deneme limiti) DEĞİŞMEDİ — kullanıcı kararı.
+- **"Panoya kopyala" numaralı format:** eskiden `words.join(' ')` → sadece kelimeler,
+  sıra numarası yok (yapıştırınca kullanıcı hangi kelime kaçıncı bilemiyordu). Artık
+  `1. lizard\n2. goddess ...` (her satır numaralı). `RecoveryUnlockPage` giriş ayrıştırma
+  da sağlamlaştırıldı: numaralı yedek formatı yapıştırılırsa sıra öneki (`12.`/`12)`/`12-`)
+  ayıklanır → kullanıcı kopyaladığı key'i doğrudan geri yapıştırabilir; düz boşluklu giriş
+  de çalışır (regresyon testli).
+- **Paylaşılan auth UI katmanı** (`lib/core/ui/widgets/`): `AuthScaffold` (ikon +
+  başlık[headlineSmall] + açıklama[onSurfaceVariant] + kaydırılabilir gövde + sabit
+  alt CTA; safe-area + tutarlı `Gap` spacing + dynamic-type taşma yok), `AppTextField`
+  (görünür label + show/hide + inline hata + helper), `MnemonicGrid`, `auth_bits`
+  (AuthErrorText + BtnSpinner). `app_theme`'e `monoWord` (GeistMono recovery kelimesi).
+- **6 auth ekranı yeniden yazıldı:** setup_password, recovery_show, recovery_verify,
+  recovery_unlock, unlock, auth_integrity → hepsi `AuthScaffold`/`AppTextField`,
+  token'lar, Geist tipografi, tek birincil CTA (Design.md §3/§4). "cilasız sürüm"
+  yorumları kalktı.
+- **vault_page state-view'ları + scan_page:** `_EmptyView`/`_NoMatchView`/
+  `_IntegrityErrorView` + arama padding token'lara çekildi; `_ScanError` token +
+  textTheme (ham `Colors.grey`/sabit spacing kalktı; reticle overlay rengi bilinçle korundu).
+- **Doğrulama:** `flutter analyze` temiz · host 176/176 (regresyon yok; +3:
+  recovery_unlock numaralı-parse + düz-giriş, recovery_show numaralı-kopyala) · iOS
+  simulator görsel doğrulama (6 ekran, dark+light). `recovery_verify_page_test`
+  davranışı korundu (TextFormField → TextField render'ı `find.byType` ile eşleşir).
+
+## 2026-06-07 (Faz 2 Patch 4) — Setup/Unlock UI + oturum kilidi + UI/UX redesign
+
+Vault artık gerçek bir kilit/oturum akışına sahip ve tüm arayüz tek tutarlı tasarım
+dilinde ("Precision/Technical"). Önce `docs/Design.md` ile sınırlar kilitlendi, sonra
+güvenlik çekirdeği → corruption UI → görsel redesign sırasıyla uygulandı (regresyon
+izolasyonu). **Host testleri 122 → 173/173.** Tüm bulgular kaynaktan doğrulandı.
+
+- **`docs/Design.md`:** tasarım dili, token'lar, bileşen envanteri, erişilebilirlik
+  kontratı, asset lisansları (Geist OFL 1.1, simple-icons CC0 — kaynaktan teyit).
+- **Oturum çekirdeği:** `VaultLockCubit` durum makinesi (`uninitialized`/`setupPending`/
+  `locked`/`unlocked`/`locking`/`keyAttributesCorrupted`) + tek key-sahiplik modeli
+  (lock: `locking`→subtree teardown→`masterKey.dispose()`→`locked`; use-after-free yok).
+  `KeyAttributesStore` (malformed→`keyAttributesCorrupted`, sızıntı yok). Setup commit
+  **recovery doğrulanmadan persist YOK**; recover+yeni parola tek atomik çağrı.
+- **Router:** `createAppRouter`→`AppRouterBundle` + kendi `CubitRefreshNotifier` adapter'ı
+  (**go_router 17.3.0'da `GoRouterRefreshStream` YOK** — kaynaktan teyit; CHANGELOG:693).
+  refreshListenable dispose'u kök widget'ta (go_router dispose etmez). Guard tüm state'leri
+  kapsar; `ShellRoute` unlocked subtree'de `VaultCubit`'i sağlar (scan/add yalnız orada).
+- **Lifecycle lock:** `paused` VE `inactive` → unlocked kilitlenir, setupPending temizlenir.
+- **Corruption/integrity UI:** VaultPage `corruptedCount` banner'ı (Yine de devam et /
+  onaylı kaldır) + `VaultIntegrityException` integrity ekranı (boş-durum DEĞİL) +
+  `/auth-integrity` (Yeniden dene / Vault'u sıfırla) + `resetVault()` (5 anahtar siler;
+  plaintext+marker dahil → yeniden migrate edilmez).
+- **UI/UX redesign:** Geist + GeistMono **gömülü** (runtime fetch yok; Türkçe glif teyitli;
+  `google_fonts` KULLANILMAZ), güven-mavi palet + `CountdownColors` `ThemeExtension`,
+  `CountdownRing` (yeşil→amber→kırmızı + ortada saniye, <5sn pulse, reduced-motion'da kapalı),
+  `IssuerAvatar` (simple-icons CC0 curated 27 ikon + baş-harf fallback), `OtpCard` (kart/liste
+  varyant + tap-to-copy + Semantics), kart/liste toggle (`vault_view_mode_v1` secure_storage),
+  ScanPage köşe-rehberli reticle.
+- **Erişilebilirlik kapısı:** Semantics (kod + kalan süre), textScaler 2.0 taşma yok,
+  reduced-motion çökme yok — widget testleriyle.
+- **DI/main:** global `VaultCubit` kaldırıldı; kök `StatefulWidget` `VaultLockCubit` + router
+  bundle'ı tutar, lifecycle gözler, `bundle.refresh`'i dispose eder.
+- **Patch 4 sertleştirme (review turu — 6 bulgu, hepsi kaynaktan doğrulandı):**
+  - **(P1) masterKey migration-fail lifecycle:** `unlock`/`recoverWithNewPassword` artık
+    masterKey'i ancak migration BAŞARIYLA bittikten sonra sahipleniyor; migration fırlatırsa
+    key `finally`'de dispose edilir, `unlocked`'a geçilmez ("locked state'te canlı key"
+    invariant'ı korunur).
+  - **(P1) guard setup alt-rotaları:** `uninitialized` iken yalnız `/setup` (recovery-show/
+    verify alt rotaları engellenir) — mnemonic henüz yokken `/setup/verify`'a deep-link
+    `RangeError` üretiyordu. Alt-ağaç yalnız `setupPending`'de açık.
+  - **(P2) setup restart:** `beginSetup` önceki pending masterKey'i dispose ediyor (üzerine
+    yazıp sızdırmıyor).
+  - **(P2) recovery-verify deneme limiti:** yanlış kelimede artık inline hata + kalan deneme;
+    3 yanlıştan sonra `cancelSetup()` (pending key dispose). Sınırsız bellekte asılı kalmaz
+    ama tek yazım hatası setup'ı baştan yaptırmaz (kullanıcı kararı).
+  - **(P2) integrity ekranı reset:** toptan-bozuk `_IntegrityErrorView`'a çift-onaylı
+    "Vault'u sıfırla" son çaresi eklendi (AuthIntegrityPage ile aynı kalıp).
+  - **(P3) CountdownRing kritik eşiği:** `forFraction(5/30)` → `forRemaining(remaining, period)`
+    MUTLAK saniye; period≠30'da doğru (period=60'ta son 5sn kritik, 10sn değil; period=15'te
+    3sn kritik). Design.md ile hizalandı.
+- **Patch 4 sertleştirme (2. review turu — 3 bulgu, hepsi kaynaktan doğrulandı):**
+  - **(P1) load-bitmeden-mutasyon veri kaybı:** `VaultCubit` mutasyonları (add/remove/
+    increment/purge) artık ilk `load()` tamamlanana kadar **bekler** (`Completer` ile).
+    Önceki `_mutatedBeforeLoad` merge'i yalnız belleği düzeltiyordu; load bitmeden `save()`
+    edilirse diskteki henüz-okunmamış şifreli kayıtlar EZİLİYORDU (`_lastById`/`_corruptedRaw`
+    boşken yazma). `load()` ayrıca idempotent (tek ilk-yükleme).
+  - **(P2) lifecycle lock güvenli sıra:** `onAppBackgrounded` artık `unlocked`'ta doğrudan
+    `lock()`'a delege ediyor (locking → subtree teardown → post-frame `masterKey.dispose()`).
+    Eskiden hemen dispose ediyordu → repo async encrypt/decrypt yaparken disposed `SecureKey`'e
+    use-after-free riski. `setupPending` → `cancelSetup` (tüketici yok, hemen güvenli).
+  - **(P3) integrity reset testi:** toptan-bozuk integrity ekranındaki çift-onaylı
+    "Vault'u sıfırla" → `resetVault()` akışı widget testiyle kapatıldı (data-destructive).
+- **Patch 4 sertleştirme (3. review turu — 1 bulgu, kaynaktan doğrulandı):**
+  - **(P1) integrity state'te ekleme = onaysız overwrite:** Toptan bozulma (top-level
+    malformed/non-list veya tüm-kayıt decrypt-fail) `load()`'ı erken fırlatır → `state.error`
+    set, `accounts` boş, repo cache (`_corruptedRaw`/`_lastById`) BOŞ. Bu state'te `VaultPage`
+    integrity ekranını gösterirken **FAB hâlâ aktifti** → manuel/QR ekleme `VaultCubit.add` →
+    `save()` çalışır ve boş cache'le yalnız yeni token'ı yazıp **diskteki bozuk-ama-belki-
+    kurtarılabilir ham vault'u kullanıcının açık "Vault'u sıfırla" onayı OLMADAN ezerdi.**
+    Çift katman düzeltme: (a) **`VaultCubit` `_guardIntegrity()`** — `state.error != null` iken
+    add/remove/increment `StateError` fırlatır (UI `_runMutation`/`_addAndClose` yakalar →
+    SnackBar); (b) **VaultPage FAB** integrity state'inde gizli (`integrityBlocked`). +3 test.
+- **Doğrulama:** `flutter analyze` temiz, host 173/173, `flutter build apk --debug` +
+  `flutter build ios --debug --no-codesign` geçti. Asset delta ~912KB raw (curated; lean).
+
+## 2026-06-07 (Faz 2 Patch 1–3) — E2E kripto katmanı + şifreli lokal vault
+
+Faz 2'nin çekirdeği: vault artık offline çalışıyor **ama düz JSON değil, E2E şifreli**.
+Her patch çok-turlu dış review'dan geçti; **tüm bulgular kaynaktan (Context7/pub.dev/
+kurulu paket kaynağı) doğrulandı** (standing rule) — bazı makul-ama-yanlış iddialar elendi
+(sodium sürümü, `runIsolated` arity). UI/route/DI rewiring + biyometri Patch 4–6'da.
+
+- **Patch 1 — `core/crypto/`:** `CryptoService` (soyut) + `SodiumCryptoService` (SodiumSumo).
+  XChaCha20-Poly1305 IETF (AAD'li) + Argon2id (KEK, **ayrı isolate** — UI bloklamaz).
+  `EncryptedBlob`/`KeyHandle` (opaque, `SecureKey` sızmaz) + `crypto_exceptions`.
+  **Sürüm kararı:** `sodium 3.4.6 + sodium_libs 3.4.6+4` — sodium 4.x Dart 3.11+ ister,
+  proje Dart 3.10.7. Detay [docs/CRYPTO.md](docs/CRYPTO.md).
+- **Patch 2 — anahtar hiyerarşisi:** `KeyManager` (setup/unlock/recoverUnlock/changePassword,
+  hepsi Future, ara key'ler `finally`'de dispose/zero-fill). `KeyAttributes` value object.
+  **Kendi BIP39 impl'imiz** (kanonik paket bakımsız → güven sınırına sokulmadı): resmi 2048
+  kelime (MIT, SHA-256 teyitli), 256-bit, checksum doğrulamalı; resmi Trezor vektörleriyle test.
+  Domain parola politikası (`WeakPasswordException`, min 8).
+- **Patch 3 — şifreli vault + migration:** `EncryptedVaultRepository` (token-bazlı record
+  `{id,v,n,c,updatedAt,deleted}`, AAD `token|1|<id>`, **unchanged-blob koruması**,
+  **bozuk-kayıt koruması** — scalar/null dahil, **integrity exception** ile sessiz veri
+  kaybı yok). `VaultMigration` (Faz 1 plaintext → şifreli, commit-marker idempotency,
+  **id-bazlı upsert** — crash sonrası var olanı ezmez). `VaultRepository` arayüzü genişledi
+  (`load()→VaultLoadResult`, `purgeCorrupted()`). Raw-storage güvenlik testi:
+  secret/issuer/accountName ciphertext dışında **hiç** görünmüyor.
+- **Sıkı validasyon (review):** `EncryptedBlob`/`KeyAttributes` parse'ı bozuk/ileri-sürüm
+  metadata'yı sodium'a ulaşmadan reddeder (nonce=24B, ciphertext≥16B, salt=16B, KDF pozitif
+  tamsayı, version desteklenen; kesirli `num` sessiz truncate edilmez).
+- **Testler:** host **79 → 122** (EncryptedBlob/KeyAttributes JSON+validasyon, BIP39 +
+  resmi vektörler, vault corruptedCount). **Integration 34** (cihaz/sim — gerçek libsodium):
+  sodium service 8 + KeyManager 8 + encrypted vault/migration 18. `analyze` temiz, APK + iOS
+  build geçer. (libsodium testleri `integration_test/`te — `sodium_libs` plain `flutter test`
+  VM host'unda yüklenmez.)
+
+## 2026-06-07 (3. tur) — JSON tip-güvenliği + tüm mutasyonlarda hata yönetimi (review)
+
+Dış review 4 bulgu daha verdi (2 orta + 2 düşük); **hepsi kaynaktan doğrulandı, hepsi gerçekti** ve düzeltildi. (Önceki turun add/QR düzeltmeleri kapanmış teyit edildi; bu tur kalan kenar durumlar.)
+
+- **#1 (orta) — `fromJson` cast'leri `TypeError` üretebiliyordu:** `as String?`/`as num?`
+  cast'leri `type: 123` / `digits: "6"` gibi bozuk depo verisinde `FormatException` DEĞİL
+  `TypeError` atıyordu → `load()`'taki `on FormatException` yakalayamaz, tek bozuk kayıt tüm
+  yüklemeyi kırardı. **Düzeltme:** tip-toleranslı `_asString`/`_asInt` yardımcıları (yanlış tip →
+  `FormatException`; sayısal String → int esnek). `VaultRepository.load()` artık kayıt başına
+  genel `catch` (FormatException dışı da) + anahtar `_coerceStringKeys` ile güvenli.
+- **#2 (orta/düşük) — Silme/HOTP sayaç artırma kalıcılık hatasını UI yakalamıyordu:** `onDelete`/
+  `onIncrement` `VoidCallback` üzerinden fire-and-forget'ti (add/QR düzelmişti ama bu ikisi geride
+  kalmıştı). Save patlarsa kullanıcı başarılı sanır, restart'ta değişiklik geri dönerdi.
+  **Düzeltme:** `VaultPage._runMutation(Future, errorPrefix)` — mutasyonu `await` eder, save hatasında
+  SnackBar gösterir (bellek-içi state güncel ama yazma başarısızsa bilgilendirir).
+- **#3 (düşük) — QR save hatasında `mounted` guard eksikti:** `_onDetect` catch'i `_showError` →
+  `context` kullanıyordu; kullanıcı ayrılmışsa disposed context riski. **Düzeltme:** `_showError`
+  başına `if (!mounted) return` (add sheet'teki korumayla tutarlı).
+- **#4 (düşük) — Doküman drift:** `PLAN.md` CI satırı hâlâ "67/67" diyordu (dosyanın gerisi 75) →
+  güncellendi.
+- **Testler:** +4 (yanlış-tip type/digits reddi, sayısal-String toleransı, remove/increment save-hata
+  fırlatma) + load testine yanlış-tip kayıt senaryoları. **75 → 79, hepsi geçti; `analyze` temiz.**
+
+## 2026-06-07 (2. tur) — Kalıcılık dayanıklılığı + async hata yönetimi (review)
+
+Dış review 5 bulgu verdi (2 orta + 3 düşük); **hepsi kaynaktan doğrulandı, hepsi gerçekti** ve düzeltildi. APK + iOS build'i de geçti (review tarafından).
+
+- **#1 (orta) — JSON yükleme parser validasyonunu bypass ediyordu:** `OtpAccount.fromJson`
+  Base32/digits/period/counter kontrolü yapmıyordu → bozuk kayıt `OtpCard` render/timer'da
+  (`secretBytes`, `period=0` bölme) crash ederdi. **Düzeltme:** validasyon TEK noktaya çekildi —
+  `OtpAccount` ctor artık `validate()` çağırır (secret Base32, digits 6–8/Steam 5, period 1–600,
+  counter ≥0). Böylece parse, fromJson ve programatik kurulum aynı güvenlik kapısından geçer;
+  geçersiz `OtpAccount` hiçbir yoldan oluşamaz. Ayrıca `VaultRepository.load()` üst-düzey
+  `jsonDecode` hatasını da yakalar (eskiden tüm yükleme patlardı) → boş vault'a düşer.
+- **#2 (orta) — `add()` future'ı beklenmiyordu:** Manuel/QR ekleme `add()`'i fire-and-forget
+  çağırıyordu; `secure_storage` yazma hatası UI'da yakalanmıyordu (kullanıcı "eklendi" sanıp
+  restart'ta kaybedebilirdi). **Düzeltme:** `_AddSheet` ve `ScanPage._onDetect` artık `await`
+  eder; başarılıysa kapatır, hata olursa formu/taramayı açık bırakıp hatayı gösterir. Ekleme
+  sırasında butonlar disable + spinner.
+- **#3 (düşük/orta) — Açılış yarış durumu:** `load()` bitmeden kullanıcı ekleme yaparsa geç
+  tamamlanan `load()` mevcut state'i eski depo içeriğiyle ezebilirdi. **Düzeltme:** `VaultCubit`
+  yükleme-öncesi mutasyonu izler; geç `load()` ezmek yerine depo kaydı + kullanıcı eklemelerini
+  id-bazlı **birleştirir** ve yeniden persist eder.
+- **#4 (düşük) — Arama temizleme:** `clear` butonu yalnız `_query`'yi sıfırlıyordu; `TextField`
+  controller'ı olmadığından ekranda eski metin kalıyordu. **Düzeltme:** `TextEditingController`
+  eklendi, temizlemede hem state hem görünen metin sıfırlanır (dispose edilir).
+- **#5 (düşük) — Doküman drift:** `PLAN.md` "60/60", `docs/OTP_ENGINE.md` vault'u hâlâ
+  "in-memory / sonraki adım" anlatıyordu → güncel duruma (kalıcı vault, tek-nokta validasyon)
+  ve test sayısına çekildi.
+- **Testler:** +8 (4 JSON validasyon reddi + 3 load dayanıklılık (mocktail ile bozuk JSON/kayıt) +
+  save-hatası fırlatma + yarış-durumu merge). **67 → 75, hepsi geçti; `analyze` temiz.**
+
+## 2026-06-07 — Faz 1 kalanı: kalıcılık + QR tarama + arama (+ doküman drift)
+
+Faz 1 tamamlandı. Dış review'ın iki düşük öncelikli doküman drift'i (kaynaktan doğrulandı) düzeltildi, sonra Faz 1'in kalan üç maddesi uygulandı.
+
+- **Doküman drift #1 (düşük) — ARCHITECTURE.md RLS örneği:** §RLS politikaları satırı yalın
+  `user_id = auth.uid()` gösteriyordu; canlı/migration `(select auth.uid())` (init-plan
+  optimizasyonu) kullanıyor. Kopyalanırsa `auth_rls_initplan` uyarısı dönerdi → örnek
+  `(select auth.uid())`'e ve nedeni açıklayan nota güncellendi.
+- **Doküman drift #2 (düşük) — PROJECT_INFO.md migration özeti:** `initplan` migration'ı için
+  "+ audit FK index" yazıyordu; index aslında init migration'a taşındı, initplan'dan kaldırıldı
+  (migration dosyası bunu belgeliyor). Özet düzeltildi.
+- **Kalıcılık (secure_storage):** `OtpAccount.toJson/fromJson` (URI'den farklı — `id` + `counter`
+  gibi yerel/operasyonel alanları korur, bozuk alan → `FormatException`). `VaultRepository`
+  arayüzü + `SecureStorageVaultRepository` (tek JSON anahtarı; bozuk tek kayıt atlanır, tüm
+  vault düşmez). `VaultCubit` artık repository alır: açılışta `load()`, her mutasyonda persist;
+  no-op'larda gereksiz yazma yapmaz. `loaded` state'i ile ilk yüklemede spinner.
+- **QR tarama (`mobile_scanner` 7.2):** `ScanPage` gerçek tarayıcı — `DetectionSpeed.noDuplicates`,
+  yalnız `qrCode` formatı, ilk geçerli `otpauth://`'ta çift-ekleme guard'lı pop, geçersiz QR'da
+  SnackBar + taramaya devam, flaş/kamera-değiştir, izin-reddi için kullanıcı dostu `errorBuilder`.
+  Platform izinleri: iOS `NSCameraUsageDescription`, Android `CAMERA` + `uses-feature camera
+  required=false` (manuel giriş hâlâ mümkün).
+- **Vault arama:** `VaultPage` AppBar'da arama çubuğu — issuer/hesap/label üzerinde
+  case-insensitive filtre; eşleşme yoksa ayrı durum. Ekleme menüsü QR/manuel ayrımı.
+- **Testler:** 7 yeni (6 JSON round-trip/dayanıklılık + 1 VaultCubit load); 5 VaultCubit testi
+  async repository imzasına uyarlandı (FakeRepo ile persist doğrulaması). **60 → 67, hepsi geçti;
+  `analyze` temiz.** API'ler Context7 ile teyit edildi (mobile_scanner v7 `errorBuilder`/
+  `MobileScannerErrorCode`, flutter_secure_storage v10 default RSA-OAEP+AES-GCM).
+
 ## 2026-06-06 (5. tur) — Vault state sağlamlığı + token id + parse sıkılaştırma (review #5)
 
 Dış review 5 bulgu verdi; **hepsi kaynak koddan doğrulandı, hepsi gerçekti** ve düzeltildi.
@@ -93,7 +417,7 @@ Dış review 4 bulgu daha verdi; hepsi **lokal Supabase CLI ile gerçek Postgres
 - Doğrulama: `flutter analyze` temiz · `flutter test` **39/39** geçti.
 
 ### Bilinen sürüm tuzakları (pubspec'te yönetiliyor)
-- ⚠️ `sodium_libs` **DISCONTINUED** → Faz 2 kriptoda `sodium` paketine geçilecek.
+- 🔐 Kripto (Faz 2): `sodium ^3.4.6` + `sodium_libs ^3.4.6+4`. sodium 4.x Dart 3.11+ ister; proje Dart 3.10.7 → 4.x çözülemez (3.x bilinçli karar, pre-built binary, native-assets flag gerekmez). `sodium_libs` "discontinued" etiketli ama 3.x hattı çalışıyor (integration testleriyle kanıtlı). Detay docs/CRYPTO.md.
 - `injectable` 2.x'e sabit (generator henüz 3.x desteklemiyor).
 - `json_annotation` ^4.9.0'a sabit (4.12 henüz `json_serializable` ile uyumsuz).
 

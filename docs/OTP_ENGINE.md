@@ -1,8 +1,11 @@
 # OTP Çekirdeği (`lib/core/otp/`)
 
 Sunucusuz, saf Dart OTP motoru. Ağ/IO yok; tüm fonksiyonlar deterministik ve
-birim test edilebilir. Faz 1'in kalbidir ve Faz 2'de (E2E kripto) bu modelin
-açık verisi `masterKey` ile şifrelenir.
+birim test edilebilir. Faz 1'in kalbidir; **Faz 2'de (E2E kripto) bu modelin açık
+verisi `masterKey` ile şifrelendi** ve **Patch 4'te vault bir kilit/oturum akışının
+(setup → unlock/recovery, `VaultLockCubit`) arkasına alındı** — token'lar yalnız
+unlock sonrası bellekteki masterKey ile çözülür. Detay: [CRYPTO.md](CRYPTO.md),
+[Design.md](Design.md).
 
 ## Dosyalar
 
@@ -51,7 +54,10 @@ açık verisi `masterKey` ile şifrelenir.
 
 ## Doğruluk — RFC test vektörleri
 
-`test/core/otp/` altında **54 test, hepsi geçiyor** (proje toplamı 60 = 54 OTP + 5 VaultCubit + 1 widget smoke; `flutter test`):
+`test/core/otp/` altında **54 OTP testi, hepsi geçiyor**. (Tarihsel: Faz 1 sonu proje
+toplamı 79 = 54 OTP + 16 vault_repository/JSON + 8 VaultCubit + 1 widget smoke. Faz 2
+Patch 4 sonrası host toplamı **186/186** — kripto/auth/UI eklendi; bkz. README / PLAN.md.)
+Aşağıdaki tablo OTP çekirdeğinin RFC kapsamıdır:
 
 | Grup | Kaynak | Kapsam |
 |---|---|---|
@@ -75,5 +81,12 @@ açık verisi `masterKey` ile şifrelenir.
   `id` lokal kimliktir, `otpauth://` URI'de **taşınmaz** (round-trip'te yeni id üretilir).
   Vault id-bazlı çalışır (`VaultCubit.removeById`/`incrementCounter(id)`, `OtpCard`
   `ValueKey(id)`) → liste değişiminde yanlış öğeye dokunulmaz; Faz 3 backfill için idempotent.
-- Şu an vault **in-memory** (`VaultCubit`). Sonraki adımlar: `flutter_secure_storage`
-  ile kalıcılık (şifresiz, OS koruması) → Faz 2'de `masterKey` ile E2E şifreleme.
+- Vault **cihazda kalıcı**. **Faz 2'de E2E şifreli oldu:** `EncryptedVaultRepository`
+  token'ları `masterKey` + XChaCha20-Poly1305 ile şifreler (`vault_encrypted_v1`,
+  token-bazlı record). `VaultRepository` arayüzü korundu (`save` aynı; `load` artık
+  `VaultLoadResult` döner, `purgeCorrupted` eklendi). Faz 1 plaintext
+  (`vault_accounts_v1`) tek seferlik `VaultMigration` ile şifrelenip silinir. Detay:
+  [CRYPTO.md](CRYPTO.md). `VaultCubit` açılışta `load()`, her mutasyonda persist eder.
+  **Validasyon TEK noktada** (`OtpAccount` ctor → `validate()`): hem `otpauth://` parse
+  hem JSON yükleme hem programatik kurulum buradan geçer → geçersiz secret/digits/period
+  kart render'ında geç crash etmez, kaynakta `FormatException` olur.

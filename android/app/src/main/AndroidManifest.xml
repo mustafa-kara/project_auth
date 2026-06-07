@@ -1,4 +1,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- QR tarama (mobile_scanner) için kamera. Kamera zorunlu donanım değil
+         (manuel otpauth:// girişi de var) → required=false. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+
     <application
         android:label="project_auth"
         android:name="${applicationName}"

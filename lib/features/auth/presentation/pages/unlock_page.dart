@@ -1,0 +1,83 @@
+/// Kilit açma — master parola (Faz 2 Patch 4).
+///
+/// Doğru parola → vault (guard yönlendirir). Yanlış parola → inline hata, kilitli
+/// kalır. "Parolamı unuttum → recovery key" linki recovery ekranına götürür.
+/// Tasarım: `AuthScaffold` + `AppTextField` (Design.md §3/§4).
+library;
+
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:go_router/go_router.dart';
+
+import '../../../../core/ui/tokens.dart';
+import '../../../../core/ui/widgets/app_text_field.dart';
+import '../../../../core/ui/widgets/auth_bits.dart';
+import '../../../../core/ui/widgets/auth_scaffold.dart';
+import '../bloc/vault_lock_cubit.dart';
+import '../bloc/vault_lock_state.dart';
+
+class UnlockPage extends StatefulWidget {
+  const UnlockPage({super.key});
+
+  @override
+  State<UnlockPage> createState() => _UnlockPageState();
+}
+
+class _UnlockPageState extends State<UnlockPage> {
+  final _passwordCtrl = TextEditingController();
+  bool _busy = false;
+
+  @override
+  void dispose() {
+    _passwordCtrl
+      ..clear()
+      ..dispose();
+    super.dispose();
+  }
+
+  Future<void> _unlock() async {
+    setState(() => _busy = true);
+    try {
+      await context.read<VaultLockCubit>().unlock(_passwordCtrl.text);
+      _passwordCtrl.clear();
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final error = context.select<VaultLockCubit, VaultLockError?>(
+        (c) => c.state.status == VaultLockStatus.locked ? c.state.error : null);
+
+    return AuthScaffold(
+      icon: Icons.lock_outline,
+      title: 'Vault kilitli',
+      description: 'Devam etmek için master parolanı gir.',
+      body: [
+        AppTextField(
+          controller: _passwordCtrl,
+          label: 'Master parola',
+          obscure: true,
+          autofocus: true,
+          autocorrect: false,
+          enableSuggestions: false,
+          errorText:
+              error == VaultLockError.wrongPassword ? 'Parola hatalı' : null,
+          onSubmitted: (_) => _busy ? null : _unlock(),
+        ),
+      ],
+      actions: [
+        FilledButton(
+          onPressed: _busy ? null : _unlock,
+          child: _busy ? const BtnSpinner() : const Text('Aç'),
+        ),
+        const SizedBox(height: Gap.sm),
+        TextButton(
+          onPressed: () => context.goNamed('recovery'),
+          child: const Text('Parolamı unuttum → recovery key'),
+        ),
+      ],
+    );
+  }
+}

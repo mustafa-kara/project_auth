@@ -9,30 +9,31 @@
 ## Faz 0 — Temel kurulum (1. hafta) — ÇOĞU TAMAMLANDI (2026-06-06)
 - [x] Flutter projesi (3.38.6) + feature-first klasör iskeleti (`lib/core/*`, `lib/features/{vault,scan}/*`). ✅
 - [x] Bağımlılıklar eklendi + sürümler çözüldü: `flutter_bloc 9.1`, `go_router 17.3`, `get_it 9.2`, `injectable 2.5`, `freezed 3.2`, `supabase_flutter 2.14`, `sodium_libs 3.4`, `flutter_secure_storage 10.3`, `mobile_scanner 7.2`, `local_auth 3.0`, `crypto`. ✅
-  - ⚠️ **`sodium_libs` DISCONTINUED** → Faz 2'de `sodium` paketine geç (pub uyarısı; API neredeyse aynı). `json_annotation` 4.9'a sabitlendi (4.12 henüz `json_serializable` ile uyumsuz). `injectable` 2.x'e sabit (generator 3.x'i desteklemiyor).
+  - 🔐 **Kripto (Faz 2'de uygulandı):** `sodium ^3.4.6` + `sodium_libs ^3.4.6+4`. sodium 4.x Dart 3.11+ ister; proje Dart 3.10.7 → 4.x çözülemez, 3.x bilinçli karar (pre-built binary, native-assets flag gerekmez; integration testleriyle kanıtlı). `sodium_libs` "discontinued" etiketli ama 3.x hattı çalışıyor. Detay docs/CRYPTO.md. `json_annotation` 4.9'a sabitlendi (4.12 henüz `json_serializable` ile uyumsuz). `injectable` 2.x'e sabit (generator 3.x'i desteklemiyor).
 - [x] `core/`: tema (Material 3 açık/koyu), go_router, DI composition root (get_it manuel — injectable codegen'e sonra geçilebilir). ✅
   - [ ] l10n iskeleti, Failure tipleri, Supabase client wrapper *(Faz 3 öncesi)*.
 - [x] go_router temel rotalar (`/`, `/scan`) + ekranlar + redirect guard yorum-iskeleti. ✅
-- [ ] CI: `flutter analyze` + `flutter test` (şu an LOKAL geçiyor: analyze temiz, 60/60 test; CI dosyası eklenecek).
+- [ ] CI: `flutter analyze` + `flutter test` (şu an LOKAL geçiyor: analyze temiz, host 186/186 + integration 34/34; CI dosyası eklenecek).
 
-## Faz 1 — Çekirdek OTP motoru (sunucusuz, tam çalışır) (1–2. hafta) — ÇEKİRDEK TAMAMLANDI
+## Faz 1 — Çekirdek OTP motoru (sunucusuz, tam çalışır) (1–2. hafta) — TAMAMLANDI
 - [x] `core/otp/`: TOTP (RFC 6238), HOTP (RFC 4226), Steam Guard algoritmaları + Base32 (RFC 4648). ✅
-- [x] **RFC test vektörlerine karşı birim testleri — GEÇTİ** (HOTP Appendix D 10 vektör, TOTP Appendix B 10 vektör SHA1/256/512, Base32, Steam, URI + input validasyon + VaultCubit id-bazlı). Proje toplamı **60/60**. ✅
+- [x] **RFC test vektörlerine karşı birim testleri — GEÇTİ** (HOTP Appendix D 10 vektör, TOTP Appendix B 10 vektör SHA1/256/512, Base32, Steam, URI + input validasyon + VaultCubit id-bazlı + JSON round-trip/dayanıklılık + kalıcılık/yarış). Faz 1 sonu 79/79; **Faz 2 Patch 3 sonrası host 122/122; Patch 4 sonrası host 186/186** (+64: VaultLockCubit, KeyAttributesStore, router guard, corruption UI, OtpCard a11y, CountdownColors mutlak-saniye eşik, recovery-verify deneme limiti, masterKey migration-fail lifecycle, load-bitmeden-mutasyon veri kaybı koruması, lifecycle lock güvenli sıra + arka-plan-yarışı (complete-after-background: unlock/recover/commit/beginSetup) + senkron dispose (background + locking-frame-yok) + **commitSetup write-fail→uninitialized / migration-fail→locked (atomik) + write-askıda-background kesişim regresyonu**, integrity-state mutasyon reddi + FAB gizleme, recovery numaralı kopyala/parse, recovery grid textScaler overflow) (+ integration 34/34). Not: otomatik reinstall-reset (FirstRunGuard) eklenip review P0 nedeniyle GERİ ALINDI — mevcut kullanıcı vault'unu riske atardı (bkz. CHANGELOG 2026-06-07). ✅
 - [x] `otpauth://` URI parse/serialize (`OtpAuthUri`) + round-trip test. ✅
 - [x] Vault ekranı: kod kartları + geri sayım halkası + kopyalama + manuel `otpauth://` ekleme. ✅
 - [x] Stabil token `id` (uuid v4) — `OtpAccount.id`, id-bazlı `VaultCubit` + `OtpCard ValueKey` (ARCHITECTURE §7.5 backfill temeli). ✅
-- [ ] QR tarama (`mobile_scanner`) — kamera izni akışı + scan_page doldurma. *(sonraki adım)*
-- [ ] Vault'ta **arama** + HOTP "sonraki kod" kalıcılığı.
-- [ ] Lokal `flutter_secure_storage` ile token saklama, **şifrelenmemiş** (henüz master key yok, sadece OS koruması). *(sonraki adım — şu an in-memory)*
-- [ ] **Çıktı:** internetsiz çalışan gerçek bir authenticator. (Çekirdek hazır; kalıcılık + QR ile demo tam olur.)
+- [x] QR tarama (`mobile_scanner` v7) — kamera izni akışı (iOS `NSCameraUsageDescription` + Android `CAMERA`), çift-algılama guard, flaş/kamera değiştir, izin-reddi hata UI'ı. ✅
+- [x] Vault'ta **arama** (issuer/hesap/label filtresi) + HOTP sayaç kalıcılığı (her artış depoya yazılır). ✅
+- [x] Lokal `flutter_secure_storage` ile token saklama, **şifrelenmemiş** (henüz master key yok, sadece OS koruması): `VaultRepository` + `OtpAccount` JSON (id/counter korur), `VaultCubit` açılışta `load()` + her mutasyonda persist. ✅
+- [x] **Çıktı:** internetsiz çalışan gerçek bir authenticator — QR/manuel ekleme, kalıcı vault, arama. ✅
 
 ## Faz 2 — E2E kripto katmanı + lokal vault'u şifrele (2–3. hafta)
-- [ ] `core/crypto/`: `CryptoService` interface + libsodium impl — Argon2id (`crypto_pwhash`), XChaCha20-Poly1305 IETF (`crypto_aead_xchacha20poly1305_ietf_*`), key wrap aynı AEAD ailesi. **`crypto_secretbox` kullanma.**
-- [ ] Anahtar hiyerarşisi: masterKey üretimi, KEK türetme, recovery key üretimi/sarmalama.
-- [ ] Round-trip ve recovery testleri (altın dosyalar).
-- [ ] Master parola belirleme + recovery key gösterme/doğrulama UI'ı.
-- [ ] Cihazda biyometrik-korumalı master key unlock (OS keystore access-control; bkz. ARCHITECTURE §2.3).
-- [ ] **Lokal vault'u E2E şifreli hale getir:** Faz 1'in token'larını `masterKey` ile şifrele. Artık vault offline+E2E (bulut hâlâ yok). Faz 3 sadece bu şifreli veriyi senkronlar — yeni şifreleme eklemez (bkz. ARCHITECTURE §7.5).
+> İlerleme: **Patch 1–4 tamam** (crypto service, KeyManager, BIP39, encrypted repo, migration; + Patch 4: Setup/Unlock/Recovery UI, route guard, lifecycle lock, corruption/integrity UI, DI rewiring, **tam UI/UX redesign** — [docs/Design.md](docs/Design.md)). **Patch 5 (biyometri) ertelendi; Patch 6 (doküman finalizasyonu) sırada.** Detay: [docs/CRYPTO.md](docs/CRYPTO.md).
+- [x] `core/crypto/`: `CryptoService` interface + libsodium impl — Argon2id (`crypto_pwhash`), XChaCha20-Poly1305 IETF (`crypto_aead_xchacha20poly1305_ietf_*`), key wrap aynı AEAD ailesi. **`crypto_secretbox` KULLANILMADI.** ✅ (Patch 1; sodium 3.4.6+sodium_libs — sodium 4.x Dart 3.11+ ister)
+- [x] Anahtar hiyerarşisi: masterKey üretimi, KEK türetme (Argon2id isolate'ta), recovery key üretimi/sarmalama (`KeyManager` setup/unlock/recoverUnlock/changePassword). ✅ (Patch 2)
+- [x] Round-trip ve recovery testleri (host 122 + integration 34: encrypt/decrypt/tamper, KEK determinizmi, BIP39 resmi Trezor vektörleri, setup→unlock/recover, changePassword). ✅ (Patch 2)
+- [x] **Lokal vault'u E2E şifreli hale getir:** `EncryptedVaultRepository` (token-bazlı record, unchanged-blob + bozuk-kayıt koruması, top-level/all-fail integrity), Faz 1→2 `VaultMigration` (commit-marker idempotency, id-bazlı upsert), raw-storage güvenlik testleri (secret/issuer/accountName sızmıyor). Vault artık offline+E2E. ✅ (Patch 3)
+- [x] Master parola belirleme + recovery key gösterme/doğrulama UI'ı + route guard (lock state'ine göre, kendi `CubitRefreshNotifier` adapter'ı — go_router 17.x'te `GoRouterRefreshStream` yok) + lifecycle lock (paused/inactive) + corruption banner/integrity ekranı + `/auth-integrity` + `KeyAttributesStore` + `resetVault` + DI/main rewiring (StatefulWidget root, unlock sonrası `VaultCubit`) + **tam UI/UX redesign** (Geist/GeistMono gömülü, simple-icons CC0, CountdownRing, IssuerAvatar, kart/liste toggle, tap-to-copy, a11y kapıları). ✅ (Patch 4; bkz. [docs/Design.md](docs/Design.md))
+- [ ] Cihazda biyometrik-korumalı master key unlock — **Faz 2 kabul kriterinden bilinçli çıkarıldı, ayrı mini-faz** (OS keystore access-control, native köprü riski izole; bkz. ARCHITECTURE §2.3). *(Patch 5, ertelendi)*
 
 ## Faz 3 — Supabase auth + senkron (3–5. hafta)
 > **DB tarafı TAMAMLANDI ve test edildi** (2026-06-06). Proje: `authenticator-dev`. Bkz. [supabase/PROJECT_INFO.md](supabase/PROJECT_INFO.md) + [test raporu](supabase/tests/TEST_REPORT.md). Kalan maddeler Flutter client'a bağlı.

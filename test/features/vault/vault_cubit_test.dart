@@ -1,11 +1,16 @@
-/// VaultCubit testleri — id-bazlı silme/sayaç artırma doğruluğu.
+/// VaultCubit testleri — id-bazlı silme/sayaç + kalıcılık (repository) davranışı.
 ///
 /// Index yerine stabil `id` kullanımı, liste değiştiğinde yanlış öğeye
-/// dokunulmamasını garanti eder (B1/B2 düzeltmesinin davranışsal kanıtı).
+/// dokunulmamasını garanti eder. Ayrıca her mutasyonun repository'e
+/// yazıldığı ve açılışta geri yüklendiği doğrulanır (Faz 1 kalıcılık).
 library;
+
+import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:project_auth/core/otp/otp_account.dart';
+import 'package:project_auth/features/vault/data/vault_load_result.dart';
+import 'package:project_auth/features/vault/data/vault_repository.dart';
 import 'package:project_auth/features/vault/presentation/bloc/vault_cubit.dart';
 
 OtpAccount _acc(String name, {OtpType type = OtpType.totp, int counter = 0}) =>
@@ -16,55 +21,203 @@ OtpAccount _acc(String name, {OtpType type = OtpType.totp, int counter = 0}) =>
       counter: counter,
     );
 
+/// Bellek-içi sahte repository — secure_storage olmadan kalıcılık davranışını test eder.
+class _FakeRepo implements VaultRepository {
+  List<OtpAccount> stored;
+  int saveCount = 0;
+
+  /// load()'ı geciktirmek için (yarış durumu testi). null ise anında döner.
+  Completer<void>? loadGate;
+
+  /// true ise save() exception fırlatır (yazma hatası testi).
+  bool failSave = false;
+
+  /// load()'ın corruptedCount değeri (banner testi için).
+  int corruptedCount = 0;
+
+  /// load()'ın atacağı hata (bütünlük hatası testi için). null ise normal yükler.
+  Object? loadError;
+
+  int purgeCount = 0;
+
+  _FakeRepo([this.stored = const []]);
+
+  @override
+  Future<VaultLoadResult> load() async {
+    // Gerçek depo gibi: okuma çağrı anında snapshot alınır; arada save() olsa
+    // bile bu çağrı eski içeriği döndürür (yarış durumunu sadık modeller).
+    final snapshot = List.of(stored);
+    if (loadGate != null) await loadGate!.future;
+    if (loadError != null) throw loadError!;
+    return VaultLoadResult(accounts: snapshot, corruptedCount: corruptedCount);
+  }
+
+  @override
+  Future<void> save(List<OtpAccount> accounts) async {
+    if (failSave) throw Exception('disk dolu');
+    saveCount++;
+    stored = List.of(accounts);
+  }
+
+  @override
+  Future<void> purgeCorrupted() async {
+    purgeCount++;
+    corruptedCount = 0;
+  }
+}
+
 void main() {
   group('VaultCubit', () {
-    test('add token listeye ekler ve stabil id atar', () {
-      final cubit = VaultCubit();
+    test('load depodaki token\'ları yükler ve loaded=true yapar', () async {
       final a = _acc('a');
-      cubit.add(a);
+      final cubit = VaultCubit(_FakeRepo([a]));
+      expect(cubit.state.loaded, isFalse);
+      await cubit.load();
+      expect(cubit.state.loaded, isTrue);
       expect(cubit.state.accounts.single.id, a.id);
     });
 
-    test('removeById doğru token\'ı siler (index kaymasından etkilenmez)', () {
-      final cubit = VaultCubit();
-      final a = _acc('a'), b = _acc('b'), c = _acc('c');
-      cubit
-        ..add(a)
-        ..add(b)
-        ..add(c);
-      // Ortadakini sil — id ile; kalanlar a ve c olmalı, sıra korunur.
-      cubit.removeById(b.id);
-      expect(cubit.state.accounts.map((e) => e.id), [a.id, c.id]);
-    });
-
-    test('removeById bilinmeyen id\'de state değiştirmez', () {
-      final cubit = VaultCubit();
+    test('add token listeye ekler, stabil id atar ve depoya yazar', () async {
+      final repo = _FakeRepo();
+      final cubit = VaultCubit(repo);
       final a = _acc('a');
-      cubit.add(a);
-      final before = cubit.state;
-      cubit.removeById('yok-böyle-id');
-      expect(cubit.state, same(before));
+      await cubit.add(a);
+      expect(cubit.state.accounts.single.id, a.id);
+      expect(repo.stored.single.id, a.id); // kalıcı
     });
 
-    test('incrementCounter yalnız hedef HOTP token\'ın sayacını artırır', () {
-      final cubit = VaultCubit();
+    test('removeById doğru token\'ı siler (index kaymasından etkilenmez)',
+        () async {
+      final repo = _FakeRepo();
+      final cubit = VaultCubit(repo);
+      final a = _acc('a'), b = _acc('b'), c = _acc('c');
+      await cubit.add(a);
+      await cubit.add(b);
+      await cubit.add(c);
+      await cubit.removeById(b.id);
+      expect(cubit.state.accounts.map((e) => e.id), [a.id, c.id]);
+      expect(repo.stored.map((e) => e.id), [a.id, c.id]); // kalıcı
+    });
+
+    test('removeById bilinmeyen id\'de state ve depoyu değiştirmez', () async {
+      final repo = _FakeRepo();
+      final cubit = VaultCubit(repo);
+      final a = _acc('a');
+      await cubit.add(a);
+      final before = cubit.state;
+      final savesBefore = repo.saveCount;
+      await cubit.removeById('yok-böyle-id');
+      expect(cubit.state, same(before));
+      expect(repo.saveCount, savesBefore); // gereksiz yazma yok
+    });
+
+    test('incrementCounter yalnız hedef HOTP token\'ın sayacını artırır',
+        () async {
+      final repo = _FakeRepo();
+      final cubit = VaultCubit(repo);
       final h1 = _acc('h1', type: OtpType.hotp, counter: 0);
       final h2 = _acc('h2', type: OtpType.hotp, counter: 5);
-      cubit
-        ..add(h1)
-        ..add(h2);
-      cubit.incrementCounter(h2.id);
+      await cubit.add(h1);
+      await cubit.add(h2);
+      await cubit.incrementCounter(h2.id);
       final byId = {for (final a in cubit.state.accounts) a.id: a};
       expect(byId[h1.id]!.counter, 0); // dokunulmadı
       expect(byId[h2.id]!.counter, 6); // hedef arttı
+      expect(repo.stored.firstWhere((a) => a.id == h2.id).counter, 6); // kalıcı
     });
 
-    test('incrementCounter TOTP\'ta no-op (HOTP değilse)', () {
-      final cubit = VaultCubit();
+    test('incrementCounter TOTP\'ta no-op (yazma yapmaz)', () async {
+      final repo = _FakeRepo();
+      final cubit = VaultCubit(repo);
       final t = _acc('t', type: OtpType.totp);
-      cubit.add(t);
-      cubit.incrementCounter(t.id);
+      await cubit.add(t);
+      final savesBefore = repo.saveCount;
+      await cubit.incrementCounter(t.id);
       expect(cubit.state.accounts.single.counter, 0);
+      expect(repo.saveCount, savesBefore); // no-op → yazma yok
+    });
+
+    test('save hatası add()\'ten yukarı fırlar (UI yakalayabilsin)', () async {
+      final repo = _FakeRepo()..failSave = true;
+      final cubit = VaultCubit(repo);
+      await expectLater(cubit.add(_acc('a')), throwsException);
+      // Bellek-içi state yine de güncel (kullanıcı görür); kalıcılık başarısız.
+      expect(cubit.state.accounts.single.accountName, 'a');
+    });
+
+    test('save hatası removeById ve incrementCounter\'dan da yukarı fırlar',
+        () async {
+      final repo = _FakeRepo();
+      final cubit = VaultCubit(repo);
+      final h = _acc('h', type: OtpType.hotp);
+      final t = _acc('t');
+      await cubit.add(h);
+      await cubit.add(t);
+      // Şimdi save'i bozalım; mutasyon hatası yukarı fırlamalı (UI SnackBar göstersin).
+      repo.failSave = true;
+      await expectLater(cubit.incrementCounter(h.id), throwsException);
+      await expectLater(cubit.removeById(t.id), throwsException);
+    });
+
+    test('yarış: load bitmeden başlatılan add, load tamamlanınca uygulanır '
+        '(depo kaydı EZİLMEZ — review P1)', () async {
+      // Depoda eski bir kayıt var; load gate ile geciktiriliyor.
+      final stale = _acc('eski-depo-kaydı');
+      final repo = _FakeRepo([stale])..loadGate = Completer<void>();
+      final cubit = VaultCubit(repo);
+
+      final loadFuture = cubit.load(); // beklemede (gate kapalı)
+      // Kullanıcı load bitmeden ekleme başlatıyor → mutasyon load'ı BEKLER
+      // (await ETME, çünkü load gate'e takılı; gerçek UI'da da ekleme load
+      // bitene kadar tamamlanmaz).
+      final fresh = _acc('kullanıcı-ekledi');
+      final addFuture = cubit.add(fresh);
+
+      // load henüz bitmeden add tamamlanmamalı (depoyu erken ezmez).
+      var addDone = false;
+      unawaited(addFuture.then((_) => addDone = true));
+      await pumpEventQueue();
+      expect(addDone, isFalse, reason: 'add load bitmeden uygulanmamalı');
+      expect(repo.saveCount, 0, reason: 'load bitmeden save edilmemeli');
+
+      // Şimdi load tamamlansın → add sonra uygulanır.
+      repo.loadGate!.complete();
+      await Future.wait([loadFuture, addFuture]);
+
+      final names = cubit.state.accounts.map((a) => a.accountName).toSet();
+      // Kullanıcının eklediği VE depo kaydı birlikte (depo ezilmedi).
+      expect(names, containsAll(['kullanıcı-ekledi', 'eski-depo-kaydı']));
+      // add load SONRASI save etti → depoda da ikisi var.
+      expect(repo.stored.map((a) => a.accountName).toSet(),
+          containsAll(['kullanıcı-ekledi', 'eski-depo-kaydı']));
+    });
+
+    test('bütünlük hatası state\'inde add/remove/increment REDDEDİLİR — depo '
+        'EZİLMEZ (review P1)', () async {
+      // load top-level integrity hatası atar → state.error set, accounts boş,
+      // repo cache boş. Bu state'te bir save diskteki ham vault'u onaysız ezerdi.
+      final repo = _FakeRepo()..loadError = StateError('top-level bozuk');
+      final cubit = VaultCubit(repo);
+      await cubit.load();
+      expect(cubit.state.error, isNotNull);
+      expect(cubit.state.accounts, isEmpty);
+
+      // Üç mutasyon da fırlar (UI SnackBar gösterir) ve ASLA save etmez.
+      await expectLater(cubit.add(_acc('yeni')), throwsStateError);
+      await expectLater(cubit.removeById('herhangi'), throwsStateError);
+      await expectLater(
+          cubit.incrementCounter('herhangi'), throwsStateError);
+      expect(repo.saveCount, 0, reason: 'integrity state\'te save edilmemeli');
+    });
+
+    test('load idempotent (ikinci çağrı reload etmez)', () async {
+      final repo = _FakeRepo([_acc('a')]);
+      final cubit = VaultCubit(repo);
+      await cubit.load();
+      // Depo değişse bile ikinci load() no-op (ilk-yükleme tek sefer).
+      repo.stored = [_acc('a'), _acc('b')];
+      await cubit.load();
+      expect(cubit.state.accounts.length, 1); // reload olmadı
     });
   });
 }

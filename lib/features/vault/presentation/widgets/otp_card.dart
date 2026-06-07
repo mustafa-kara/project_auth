@@ -1,4 +1,9 @@
-/// Tek bir OTP hesabını gösteren kart: kod + geri sayım + kopyalama.
+/// Tek bir OTP hesabını gösteren kart (Design.md §4): kod + geri sayım + logo.
+///
+/// İki varyant: spacious kart (varsayılan) ↔ kompakt liste. Kod hep görünür;
+/// karta/koda tek tap = panoya kopyala + kısa onay (tap-to-reveal YOK). Kod
+/// GeistMono + tabular; sayaç [CountdownRing]; logo [IssuerAvatar]. Semantics ile
+/// kod + kalan süre tek etikette duyurulur.
 library;
 
 import 'dart:async';
@@ -9,17 +14,25 @@ import 'package:flutter/services.dart';
 import '../../../../core/di/locator.dart';
 import '../../../../core/otp/otp_account.dart';
 import '../../../../core/otp/otp_generator.dart';
+import '../../../../core/theme/app_theme.dart';
+import '../../../../core/ui/tokens.dart';
+import '../../../../core/ui/widgets/countdown_ring.dart';
+import '../../../../core/ui/widgets/issuer_avatar.dart';
 
 class OtpCard extends StatefulWidget {
   final OtpAccount account;
   final VoidCallback? onIncrement; // HOTP için
   final VoidCallback? onDelete;
 
+  /// Kompakt liste görünümü mü (false = spacious kart).
+  final bool compact;
+
   const OtpCard({
     super.key,
     required this.account,
     this.onIncrement,
     this.onDelete,
+    this.compact = false,
   });
 
   @override
@@ -46,15 +59,10 @@ class _OtpCardState extends State<OtpCard> {
     super.didUpdateWidget(old);
     if (old.account != widget.account) {
       _recompute();
-      // Tip değişebilir (TOTP↔HOTP, örn. düzenleme veya State reuse): timer'ı
-      // güncel tipe göre başlat/iptal et — aksi halde TOTP kartı donar veya
-      // HOTP kartında gereksiz timer döner.
       _syncTimer();
     }
   }
 
-  /// Zamana bağlı tipte (TOTP/Steam) saniyelik timer çalışmalı; HOTP'te çalışmamalı.
-  /// Mevcut durum hedefle uyumluysa dokunmaz (idempotent).
   void _syncTimer() {
     if (_isTimeBased) {
       _timer ??=
@@ -99,8 +107,25 @@ class _OtpCardState extends State<OtpCard> {
 
   String get _formattedCode {
     // 6 haneyi "123 456" gibi gruplar (Steam/8 hane için ham gösterim).
-    if (_code.length == 6) return '${_code.substring(0, 3)} ${_code.substring(3)}';
+    if (_code.length == 6) {
+      return '${_code.substring(0, 3)} ${_code.substring(3)}';
+    }
     return _code;
+  }
+
+  Future<void> _copy() async {
+    await Clipboard.setData(ClipboardData(text: _code));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(const SnackBar(content: Text('Kod kopyalandı')));
+  }
+
+  /// Erişilebilirlik etiketi: kod + (zamana bağlıysa) kalan süre.
+  String get _semanticsLabel {
+    final a = widget.account;
+    final base = '${a.label}, kod $_code';
+    return _isTimeBased ? '$base, $_remaining saniye kaldı' : base;
   }
 
   @override
@@ -109,66 +134,82 @@ class _OtpCardState extends State<OtpCard> {
     super.dispose();
   }
 
+  Widget _trailing() => _isTimeBased
+      ? CountdownRing(
+          remaining: _remaining,
+          period: widget.account.period,
+          size: widget.compact ? 36 : 44,
+        )
+      : IconButton(
+          icon: const Icon(Icons.refresh),
+          tooltip: 'Sonraki kod',
+          onPressed: widget.onIncrement,
+        );
+
   @override
   Widget build(BuildContext context) {
     final a = widget.account;
-    final theme = Theme.of(context);
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      child: ListTile(
-        title: Text(a.label, maxLines: 1, overflow: TextOverflow.ellipsis),
-        subtitle: Text(
-          _formattedCode,
-          style: theme.textTheme.headlineSmall?.copyWith(
-            fontFeatures: const [FontFeature.tabularFigures()],
-            letterSpacing: 2,
-            color: theme.colorScheme.primary,
-          ),
-        ),
-        leading: _isTimeBased
-            ? _Countdown(remaining: _remaining, period: a.period)
-            : IconButton(
-                icon: const Icon(Icons.refresh),
-                tooltip: 'Sonraki kod',
-                onPressed: widget.onIncrement,
-              ),
-        trailing: IconButton(
-          icon: const Icon(Icons.copy),
-          tooltip: 'Kopyala',
-          onPressed: () async {
-            await Clipboard.setData(ClipboardData(text: _code));
-            if (!context.mounted) return;
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Kod kopyalandı')),
-            );
-          },
-        ),
-        onLongPress: widget.onDelete,
+    final codeStyle = widget.compact
+        ? AppTheme.monoCodeCompact(context)
+        : AppTheme.monoCode(context);
+    final avatarSize = widget.compact ? 36.0 : 44.0;
+
+    final content = Padding(
+      padding: EdgeInsets.symmetric(
+        horizontal: Gap.lg,
+        vertical: widget.compact ? Gap.sm : Gap.md,
       ),
-    );
-  }
-}
-
-class _Countdown extends StatelessWidget {
-  final int remaining;
-  final int period;
-  const _Countdown({required this.remaining, required this.period});
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 36,
-      height: 36,
-      child: Stack(
-        alignment: Alignment.center,
+      child: Row(
         children: [
-          CircularProgressIndicator(
-            value: period == 0 ? 0 : remaining / period,
-            strokeWidth: 3,
+          IssuerAvatar(
+            issuer: a.issuer,
+            fallbackLabel: a.accountName,
+            size: avatarSize,
           ),
-          Text('$remaining', style: Theme.of(context).textTheme.labelSmall),
+          const SizedBox(width: Gap.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(a.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color:
+                            Theme.of(context).colorScheme.onSurfaceVariant)),
+                const SizedBox(height: Gap.xs),
+                Text(_formattedCode, style: codeStyle),
+              ],
+            ),
+          ),
+          const SizedBox(width: Gap.md),
+          _trailing(),
         ],
       ),
+    );
+
+    final tappable = Semantics(
+      label: _semanticsLabel,
+      button: true,
+      onTap: _copy,
+      child: InkWell(
+        onTap: _copy, // tek tap = kopyala
+        onLongPress: widget.onDelete,
+        borderRadius: BorderRadius.circular(Radii.lg),
+        child: content,
+      ),
+    );
+
+    if (widget.compact) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: Gap.md),
+        child: tappable,
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(Gap.md, Gap.sm, Gap.md, 0),
+      child: Card(child: tappable),
     );
   }
 }

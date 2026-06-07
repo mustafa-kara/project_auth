@@ -34,8 +34,10 @@ E2E (uçtan uca) şifreli, çoklu cihaz senkronize **TOTP/HOTP authenticator** �
 | Supabase backend (Faz 3 DB) | ✅ Uygulandı + güvenlik taraması temiz (0 uyarı) + uçtan uca test (8/8) + least-privilege sertleştirme (0003) |
 | Custom Access Token Hook | ✅ Etkin + admin claim doğrulandı |
 | Flutter — Faz 0 iskelet | ✅ Proje + feature-first yapı + DI/router/tema + bağımlılıklar |
-| Flutter — Faz 1 OTP çekirdeği | ✅ TOTP/HOTP/Steam/Base32 + `otpauth://` (validasyonlu, stabil token id) + vault UI · **60/60 test geçti** (RFC vektörleri + validasyon + VaultCubit + widget) · `analyze` temiz |
-| Flutter — Faz 1 kalanı | ⏳ QR tarama + secure_storage kalıcılık + arama |
+| Flutter — Faz 1 OTP çekirdeği | ✅ TOTP/HOTP/Steam/Base32 + `otpauth://` (validasyonlu, stabil token id) + vault UI + QR tarama (mobile_scanner) + secure_storage kalıcılık + arama · `analyze` temiz |
+| Flutter — Faz 2 E2E kripto (Patch 1–3) | ✅ `CryptoService`/SodiumSumo (XChaCha20-Poly1305 IETF + Argon2id), `KeyManager` (setup/unlock/recovery/changePassword), kendi BIP39 (MIT, resmi vektörler), `EncryptedVaultRepository` (token-bazlı, unchanged-blob + bozuk-kayıt koruması, integrity), Faz 1→2 migration (commit-marker, upsert) · **host 122/122 + integration 34/34** (sim) |
+| Flutter — Faz 2 UI/oturum (Patch 4) | ✅ Setup/Unlock/Recovery UI + route guard (lock state'ine göre) + lifecycle lock (paused/inactive) + corruption banner/integrity ekranı + `KeyAttributesStore`/`resetVault` + DI/main rewiring + **tam UI/UX redesign** (Geist/GeistMono gömülü, simple-icons CC0, CountdownRing, IssuerAvatar, kart/liste toggle, tap-to-copy, a11y) · **host 186/186** · bkz. [docs/Design.md](docs/Design.md) |
+| Flutter — Faz 2 kalanı (Patch 5–6) | ⏳ biyometri ayrı mini-faz (Patch 5, ertelendi) · doküman finalizasyonu (Patch 6) |
 | Admin paneli (Next.js) | ⏳ Faz 6 |
 
 **Backend canlı proje:** `authenticator-dev` (Supabase, eu-central-1, PG17). Detay: [PROJECT_INFO.md](supabase/PROJECT_INFO.md).
@@ -82,9 +84,14 @@ Proje kökü Flutter uygulamasıdır (`lib/`, `pubspec.yaml`). Gereken: Flutter 
 ```bash
 flutter pub get
 flutter analyze          # lint — şu an temiz
-flutter test             # 60/60 geçiyor (OTP RFC vektörleri + URI validasyon + VaultCubit + widget smoke)
+flutter test             # 186/186 host (OTP RFC vektörleri + URI validasyon + VaultCubit + crypto blob/attrs/BIP39 + VaultLockCubit/guard/KeyAttributesStore + lifecycle arka-plan-yarışı + corruption/integrity-guard/a11y widget + CountdownColors + recovery-verify/textScaler)
 flutter run              # cihaz/emülatörde çalıştır
 ```
+
+> **libsodium testleri cihaz/simülatörde:** `sodium_libs` platform plugin'i plain
+> `flutter test` VM host'unda yüklenmez → kripto round-trip testleri
+> `integration_test/` altında (34 test: sodium service 8 + KeyManager 8 +
+> encrypted vault/migration 18). Çalıştır: `flutter test integration_test/ -d <device>`.
 
 **Klasör yapısı** (feature-first + katmanlı):
 ```
@@ -95,8 +102,9 @@ lib/
     router/     go_router rotaları (Routes sabitleri)
     theme/      Material 3 açık/koyu tema
   features/
-    vault/      presentation/{bloc,pages,widgets} — VaultCubit, VaultPage, OtpCard
-    scan/       presentation — ScanPage (QR, Faz 1 ilerleyen adım)
+    vault/      data/ — VaultRepository (secure_storage kalıcılık)
+                presentation/{bloc,pages,widgets} — VaultCubit, VaultPage (arama), OtpCard
+    scan/       presentation — ScanPage (mobile_scanner QR tarama)
   main.dart     DI init + MaterialApp.router + VaultCubit provider
 test/
   core/otp/     RFC 4226/6238 test vektörleri + URI parse testleri
@@ -104,7 +112,7 @@ test/
 
 > **OTP çekirdeği detayı:** [docs/OTP_ENGINE.md](docs/OTP_ENGINE.md).
 >
-> ⚠️ **`sodium_libs` paketi DISCONTINUED.** Faz 2 (kripto) başlarken `sodium` paketine geçilecek (API neredeyse aynı; XChaCha20-Poly1305 IETF + Argon2id kararı değişmez).
+> 🔐 **Kripto paket kararı (Faz 2'de uygulandı):** `sodium: ^3.4.6` + `sodium_libs: ^3.4.6+4`. `sodium 4.x` Dart SDK `^3.11.0` ister; proje Dart `3.10.7` (Flutter 3.38.6 stable) → **4.x çözülemez**, bu yüzden 3.x bilinçli ve doğru karardır. `sodium_libs` pub'da "discontinued" etiketli ama pre-built libsodium binary'lerini yükler ve native-assets/experiment flag GEREKTİRMEZ; 3.x hattı çalışır. İleride Flutter Dart 3.11+'a yükselince 4.x native assets'e geçiş ayrı bir küçük migration olur. XChaCha20-Poly1305 IETF + Argon2id algoritma kararı değişmez. Detay: [docs/CRYPTO.md](docs/CRYPTO.md).
 
 ---
 

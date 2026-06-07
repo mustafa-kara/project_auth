@@ -31,7 +31,7 @@ await Supabase.initialize(
 
 ## Uygulanan migration'lar (canlıyla birebir hizalı — bkz. migrations/README.md)
 - `20260606152227_init_authenticator` — tablolar + RLS + hook + grant + trigger + publication + private aggregate
-- `20260606152553_rls_initplan_optimization` — `auth.uid()` → `(select auth.uid())` + audit FK index
+- `20260606152553_rls_initplan_optimization` — `auth.uid()` → `(select auth.uid())` (init-plan optimizasyonu; audit FK index `idx_audit_logs_actor` init migration'ına taşındığı için bu dosyadan kaldırıldı)
 - `20260606162359_least_privilege_revoke` — fazlalık `anon`/`authenticated` table privilege'larını revoke (derinlemesine savunma)
 
 ## Güvenlik taraması (get_advisors) — son: 2026-06-06 (0003 sonrası)
