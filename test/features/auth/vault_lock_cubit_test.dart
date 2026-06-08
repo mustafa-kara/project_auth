@@ -870,6 +870,87 @@ void main() {
       expect(km.issued.single.disposed, isFalse);
     });
   });
+
+  // --- Faz 3 Patch 1: onAuthSignedOut (kimlik kapısı kapanınca volatile temizlik) ---
+  group('onAuthSignedOut', () {
+    test('unlocked → locked + masterKey dispose', () async {
+      await store.write(_fakeAttrs());
+      final km = FakeKeyManager();
+      final cubit = _build(km, store);
+      await cubit.bootstrap();
+      await cubit.unlock('parola123');
+      expect(cubit.state.status, VaultLockStatus.unlocked);
+
+      cubit.onAuthSignedOut(); // immediate lock
+      expect(cubit.state.status, VaultLockStatus.locked);
+      expect(km.issued.single.disposed, isTrue);
+    });
+
+    test('setupPending (commit YOK) → cancelSetup → uninitialized (key+mnemonic temiz)',
+        () async {
+      final km = FakeKeyManager();
+      final cubit = _build(km, store);
+      await cubit.bootstrap();
+      await cubit.beginSetup('parola123');
+      expect(cubit.state.status, VaultLockStatus.setupPending);
+
+      cubit.onAuthSignedOut();
+      expect(cubit.state.status, VaultLockStatus.uninitialized);
+      expect(km.issued.single.disposed, isTrue); // mnemonic+key temizlendi
+    });
+
+    test('setupPending + commit-in-flight → cancelSetup ÇAĞRILMAZ + abort; commit '
+        'bitince unlocked EMİT EDİLMEZ (reviewer [P3] :400 kuralı)', () async {
+      final km = FakeKeyManager();
+      final gate = Completer<void>();
+      storage.writeGate = gate.future; // commitSetup attrs.write'da asılı kalır
+      final cubit = _build(km, store);
+      await cubit.bootstrap();
+      await cubit.beginSetup('parola123');
+
+      final commit = cubit.commitSetup(); // _commitInFlight = true, write askıda
+      // signOut commit sürerken: cancelSetup ÇAĞRILMAMALI (no-op gibi), abort set.
+      cubit.onAuthSignedOut();
+      expect(cubit.state.status, VaultLockStatus.setupPending,
+          reason: 'commit sürerken cancelSetup çağrılmaz');
+
+      gate.complete(); // write tamamlanır → commit devam eder
+      await commit;
+      // abort nedeniyle unlocked EMİT EDİLMEZ; attrs yazıldıysa locked.
+      expect(cubit.state.status, isNot(VaultLockStatus.unlocked));
+      expect(cubit.state.status, VaultLockStatus.locked);
+    });
+
+    test('locking → senkron dispose + locked', () async {
+      await store.write(_fakeAttrs());
+      final km = FakeKeyManager();
+      final cubit = _build(km, store);
+      await cubit.bootstrap();
+      await cubit.unlock('parola123');
+      cubit.lock(); // interaktif → locking (post-frame dispose kuyrukta)
+      expect(cubit.state.status, VaultLockStatus.locking);
+
+      cubit.onAuthSignedOut(); // locking'de senkron dispose + locked
+      expect(cubit.state.status, VaultLockStatus.locked);
+      expect(km.issued.single.disposed, isTrue);
+    });
+
+    test('locked + devam eden unlock → abort (unlocked\'a geçmez)', () async {
+      await store.write(_fakeAttrs());
+      final km = FakeKeyManager();
+      final migrateGate = Completer<void>();
+      final cubit = _build(km, store, migrateGate: migrateGate.future);
+      await cubit.bootstrap();
+
+      final unlocking = cubit.unlock('parola123'); // migration'da asılı
+      cubit.onAuthSignedOut(); // _abortToBackground = true
+      migrateGate.complete();
+      await unlocking;
+      expect(cubit.state.status, isNot(VaultLockStatus.unlocked),
+          reason: 'abort sonrası unlocked emit edilmemeli');
+      expect(km.issued.single.disposed, isTrue);
+    });
+  });
 }
 
 /// `addPostFrameCallback` ile kuyruğa alınan callback'leri fire ettirir

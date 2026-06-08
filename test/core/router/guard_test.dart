@@ -3,6 +3,7 @@ library;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:project_auth/core/router/app_router.dart';
+import 'package:project_auth/features/account/presentation/bloc/session_state.dart';
 import 'package:project_auth/features/auth/presentation/bloc/vault_lock_state.dart';
 
 void main() {
@@ -67,6 +68,66 @@ void main() {
       expect(guardRedirect(s, Routes.vault), Routes.authIntegrity);
       expect(guardRedirect(s, Routes.unlock), Routes.authIntegrity);
       expect(guardRedirect(s, Routes.authIntegrity), isNull);
+    });
+  });
+
+  group('sessionGuard (Faz 3 Patch 1 — kimlik kapısı)', () {
+    const lockedVault = VaultLockState.locked();
+    const unlockedVault = VaultLockState.unlocked();
+
+    SessionState session(SessionStatus status, {bool linkRequired = false}) =>
+        SessionState(status: status, linkRequired: linkRequired);
+
+    test('unknown → /splash (vault shell\'e GİRMEZ, reviewer [P1])', () {
+      final s = session(SessionStatus.unknown);
+      expect(sessionGuard(s, lockedVault, Routes.vault), Routes.splash);
+      expect(sessionGuard(s, lockedVault, Routes.authLogin), Routes.splash);
+      expect(sessionGuard(s, lockedVault, Routes.splash), isNull);
+    });
+
+    test('signedOut → /auth/login (her korunan rota)', () {
+      final s = session(SessionStatus.signedOut);
+      expect(sessionGuard(s, lockedVault, Routes.vault), Routes.authLogin);
+      expect(sessionGuard(s, lockedVault, Routes.unlock), Routes.authLogin);
+      expect(sessionGuard(s, lockedVault, Routes.authLogin), isNull);
+      expect(sessionGuard(s, lockedVault, Routes.authRegister), isNull);
+      expect(sessionGuard(s, lockedVault, Routes.authConfirm), isNull);
+    });
+
+    test('signedOut + /auth/link → /auth/login (link public DEĞİL, reviewer [P2])',
+        () {
+      final s = session(SessionStatus.signedOut);
+      expect(sessionGuard(s, lockedVault, Routes.authLink), Routes.authLogin);
+    });
+
+    test('emailConfirmPending → /auth/confirm (trap; login geri atılır)', () {
+      final s = session(SessionStatus.emailConfirmPending);
+      expect(sessionGuard(s, lockedVault, Routes.authConfirm), isNull);
+      expect(sessionGuard(s, lockedVault, Routes.authLogin), Routes.authConfirm);
+      expect(sessionGuard(s, lockedVault, Routes.vault), Routes.authConfirm);
+    });
+
+    test('signedIn + linkRequired → /auth/link (vault guard\'dan ÖNCE, bypass yok)',
+        () {
+      final s = session(SessionStatus.signedIn, linkRequired: true);
+      expect(sessionGuard(s, unlockedVault, Routes.vault), Routes.authLink);
+      expect(sessionGuard(s, unlockedVault, Routes.authLink), isNull);
+      // /auth/link de isAuthRoute ama bypass edilmez (reviewer [P1]).
+      expect(sessionGuard(s, lockedVault, Routes.authLogin), Routes.authLink);
+    });
+
+    test('signedIn + locked → /unlock (vault guard çalışır)', () {
+      final s = session(SessionStatus.signedIn);
+      expect(sessionGuard(s, lockedVault, Routes.vault), Routes.unlock);
+      expect(sessionGuard(s, lockedVault, Routes.unlock), isNull);
+    });
+
+    test('signedIn + unlocked + /auth|/splash → vault (lock\'un istediği başlangıç)',
+        () {
+      final s = session(SessionStatus.signedIn);
+      expect(sessionGuard(s, unlockedVault, Routes.vault), isNull);
+      expect(sessionGuard(s, unlockedVault, Routes.authLogin), Routes.vault);
+      expect(sessionGuard(s, unlockedVault, Routes.splash), Routes.vault);
     });
   });
 }

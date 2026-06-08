@@ -58,8 +58,8 @@ class _TokenRecord {
 }
 
 class EncryptedVaultRepository implements VaultRepository {
-  /// Token-bazlı şifreli kayıt dizisinin tutulduğu depo anahtarı.
-  static const _vaultKey = 'vault_encrypted_v1';
+  /// Token-bazlı şifreli kayıt dizisinin tutulduğu depo anahtarı (taban).
+  static const vaultKey = 'vault_encrypted_v1';
 
   /// AAD prefix'i — record tipi + şema versiyonu. Tam AAD: `token|1|<id>`.
   static const _aadPrefix = 'token|1|';
@@ -67,6 +67,11 @@ class EncryptedVaultRepository implements VaultRepository {
   final KeyHandle _masterKey;
   final CryptoService _crypto;
   final FlutterSecureStorage _storage;
+
+  /// Faz 3 Patch 1 — multi-vault namespace prefix'i (boş = Faz 2 byte-identical).
+  /// **AAD DEĞİŞMEZ** (`token|1|<id>`) — namespace yalnız storage ANAHTARINI etkiler,
+  /// ciphertext bağlamını değil (id zaten globalce benzersiz UUID).
+  final String _vaultStorageKey;
 
   /// Bir önceki `load()`'tan kalan durum (unchanged-blob + bozuk-kayıt koruması):
   ///   - `_lastById`: id → (plaintext'i bilinen) sağlam kayıt + blob'u + meta.
@@ -78,9 +83,11 @@ class EncryptedVaultRepository implements VaultRepository {
     required KeyHandle masterKey,
     required CryptoService crypto,
     FlutterSecureStorage? storage,
+    String keyPrefix = '',
   })  : _masterKey = masterKey,
         _crypto = crypto,
-        _storage = storage ?? const FlutterSecureStorage();
+        _storage = storage ?? const FlutterSecureStorage(),
+        _vaultStorageKey = '$keyPrefix$vaultKey';
 
   int _nowMs() => DateTime.now().millisecondsSinceEpoch;
 
@@ -91,7 +98,7 @@ class EncryptedVaultRepository implements VaultRepository {
     _lastById.clear();
     _corruptedRaw.clear();
 
-    final raw = await _storage.read(key: _vaultKey);
+    final raw = await _storage.read(key: _vaultStorageKey);
     if (raw == null || raw.isEmpty) return VaultLoadResult.empty;
 
     // Top-level bozulma şifreli vault'ta CİDDİDİR → boş listeye düşmek token
@@ -198,7 +205,7 @@ class EncryptedVaultRepository implements VaultRepository {
     final presentIds = {for (final a in accounts) a.id};
     _lastById.removeWhere((id, _) => !presentIds.contains(id));
 
-    await _storage.write(key: _vaultKey, value: jsonEncode(records));
+    await _storage.write(key: _vaultStorageKey, value: jsonEncode(records));
   }
 
   @override

@@ -33,6 +33,17 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- Faz 3 Patch 1: Supabase e-posta onayı PKCE deep-link callback'i.
+                 VIEW + DEFAULT + BROWSABLE ZORUNLU — yoksa tarayıcı linki uygulamaya
+                 açamaz. scheme/host SupabaseConfig.authCallbackUrl ile aynı. -->
+            <intent-filter android:autoVerify="false">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data
+                    android:scheme="dev.mustafakara.projectauth"
+                    android:host="login-callback"/>
+            </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->

@@ -6,7 +6,14 @@ library;
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:get_it/get_it.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../features/account/data/active_account_store.dart';
+import '../../features/account/data/legacy_link_store.dart';
+import '../../features/account/data/pending_confirmation_store.dart';
+import '../../features/account/data/supabase_auth_repository.dart';
+import '../../features/account/domain/account_vault_manager.dart';
+import '../../features/account/domain/auth_repository.dart';
 import '../../features/auth/data/biometric_service_impl.dart';
 import '../../features/auth/data/key_attributes_store.dart';
 import '../../features/auth/domain/biometric_service.dart';
@@ -52,5 +59,23 @@ Future<void> configureDependencies() async {
   // bmk anahtarı OS-keystore biyometrik erişim kontrolü ister.
   locator.registerLazySingleton<BiometricService>(() => BiometricServiceImpl());
 
-  // Faz 3: SupabaseClient wrapper + AuthRepository.
+  // Faz 3 Patch 1: Supabase istemcisi + kimlik repository'si. `Supabase.initialize`
+  // main.dart'ta DI'dan ÖNCE çağrılmış olmalı (singleton hazır).
+  locator.registerLazySingleton<SupabaseClient>(() => Supabase.instance.client);
+  locator.registerLazySingleton<AuthRepository>(
+      () => SupabaseAuthRepository(locator<SupabaseClient>()));
+
+  // Multi-vault (kullanıcı kararı 7): aktif uid + per-uid legacy karar + onay store.
+  locator.registerLazySingleton<ActiveAccountStore>(
+      () => ActiveAccountStore(storage: locator<FlutterSecureStorage>()));
+  locator.registerLazySingleton<LegacyLinkStore>(
+      () => LegacyLinkStore(storage: locator<FlutterSecureStorage>()));
+  locator.registerLazySingleton<PendingConfirmationStore>(
+      () => PendingConfirmationStore(storage: locator<FlutterSecureStorage>()));
+  locator.registerLazySingleton<AccountVaultManager>(() => AccountVaultManager(
+        storage: locator<FlutterSecureStorage>(),
+        activeStore: locator<ActiveAccountStore>(),
+        legacyStore: locator<LegacyLinkStore>(),
+        biometric: locator<BiometricService>(),
+      ));
 }

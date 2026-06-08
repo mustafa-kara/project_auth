@@ -2,6 +2,55 @@
 
 Proje ilerleme günlüğü. En yeni en üstte.
 
+## 2026-06-08 (Faz 3 Patch 1 — Supabase kimlik / auth)
+
+Uygulamaya **kimlik katmanı** eklendi (Supabase email/parola): kayıt/giriş/çıkış + e-posta onayı.
+Vault E2E akışı (master parola/unlock/biyometri) **iç mantığı korunarak** en dışına bir kimlik
+kapısı eklendi. **Sync YOK** (Patch 2–3). On iki tur dış review (Codex), her API `.pub-cache`/
+Context7 kaynağından teyit edilerek tasarlandı. host **220/220 → 257/257**, APK debug build OK.
+
+- **İki bağımsız "kapı" (sıralı):** Supabase oturumu (kimlik) → vault kilidi (E2E). Birleşik guard
+  kimlik kapısını EN DIŞTA tutar; vault guard (masterKey gerektiren shell) yalnız `signedIn &&
+  !linkRequired` dalında. `unknown` boyunca `/splash` (vault shell `signedIn` öncesi render edilmez
+  → `masterKey` crash'i yok). Login parolası ≠ master parola; birbirini **türetmez**.
+- **`SessionCubit`** + `SupabaseAuthRepository`: `signUp`/`signInWithPassword`/`signOut`;
+  `onAuthStateChange` **`onError` ZORUNLU** (gotrue ağ hatasını stream error olarak verir → yoksa
+  app crash). `AuthException.code` → domain hatalarına map (`email_not_confirmed`/`invalid_credentials`/
+  `email_exists`/`weak_password`, kaynaktan teyitli).
+- **E-posta onayı ZORUNLU** (PKCE + deep-link `dev.mustafakara.projectauth://login-callback`):
+  Android intent-filter (VIEW+DEFAULT+BROWSABLE) + iOS `CFBundleURLTypes`. `emailConfirmPending`
+  PERSIST edilir (`auth_pending_email_v1`) — yeniden açılışta onay ekranına döner; "Farklı e-posta
+  kullan" pending'i temizleyip çıkışı sağlar (guard trap önlenir).
+- **signOut güvenliği:** lokal vault volatile temizliği (`VaultLockCubit.onAuthSignedOut`) network
+  signOut'tan ÖNCE — setup/unlock/biometric dahil HER aşamada masterKey/mnemonic silinir
+  (`lock()` `setupPending`'de no-op olduğu için ayrı genel metot; commit-in-flight kuralı `:400`'le
+  aynı). **`SignOutScope.global`** (kullanıcı kararı — sunucuda tüm cihaz refresh-token'ları revoke);
+  ağ hatasında BİLE `signedOut`'a ulaşılır (gotrue local token'ı önce siler — #683; offline garantisi).
+- **Onaysız e-posta ile GİRİŞ (review-sonrası [P2] fix):** `signIn` `AuthEmailNotConfirmed`'da pending
+  email'i PERSIST eder + `emailConfirmPending` emit → `/auth/confirm` ekranı email'i dolu görür, resend
+  çalışır (önceki halde email=null → resend no-op + kullanıcı sıkışırdı).
+- **Per-uid view mode (review-sonrası [P3] fix):** `VaultPage` artık global singleton yerine ShellRoute'un
+  sağladığı (aktif uid namespace'li) `ViewModeStore`'u `context.read` ile okur (standalone/test fallback
+  global). A kullanıcısının kart/liste tercihi B'ye yansımaz; namespaced reset view-mode'u da temizler.
+- **Root oturum dinleyicisi sahipliği (review-sonrası [P3] fix):** `main`'deki `SessionState` aboneliği
+  artık `StreamSubscription` field'ında tutulur + `dispose`'ta cancel + `onError` ile async hata yolu
+  korunur (zone'a sızma yok). Önceki halde anonim listener sahiplenilmiyordu (sızıntı + crash riski).
+- **uid namespace izolasyon önceliği (review-sonrası [P3] fix):** uid değişiminde `main._onSession`
+  ÖNCE bellekteki vault stack'i doğru uid namespace'ine geçirir, SONRA aktif uid'i persist eder
+  (best-effort). `setActive` (secure storage) fail etse bile kullanıcı doğru namespace'te kalır —
+  legacy `''` stack'inde sessizce KALMAZ (yanlış vault sızıntısı önlenir); persist sonraki açılışta yeniden denenir.
+- **Multi-vault per uid:** her Supabase uid için AYRI lokal vault namespace (`'<uid>/'` prefix;
+  store'lar `keyPrefix` alır, boş = Faz 2 byte-identical). `vault_active_uid_v1` (aktif uid) +
+  `legacy_link_decided/<uid>` (per-uid karar). İlk login'de uid-siz Faz 2 vault varsa **açık
+  account-linking onayı** (`/auth/link`): "ilişkilendir" (taşı + `bmk` TEMİZLE + `biometric.disable`
+  → yeniden enroll) / "yeni boş vault". Her iki seçim de kararı işaretler → `linkRequired` düşer
+  (guard döngüsü yok). `linkRequired` SENKRON `SessionState` alanı (guard async storage okumaz).
+- **Config:** `String.fromEnvironment` + dev fallback (PROJECT_INFO ile hizalı); `publishableKey`
+  (anon, RLS arkasında). `sb_secret_` asla client'ta. Sunucu şeması değişmedi (bytea; hex codec Patch 2+).
+- Yeni testler: `session_cubit_test` (+linkRequired hydrate köprüsü, signOut-throw, onError, cancel),
+  `sessionGuard` grubu, `onAuthSignedOut` grubu (commit-in-flight dahil), `multi_vault_namespace_test`,
+  `auth_pages_test`. **257/257 host, analyze temiz, APK debug build OK.**
+
 ## 2026-06-08 (Faz 2 Patch 5 — biyometrik vault unlock)
 
 Biyometrik unlock kısayolu eklendi — **E2E parola modelini zayıflatmadan**. masterKey

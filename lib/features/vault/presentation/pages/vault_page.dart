@@ -30,15 +30,27 @@ class _VaultPageState extends State<VaultPage> {
   /// (Bozuk kayıtlar korunur; banner yalnız görsel olarak kapanır.)
   bool _corruptionDismissed = false;
 
-  final ViewModeStore _viewModeStore = locator<ViewModeStore>();
+  /// Aktif uid namespace'li `ViewModeStore` (reviewer [P3] — per-uid kart/liste).
+  /// ShellRoute `RepositoryProvider` ile sağlar; standalone (test) durumda global
+  /// singleton'a düşer.
+  late final ViewModeStore _viewModeStore;
   VaultViewMode _viewMode = VaultViewMode.card;
 
   @override
   void initState() {
     super.initState();
+    _viewModeStore = _resolveViewModeStore();
     _viewModeStore.read().then((m) {
       if (mounted) setState(() => _viewMode = m);
     });
+  }
+
+  ViewModeStore _resolveViewModeStore() {
+    try {
+      return context.read<ViewModeStore>(); // ShellRoute (per-uid)
+    } catch (_) {
+      return locator<ViewModeStore>(); // fallback (standalone/test)
+    }
   }
 
   @override

@@ -45,6 +45,21 @@
 	<string>QR kodlarını tarayarak doğrulama (2FA) kodu eklemek için kameraya erişilir.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Vault'u Face ID ile hızlıca açmak için kullanılır. Master parolan her zaman çalışmaya devam eder.</string>
+	<!-- Faz 3 Patch 1: Supabase e-posta onayı PKCE deep-link custom scheme.
+	     SupabaseConfig.authCallbackUrl (dev.mustafakara.projectauth://login-callback). -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>dev.mustafakara.projectauth</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>dev.mustafakara.projectauth</string>
+			</array>
+		</dict>
+	</array>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>

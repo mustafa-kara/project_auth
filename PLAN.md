@@ -42,12 +42,15 @@
 - [x] `admin_users` + `custom_access_token_hook` + `is_admin()` + tüm hook izinleri **+ `supabase_auth_admin` SELECT policy**. Hook Dashboard'dan etkinleştirildi. ✅ (uçtan uca test: admin claim true/false doğru)
 - [x] `updated_at` trigger (`touch_timestamps`/`touch_updated_at`) + `alter publication supabase_realtime add table tokens`. ✅
 - [x] **cross-user RLS testi** + with check + audit_logs admin-only + FK cascade. ✅ (8/8 test geçti)
-- [ ] `AuthRepository` (email/parola) + kayıt/giriş akışı. *(Flutter)*
-- [ ] `key_attributes` upload/download; cihazlar arası master key kurtarma. *(Flutter)*
-- [ ] Şifreli token push/pull; **payload opaklık testi** (client). *(Flutter)*
-- [ ] **Lokal→bulut backfill** (idempotent upsert, bkz. ARCHITECTURE §7.5). *(Flutter)*
-- [ ] Supabase Realtime ile gerçek zamanlı çoklu cihaz senkron + arrival-order LWW + soft delete. *(Flutter)*
-- [ ] Uygulama kilidi (biyometrik/PIN) feature'ı. *(Flutter)*
+- [x] **Patch 1 — `AuthRepository` (email/parola) + kayıt/giriş/çıkış akışı.** ✅ Supabase init
+  (PKCE), `SessionCubit` (signedIn/out/emailConfirmPending), iki-kapı guard (kimlik + vault),
+  e-posta onay deep-link, signOut→vault kilit + ağ-hatası-dirençli `signedOut`, multi-vault per uid
+  (namespace + account-linking + legacy migration `bmk` temizleme). **host 220→257.** *(Flutter)*
+- [ ] **Patch 2** — `key_attributes` upload/download; cihazlar arası master key kurtarma + bytea hex codec. *(Flutter)*
+- [ ] **Patch 3** — Şifreli token push/pull; **payload opaklık testi**; arrival-order LWW + soft delete;
+  Realtime tetikleyici → REST pull. **Lokal→bulut backfill** (idempotent upsert, ARCHITECTURE §7.5). *(Flutter)*
+- [ ] **Patch 4** — `devices` kayıt (stable device_id + last_seen) + `catalog_services`/`feature_flags`/`announcements` okuma. *(Flutter)*
+- [x] Uygulama kilidi (biyometrik) feature'ı — **Faz 2 Patch 5'te tamamlandı.** ✅
 
 ## Faz 4 — Sosyal giriş + push *(developer hesapları hazır olunca)*
 - [ ] Google Sign-In + Apple Sign-In (`AuthRepository`'ye eklenir, çekirdek değişmez).

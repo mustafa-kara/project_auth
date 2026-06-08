@@ -59,3 +59,5 @@ admin_users · key_attributes · tokens · devices · announcements · catalog_s
 - [ ] `private` şemayı "Exposed schemas"a EKLEME (varsayılan; eklenmemeli — sadece kontrol et)
 - [ ] Backend DB rolü + `private` USAGE + fonksiyon EXECUTE grant (ARCHITECTURE §6, migration Desen A/B) — Faz 6 öncesi
 - [ ] İlk **gerçek** admin: `insert into public.admin_users (user_id) values ('<auth-user-uuid>');` (güvenli kanal) — gerçek kullanıcı oluşunca
+- [ ] **Faz 3 Patch 1 — E-posta onayı:** Dashboard > Auth > Providers > Email → "Confirm email" AÇIK (kayıt sonrası onay maili).
+- [ ] **Faz 3 Patch 1 — Redirect URL:** Dashboard > Auth > URL Configuration > Redirect URLs → `dev.mustafakara.projectauth://login-callback` ekle (PKCE deep-link callback; native intent-filter/URL scheme ile eşleşir).

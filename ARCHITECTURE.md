@@ -305,9 +305,35 @@ create policy "admin reads audit_logs" on public.audit_logs
 
 ## 7. Kimlik Doğrulama Akışı
 
-- **Login parolası ≠ master parola.** Supabase Auth oturumu (email/parola, sonra OAuth) kimlik içindir; master parola E2E anahtarı içindir. İkisi ayrı tutulur (güvenlik + parola sıfırlama bağımsızlığı).
+- **Login parolası ≠ master parola.** Supabase Auth oturumu (email/parola, sonra OAuth) kimlik içindir; master parola E2E anahtarı içindir. İkisi ayrı tutulur (güvenlik + parola sıfırlama bağımsızlığı). **Birbirini TÜRETMEZ** (tam ayrık akış).
 - `AuthRepository` interface ile soyutlanır → email/parola önce, Google/Apple sonra eklenir (kod değişmeden).
-- Uygulama açılış akışı: Supabase session var mı? → master key cihazda unlock edilebilir mi (biyometrik)? → değilse master parola sor → vault'a gir.
+
+### İki bağımsız "kapı" (Faz 3 Patch 1 — uygulandı)
+
+İki ortogonal ama **sıralı** durum: önce Supabase oturumu (kimlik), sonra vault kilidi (E2E).
+
+```
+SessionStatus (kimlik)              VaultLockStatus (E2E)
+  unknown → /splash                   uninitialized → /setup
+  signedOut → /auth/login             locked        → /unlock
+  emailConfirmPending → /auth/confirm  unlocked      → /  (vault)
+  signedIn → vault guard'ı çalışır
+```
+
+- **Birleşik guard (`sessionGuard`)** kimlik kapısını EN DIŞTA tutar; **vault guard (masterKey
+  gerektiren shell) yalnız `signedIn && !linkRequired` dalında** çalışır. `unknown` boyunca
+  `/splash` gösterilir → vault shell `signedIn` öncesi render edilmez (`masterKey` null crash'i yok).
+- **E-posta onayı ZORUNLU** (PKCE + deep-link `dev.mustafakara.projectauth://login-callback`;
+  Android intent-filter VIEW+DEFAULT+BROWSABLE, iOS `CFBundleURLTypes`). `emailConfirmPending`
+  PERSIST edilir (yeniden açılışta onay ekranı; "Farklı e-posta kullan" çıkışı).
+- **`onAuthStateChange` `onError` ZORUNLU** (gotrue ağ hatasını stream error olarak verir → yoksa app crash).
+- **signOut** lokal vault'u (masterKey/mnemonic) network signOut'tan ÖNCE temizler (her aşamada);
+  ağ hatasında bile `signedOut`'a ulaşılır (gotrue local token'ı önce siler).
+- **Multi-vault per uid:** her Supabase uid için AYRI lokal vault namespace (`'<uid>/'`). İlk
+  login'de uid-siz Faz 2 vault varsa açık **account-linking** onayı (`/auth/link`): ilişkilendir
+  (taşı + `bmk` temizle/yeniden enroll) / yeni boş vault. Per-uid karar marker → guard döngüsü yok.
+- Açılış akışı: Supabase session var mı? → (yeni cihaz: key_attributes restore — Patch 2) → master
+  key cihazda unlock edilebilir mi (biyometrik)? → değilse master parola sor → vault'a gir.
 
 ---
 

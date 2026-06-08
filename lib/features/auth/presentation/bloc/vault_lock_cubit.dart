@@ -56,6 +56,18 @@ class VaultStorageKeys {
     viewMode,
     biometricKey,
   ];
+
+  /// Faz 3 Patch 1 — bir uid namespace'inin SİLİNEBİLİR anahtarları (reset). Prefix
+  /// uygulanan vault anahtarları (`plaintextVault` GLOBAL/uid-siz olduğu için DAHİL
+  /// EDİLMEZ — başka namespace'leri etkilemesin). `biometricKey` ayrı OS-keystore'da
+  /// → asıl temizlik `biometric.disable()` (burada savunma katmanı).
+  static List<String> forUser(String prefix) => [
+        '$prefix$encryptedVault',
+        '$prefix$keyAttributes',
+        '$prefix$migrationMarker',
+        '$prefix$viewMode',
+        biometricKey,
+      ];
 }
 
 /// Migration'ı `VaultCubit.load()`'tan ÖNCE çalıştırmak için soyut kanca. unlock /
@@ -401,6 +413,35 @@ class VaultLockCubit extends Cubit<VaultLockState> {
       case VaultLockStatus.locking:
         // İnteraktif lock()'un post-frame dispose'una bel bağlama — paused'ta frame
         // gelmeyebilir (review P1/P2). Hemen senkron dispose + locked.
+        _disposeKey();
+        emit(_locked());
+      case VaultLockStatus.uninitialized:
+      case VaultLockStatus.locked:
+      case VaultLockStatus.keyAttributesCorrupted:
+        // Devam eden unlock/recover/beginSetup/biometricUnlock async işlemi varsa
+        // unlocked/setupPending'e geçmesini engelle.
+        _abortToBackground = true;
+    }
+  }
+
+  /// Faz 3 Patch 1: Supabase kimlik oturumu kapandı (signOut). Kimlik kapısı
+  /// kapanınca E2E kapısı da kapanmalı → hangi vault aşamasında olursa olsun TÜM
+  /// volatile state (masterKey/mnemonic) güvenle temizlenir.
+  ///
+  /// **`lock()` TEK BAŞINA YETMEZ** (`lock` yalnız `unlocked`'ta çalışır; `setupPending`'de
+  /// no-op) → bu metot `onAppBackgrounded`'ın durum-bazlı temizlik kalıbını BİREBİR
+  /// yansıtır (commit-in-flight kuralı dahil — reviewer [P1]).
+  void onAuthSignedOut() {
+    switch (state.status) {
+      case VaultLockStatus.unlocked:
+        lock(immediate: true); // senkron dispose + locked
+      case VaultLockStatus.setupPending:
+        _abortToBackground = true;
+        // Devam eden commit varsa state'i commit sonlandırır (attrs yazıldıysa
+        // `locked`); yoksa pending'i temizle → uninitialized (reviewer [P1] :400 kuralı).
+        if (!_commitInFlight) cancelSetup();
+      case VaultLockStatus.locking:
+        // post-frame dispose'a bel bağlama → hemen senkron dispose + locked.
         _disposeKey();
         emit(_locked());
       case VaultLockStatus.uninitialized:

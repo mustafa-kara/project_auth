@@ -21,20 +21,29 @@ import 'encrypted_vault_repository.dart';
 
 class VaultMigration {
   /// Faz 1 plaintext deposu (SecureStorageVaultRepository ile aynı anahtar).
+  /// GLOBAL (uid-siz) — Faz 1 multi-vault'tan önceydi.
   static const _plaintextKey = 'vault_accounts_v1';
 
-  /// Geçişin tamamlandığını işaretleyen ayrı marker.
-  static const _markerKey = 'vault_migration_v1';
+  /// Geçişin tamamlandığını işaretleyen ayrı marker (taban).
+  static const markerKey = 'vault_migration_v1';
   static const _committed = 'committed';
 
   final CryptoService _crypto;
   final FlutterSecureStorage _storage;
 
+  /// Faz 3 Patch 1 — hedef şifreli vault + marker namespace prefix'i (boş = Faz 2
+  /// byte-identical). Plaintext kaynak GLOBAL kalır (taşınınca silinir).
+  final String _keyPrefix;
+
   VaultMigration({
     required CryptoService crypto,
     FlutterSecureStorage? storage,
+    String keyPrefix = '',
   })  : _crypto = crypto,
-        _storage = storage ?? const FlutterSecureStorage();
+        _storage = storage ?? const FlutterSecureStorage(),
+        _keyPrefix = keyPrefix;
+
+  String get _markerKey => '$_keyPrefix$markerKey';
 
   /// Gerekirse Faz 1 plaintext token'ları [masterKey] ile şifreli vault'a taşır.
   /// `VaultCubit.load()`'tan ÖNCE çağrılmalı (yoksa eski plaintext dururken
@@ -56,6 +65,7 @@ class VaultMigration {
       masterKey: masterKey,
       crypto: _crypto,
       storage: _storage,
+      keyPrefix: _keyPrefix,
     );
 
     // GERÇEK upsert (review P2): save() replace semantiğinde olduğu için önce

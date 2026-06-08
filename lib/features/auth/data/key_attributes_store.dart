@@ -18,19 +18,26 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../../../core/crypto/key_attributes.dart';
 
 class KeyAttributesStore {
-  /// Anahtar metadata'sının tutulduğu depo anahtarı.
+  /// Anahtar metadata'sının tutulduğu depo anahtarı (taban).
   static const storageKey = 'vault_key_attributes_v1';
 
   final FlutterSecureStorage _storage;
 
-  KeyAttributesStore({FlutterSecureStorage? storage})
-      : _storage = storage ?? const FlutterSecureStorage();
+  /// Faz 3 Patch 1 — multi-vault namespace prefix'i (`'<uid>/'`). Boş ise Faz 2
+  /// davranışıyla byte-identical (eski uid-siz anahtar).
+  final String _keyPrefix;
+
+  KeyAttributesStore({FlutterSecureStorage? storage, String keyPrefix = ''})
+      : _storage = storage ?? const FlutterSecureStorage(),
+        _keyPrefix = keyPrefix;
+
+  String get _key => '$_keyPrefix$storageKey';
 
   /// Saklı attrs'ı okur. Yoksa null. **Bozuk/parse edilemez içerik → rethrow
   /// `FormatException`** (sessiz null DEĞİL — bkz. dosya başı). `jsonDecode`'un
   /// `!is Map` durumu da `FormatException`'a normalize edilir.
   Future<KeyAttributes?> read() async {
-    final raw = await _storage.read(key: storageKey);
+    final raw = await _storage.read(key: _key);
     if (raw == null || raw.isEmpty) return null;
     final Object? decoded;
     try {
@@ -49,7 +56,7 @@ class KeyAttributesStore {
   }
 
   Future<void> write(KeyAttributes attrs) =>
-      _storage.write(key: storageKey, value: jsonEncode(attrs.toJson()));
+      _storage.write(key: _key, value: jsonEncode(attrs.toJson()));
 
-  Future<void> clear() => _storage.delete(key: storageKey);
+  Future<void> clear() => _storage.delete(key: _key);
 }

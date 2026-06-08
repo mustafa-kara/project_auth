@@ -26,7 +26,7 @@ E2E (uçtan uca) şifreli, çoklu cihaz senkronize **TOTP/HOTP authenticator** �
 
 ---
 
-## Mevcut durum (2026-06-06)
+## Mevcut durum (2026-06-08)
 
 | Aşama | Durum |
 |---|---|
@@ -38,6 +38,7 @@ E2E (uçtan uca) şifreli, çoklu cihaz senkronize **TOTP/HOTP authenticator** �
 | Flutter — Faz 2 E2E kripto (Patch 1–3) | ✅ `CryptoService`/SodiumSumo (XChaCha20-Poly1305 IETF + Argon2id), `KeyManager` (setup/unlock/recovery/changePassword), kendi BIP39 (MIT, resmi vektörler), `EncryptedVaultRepository` (token-bazlı, unchanged-blob + bozuk-kayıt koruması, integrity), Faz 1→2 migration (commit-marker, upsert) · **host 122/122 + integration 34/34** (sim) |
 | Flutter — Faz 2 UI/oturum (Patch 4) | ✅ Setup/Unlock/Recovery UI + route guard (lock state'ine göre) + lifecycle lock (paused/inactive) + corruption banner/integrity ekranı + `KeyAttributesStore`/`resetVault` + DI/main rewiring + **tam UI/UX redesign** (Geist/GeistMono gömülü, simple-icons CC0, CountdownRing, IssuerAvatar, kart/liste toggle, tap-to-copy, a11y) · **host 186/186** · bkz. [docs/Design.md](docs/Design.md) |
 | Flutter — Faz 2 biyometri (Patch 5) | ✅ Biyometrik unlock kısayolu: 3. wrap (`biometricEncryptedMasterKey`) + OS-keystore erişim kontrolü (iOS Secure Enclave + `biometryCurrentSet`, Android `strongBiometricOnly`+`enforceBiometrics`), gerçek geçit = `storage.read` (çift prompt yok; `local_auth` yalnız availability), Settings enable/disable + UnlockPage butonu, `device_info_plus` API<28 gate, lifecycle inactive-vs-paused ayrımı, parola+recovery her zaman çalışır · **host 220/220** · bkz. [docs/CRYPTO.md §11](docs/CRYPTO.md) |
+| Flutter — Faz 3 auth (Patch 1) | ✅ Supabase email/parola kimlik (kayıt/giriş/çıkış + e-posta onayı, PKCE deep-link). İki-kapı guard (kimlik EN DIŞTA → vault kilidi), `unknown→/splash` (masterKey crash'i yok), `onAuthStateChange` `onError` (crash önleme), signOut → vault kilit + ağ-hatası-dirençli `signedOut`, multi-vault per uid (namespace + account-linking + legacy `bmk` temizleme). Login parolası ≠ master parola. **Sync YOK (Patch 2–3).** · **host 257/257** |
 | Admin paneli (Next.js) | ⏳ Faz 6 |
 
 **Backend canlı proje:** `authenticator-dev` (Supabase, eu-central-1, PG17). Detay: [PROJECT_INFO.md](supabase/PROJECT_INFO.md).
@@ -49,7 +50,7 @@ E2E (uçtan uca) şifreli, çoklu cihaz senkronize **TOTP/HOTP authenticator** �
 0. **Temel kurulum** — Flutter iskeleti, bağımlılıklar, go_router, DI
 1. **OTP motoru** — TOTP/HOTP/Steam (RFC 6238/4226), QR tarama, vault UI (sunucusuz çalışır)
 2. **E2E kripto** — libsodium, master key + recovery key, lokal vault şifreleme
-3. **Supabase auth + senkron** — DB ✅ hazır; Flutter client tarafı sırada
+3. **Supabase auth + senkron** — DB ✅ hazır; Flutter Patch 1 (auth) ✅; sync (Patch 2–3) sırada
 4. **Sosyal giriş + push** — Google/Apple Sign-In, FCM *(developer hesapları gerekli)*
 5. **Import/Export + katalog** — Google Auth / Aegis / 2FAS göçü
 6. **Admin paneli** — Next.js, analitik, duyuru/push, feature flag
@@ -84,7 +85,7 @@ Proje kökü Flutter uygulamasıdır (`lib/`, `pubspec.yaml`). Gereken: Flutter 
 ```bash
 flutter pub get
 flutter analyze          # lint — şu an temiz
-flutter test             # 220/220 host (OTP RFC vektörleri + URI validasyon + VaultCubit + crypto blob/attrs/BIP39 + VaultLockCubit/guard/KeyAttributesStore + lifecycle arka-plan-yarışı + corruption/integrity-guard/a11y widget + CountdownColors + recovery-verify/textScaler + biyometri: bmk attrs/cubit enable-disable-unlock atomikliği/inactive-vs-paused + Settings/UnlockPage widget)
+flutter test             # 257/257 host (OTP RFC vektörleri + URI validasyon + VaultCubit + crypto blob/attrs/BIP39 + VaultLockCubit/guard/KeyAttributesStore + lifecycle arka-plan-yarışı + corruption/integrity-guard/a11y widget + CountdownColors + recovery-verify/textScaler + biyometri + Faz 3 auth: SessionCubit/sessionGuard/onAuthSignedOut/multi-vault-namespace/login-register widget)
 flutter run              # cihaz/emülatörde çalıştır
 ```
 
