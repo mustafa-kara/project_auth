@@ -2,6 +2,61 @@
 
 Proje ilerleme günlüğü. En yeni en üstte.
 
+## 2026-06-09 (Faz 3 Patch 3 — şifreli token sync + key_attributes UPDATE)
+
+Şifreli TOTP token'ları sunucuyla senkronlanır — E2E garantisi KORUNARAK. Bir cihazda eklenen/silinen
+token diğer cihazda görünür; yeni cihaz tüm token'ları geri yükler. Ayrıca **changePassword artık
+sunucudaki `key_attributes` sarmalını GÜNCELLER** (Patch 2'deki guard'lı-insert sınırı KALKTI → yeni
+cihazda fresh-restore yeni parolayı kullanır). Sunucu şeması DEĞİŞMEDİ; yeni kripto rutini YOK. Beş tur
+plan review (Codex), her supabase-flutter API'si Context7'den teyit edilerek. host **293/293 → 347/347**.
+
+- **Sunucuya yalnız opak gider:** `ciphertext`/`nonce` (`OtpAccount` JSON'unun masterKey + XChaCha20-
+  Poly1305 ile şifreli hâli; AAD `token|1|<id>`) + `version` + `deleted`. **Açık TOTP secret, masterKey,
+  KEK, recovery key ASLA.** `updated_at`/`created_at` client'tan gönderilmez (server trigger ezer).
+- **Üç katman + orchestrator (masterKey'siz sync):** `RawTokenStore` (= `EncryptedVaultRepository`'nin
+  yeni yüzü; `exportRaw`/`importRemote`/`markDeleted` — decrypt YOK) + `RemoteTokenRepository`/
+  `SupabaseTokenRepository` (opak transport; `ByteaCodec` + `SyncError`) + `TokenSyncService` (cursor +
+  push/pull/merge + Realtime). `VaultRepository` (`load/save/purgeCorrupted`) çözülmüş kalır → 293 test bozulmaz.
+- **Arrival-order LWW (sunucu `updated_at` hakemi):** client epoch-ms ile ASLA kıyaslanmaz; her kayıt
+  son uzlaşılan sunucu cursor'unu (`sv`) tutar. Lokal-dirty (sv=null) için pull-cursor ile echo-vs-yeni
+  ayrımı. Merge id-bazlı + idempotent (çift pull zararsız).
+- **Soft-delete (tombstone):** silme = `deleted=true` (hard DELETE yok — sunucuda policy/grant yok).
+  `markDeleted` son bilinen blob'la tombstone üretir + atomik yazar; `load()` accounts'ta göstermez,
+  `exportRaw` push için döndürür. Tombstone save'ler arası korunur (token diriltilmez).
+- **Realtime = yalnız TETİKLEYİCİ (bytea #1180 çift-encode):** payload OKUNMAZ; değişiklik sinyali REST
+  `pullSince` tetikler. Sıra: abone-önce → catch-up pull → idempotent merge. Abonelik VaultCubit subtree
+  lifecycle'ına bağlı (unlock'ta start, lock/arka-plan/signOut'ta dispose).
+- **Bozuk-remote-satır KARANTİNASI:** başarılı yanıttaki tek malformed satır atlanır + sayılır (vault
+  DÜŞMEZ, overwrite YOK); cursor yalnız ilk-malformed'dan önceki son-valid'e kadar ilerler (`safeCursorIso`)
+  → gap atlanmaz, sunucu düzelince tekrar denenir. Ağ/RLS hatası (tüm istek) ≠ tek bozuk satır.
+- **changePassword sync (Adım K):** masterKey DEĞİŞMEZ → token re-encrypt YOK; yalnız `key_attributes`
+  satırı UPDATE edilir (LWW). Ağ hatası → `attrs_dirty_v1` marker SET kalır → sonraki unlock'ta dirty-replay
+  yeniden dener (gerçek retry; başarıda CLEAR). İki cihaz çakışırsa son-ulaşan kazanır (veri kaybı yok —
+  kaybeden lokal attrs ile çalışmaya devam eder; recovery sarmalı değişmez).
+- **Push best-effort (sessiz), pull self-healing reconciler.** Çakışma sessiz LWW (kullanıcıya bildirim yok).
+- **UI:** Settings'te "Canlı senkron" toggle (per-uid `live_sync_enabled_v1`, varsayılan kapalı; kapalıyken
+  bile açılışta catch-up sync). VaultPage AppBar'da sync göstergesi (`syncing`/`error`/`malformedCount`; a11y Semantics).
+- **`uid==null` (legacy/uid-siz) → tüm sync INERT; davranış + 293 test BİREBİR.**
+- **KASITLI sınırlar:** token sync yalnız unlocked; kilitli arka-plan raw-pull kapsam dışı. Diğer cihazların
+  push ile zorla re-wrap'i kapsam dışı (gerek yok; provisioned cihaz lokal attrs ile çalışır). Tombstone GC ileride.
+- **Manuel/integration checklist (cihazda):** gerçek Supabase'e bytea token INSERT/SELECT round-trip +
+  Realtime tetik → REST pull + yeni-cihaz token restore + soft-delete cross-device + LWW + changePassword
+  sonrası fresh-restore yeni-parola + bozuk-satır karantina.
+- **İmplementasyon-review düzeltmeleri (3 bulgu, kaynaktan teyit):**
+  - [P1] **Merge yazımı artık VaultCubit sequencer'ı ALTINDA:** `TokenSyncService` `importRemote`'u DOĞRUDAN
+    çağırmıyor; `mergeRemote` callback'i → `VaultCubit.applyRemoteMerge` (import+reload TEK kritik bölümde,
+    `_opChain`) → eşzamanlı kullanıcı add/delete/increment ile yarış yok (veri kaybı kapatıldı).
+  - [P2] **Push best-effort GERÇEKTEN:** `syncOnce`'ta push kendi `try/catch`'inde → push hatası pull'u
+    ENGELLEMEZ (başka cihaz değişiklikleri yine çekilir).
+  - [P2] **Canlı tercih race'i:** `_liveAtStart` setter yerine `liveSyncResolver` (async) → `load()` start'tan
+    ÖNCE `await` eder → persisted `live=true` unlock başlangıcında kesin uygulanır (abone olur).
+  - **2. tur (2 bulgu):** [P1] **cursor-merge-yapılmadan-ilerleme:** in-flight sync'te vault kapanırsa
+    `applyRemoteMerge` `null` döner (merge UYGULANMADI) → `syncOnce` cursor'u İLERLETMEZ (eski: yine yazıyordu →
+    remote satırlar diske yazılmadan cursor ilerler, sonraki pull atlardı = token sync veri kaybı). [P2]
+    **`purgeCorrupted` sequencer'a alındı** (purge disk yazımı sync import / mutasyon ile yarışmasın — tek yazma kuyruğu).
+  - host **340→347** (+7: push-fail-pull, applyRemoteMerge import+reload, sequencer-serialize, persisted-live-true/false,
+    merge-null→cursor-ilerlemez, applyRemoteMerge-closed→null).
+
 ## 2026-06-08 (Faz 3 Patch 2 — key_attributes upload/restore)
 
 Kripto **metadatası** (`key_attributes`: KDF parametreleri + KEK/recovery ile zaten-şifreli master

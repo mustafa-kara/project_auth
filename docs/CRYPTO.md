@@ -232,3 +232,40 @@ Login parolası ≠ master parola; biri diğerini türetmez.
 bir cihazdaki `changePassword` sunucuyu Patch 2'de güncellemez (çok-cihaz tutarlılığı Patch 3 LWW).
 Restore'da sunucu kazanır (yeni cihaz çeker). Ağ hatası ≠ 0-row: ağ koparsa `restoreFailed` (setup'a düşmez,
 çift-vault yok); yalnız gerçek 0-row'da setup.
+
+## 13. Şifreli token senkronu + changePassword UPDATE (Faz 3 Patch 3)
+
+**Amaç:** Şifreli TOTP token'larını çoklu cihaz senkronlamak — E2E ZAYIFLATMADAN.
+
+**Sunucuya giden (hepsi zaten opak):** `ciphertext` + `nonce` — `OtpAccount` JSON'unun masterKey +
+XChaCha20-Poly1305 IETF ile şifreli hâli; **AAD `token|1|<id>`** (her token kendi id'sine bağlı; bir blob
+başka id'de çözülemez). Ayrıca `version` + `deleted` (soft-delete bayrağı). **`updated_at`/`created_at`
+client'tan GÖNDERİLMEZ** — sunucu trigger'ı `now()` ile yazar (LWW saat tutarlılığı).
+
+**Sunucuya ASLA gitmeyen:** açık TOTP secret, `masterKey`, `KEK`, `recovery key`. Sync katmanı
+(`RawTokenStore`/`TokenSyncService`) masterKey GÖRMEZ — opak ciphertext'i açmadan okur/yazar. Token'lar
+masterKey ile şifreli; masterKey `key_attributes`'ta sarmalı → **token sync ZORUNLU OLARAK key_attributes
+restore + unlock SONRASI** çalışır (kripto bağımlılık zinciri; yeni cihaz önce parola sorar, sonra token çeker).
+
+**Format:** lokal `EncryptedBlob` nonce+ciphertext BİRLİKTE; sunucu (`tokens`) AYRI bytea kolonlar.
+`ByteaCodec` (`\x`+hex, tek nokta) ile bölünür/birleştirilir. Restore'da blob aynı AAD bağlamında çözülür
+(aynı masterKey + aynı id → çözülür; `key_attributes` cihazlar arası aynı).
+
+**Arrival-order LWW (çakışma):** sunucu `updated_at` tek geçerli sıralama (client epoch-ms ile ASLA
+kıyaslanmaz). Her lokal kayıt son uzlaşılan sunucu cursor'unu (`sv`) tutar. Sunucuya son ULAŞAN kazanır;
+çakışmada bir cihazın değişikliği sessizce kaybolabilir — Faz 3 için bilinçli basitleştirme (kullanıcıya
+bildirim yok). Merge id-bazlı + idempotent.
+
+**Soft-delete:** silme = `deleted=true` (hard DELETE yok — sunucuda policy/grant yok). Lokal tombstone son
+bilinen blob'u korur (sunucu zaten ona sahip; geçerli `EncryptedBlob` taşımalı), push edilir, diğer cihaz gizler.
+
+**Realtime = yalnız tetikleyici:** supabase-flutter Realtime bytea'yı çift-encode eder (#1180) → payload
+OKUNMAZ; değişiklik sinyali REST `pullSince` tetikler.
+
+**changePassword (key_attributes UPDATE):** `KeyManager.changePassword` **masterKey'i DEĞİŞTİRMEZ** — yalnız
+yeni `kdf_salt/ops/mem` + yeni KEK + yeni `encrypted_master_key` üretir (`recovery_encrypted_master_key`
+dokunulmaz). → **token'lar yeniden şifrelenmez** (sync ile orthogonal). Sunucudaki `key_attributes` satırı
+UPDATE edilir (LWW `updated_at`) → yeni cihazda fresh-restore yeni parola sarmalını çeker. Ağ hatası →
+`attrs_dirty_v1` marker SET kalır → sonraki unlock'ta dirty-replay yeniden dener. Çakışmada son-ulaşan
+sarmal kazanır — **veri kaybı yok** (kaybeden cihaz lokal attrs ile çalışmaya devam eder; recovery sarmalı
+değişmediği için recovery key her iki parolada da çalışır).

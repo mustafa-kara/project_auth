@@ -13,6 +13,7 @@ import 'core/theme/app_theme.dart';
 import 'features/account/domain/account_vault_manager.dart';
 import 'features/account/domain/auth_repository.dart';
 import 'features/account/domain/key_attributes_repository.dart';
+import 'features/account/data/attrs_dirty_store.dart';
 import 'features/account/data/pending_confirmation_store.dart';
 import 'features/account/presentation/bloc/session_cubit.dart';
 import 'features/account/presentation/bloc/session_state.dart';
@@ -21,8 +22,12 @@ import 'features/auth/domain/biometric_service.dart';
 import 'features/auth/domain/key_manager.dart';
 import 'features/auth/presentation/bloc/vault_lock_cubit.dart';
 import 'features/vault/data/encrypted_vault_repository.dart';
+import 'features/vault/data/last_sync_store.dart';
+import 'features/vault/data/live_sync_pref_store.dart';
 import 'features/vault/data/vault_migration.dart';
 import 'features/vault/data/view_mode_store.dart';
+import 'features/vault/domain/remote_token_repository.dart';
+import 'features/vault/domain/token_sync_service.dart';
 import 'features/vault/presentation/bloc/vault_cubit.dart';
 
 Future<void> main() async {
@@ -136,6 +141,8 @@ class _AuthenticatorAppState extends State<AuthenticatorApp>
       biometric: locator<BiometricService>(),
       remoteRepo: locator<KeyAttributesRepository>(),
       uid: uid,
+      // Faz 3 Patch 3 (Adım K): changePassword sonrası sunucu UPDATE retry marker'ı.
+      attrsDirtyStore: AttrsDirtyStore(storage: storage, keyPrefix: prefix),
       migrate: (masterKey) => migration.migrateIfNeeded(masterKey: masterKey),
       deleteKeys: (keys) async {
         // Namespace'li reset: forUser(prefix) anahtarlarını sil (prefix boşsa Faz2 all).
@@ -148,19 +155,55 @@ class _AuthenticatorAppState extends State<AuthenticatorApp>
       },
     )..bootstrap();
 
+    // Faz 3 Patch 3 — per-uid token sync store'ları (canlı tercih Settings'e de gider).
+    final liveSyncStore = LiveSyncPrefStore(storage: storage, keyPrefix: prefix);
+
     _bundle = createAppRouter(
       _lock,
       session: _session,
-      vaultCubitBuilder: () => VaultCubit(EncryptedVaultRepository(
-        masterKey: _lock.masterKey,
-        crypto: locator<CryptoService>(),
-        storage: storage,
-        keyPrefix: prefix,
-      )),
+      vaultCubitBuilder: () => _buildVaultCubit(prefix, uid, storage, liveSyncStore),
       // Aktif uid namespace'li ViewModeStore (reviewer [P3] — per-uid tercih).
       viewModeStoreBuilder: () =>
           ViewModeStore(storage: storage, keyPrefix: prefix),
+      liveSyncStoreBuilder: () => liveSyncStore,
     );
+  }
+
+  /// Unlocked subtree'de `VaultCubit` + (uid varsa) `TokenSyncService` kurar.
+  ///
+  /// TEK `EncryptedVaultRepository` instance: hem `VaultRepository` (VaultCubit) hem
+  /// `RawTokenStore` (sync). `uid == null` (legacy) → `sync: null` (NO-OP, byte-identical).
+  /// Sync callback'leri cubit'e bağlıdır → cubit ÖNCE kurulur, sonra service'i set ederiz.
+  VaultCubit _buildVaultCubit(
+    String prefix,
+    String? uid,
+    FlutterSecureStorage storage,
+    LiveSyncPrefStore liveSyncStore,
+  ) {
+    final repo = EncryptedVaultRepository(
+      masterKey: _lock.masterKey,
+      crypto: locator<CryptoService>(),
+      storage: storage,
+      keyPrefix: prefix,
+    );
+    if (uid == null) {
+      return VaultCubit(repo); // legacy/uid-siz → sync yok
+    }
+    late VaultCubit cubit;
+    final sync = TokenSyncService(
+      remote: locator<RemoteTokenRepository>(),
+      store: repo, // EncryptedVaultRepository RawTokenStore'u da implement eder
+      lastSync: LastSyncStore(storage: storage, keyPrefix: prefix),
+      uid: uid,
+      // Merge import yazımı VaultCubit sequencer'ı ALTINDA → kullanıcı add/delete ile
+      // yarışmaz (reviewer [P1]). Service importRemote'u DOĞRUDAN çağırmaz.
+      mergeRemote: (rows, cursor) => cubit.applyRemoteMerge(rows, cursor),
+      onStatus: (s) => cubit.updateSyncState(s),
+    );
+    cubit = VaultCubit(repo, sync: sync, rawStore: repo);
+    // Canlı tercih: load() start(live:)'dan ÖNCE bunu await eder (reviewer [P2] — race yok).
+    cubit.liveSyncResolver = liveSyncStore.read;
+    return cubit;
   }
 
   /// uid değişince eski stack'i kapatıp yenisini kurar.

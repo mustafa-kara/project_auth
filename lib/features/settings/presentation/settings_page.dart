@@ -15,6 +15,8 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../auth/domain/biometric_exceptions.dart';
 import '../../auth/presentation/bloc/vault_lock_cubit.dart';
+import '../../vault/data/live_sync_pref_store.dart';
+import '../../vault/presentation/bloc/vault_cubit.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -25,6 +27,59 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   bool _busy = false;
+
+  /// Canlı senkron tercihi (LiveSyncPrefStore'dan yüklenir). null = yüklenmedi.
+  bool? _liveSync;
+  bool _liveBusy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadLiveSyncPref();
+  }
+
+  Future<void> _loadLiveSyncPref() async {
+    // RepositoryProvider yoksa (sync desteklenmiyor) toggle gizli kalır.
+    LiveSyncPrefStore? store;
+    try {
+      store = context.read<LiveSyncPrefStore>();
+    } catch (_) {
+      store = null;
+    }
+    if (store == null) return;
+    final v = await store.read();
+    if (mounted) setState(() => _liveSync = v);
+  }
+
+  Future<void> _toggleLiveSync(bool enable) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final vault = context.read<VaultCubit>();
+    LiveSyncPrefStore? store;
+    try {
+      store = context.read<LiveSyncPrefStore>();
+    } catch (_) {
+      store = null;
+    }
+    setState(() => _liveBusy = true);
+    try {
+      await store?.write(enable);
+      if (enable) {
+        vault.enableLiveSync();
+      } else {
+        await vault.disableLiveSync();
+      }
+      if (mounted) setState(() => _liveSync = enable);
+      messenger.showSnackBar(SnackBar(
+          content: Text(enable
+              ? 'Canlı senkron açıldı'
+              : 'Canlı senkron kapatıldı (açılışta yine senkron olur)')));
+    } catch (_) {
+      messenger.showSnackBar(
+          const SnackBar(content: Text('İşlem başarısız — tekrar dene')));
+    } finally {
+      if (mounted) setState(() => _liveBusy = false);
+    }
+  }
 
   Future<void> _toggleBiometric(bool enable) async {
     final cubit = context.read<VaultLockCubit>();
@@ -105,9 +160,36 @@ class _SettingsPageState extends State<SettingsPage> {
                   style: TextStyle(fontSize: 12),
                 ),
               ),
+            _buildLiveSyncTile(context),
           ],
         ),
       ),
+    );
+  }
+
+  /// Faz 3 Patch 3 — canlı senkron (Realtime) toggle'ı. Yalnız sync destekleniyorsa
+  /// (uid'li vault + pref yüklendi) gösterilir. Kapalıyken bile açılışta catch-up sync olur.
+  Widget _buildLiveSyncTile(BuildContext context) {
+    // VaultCubit yoksa (örn. yalnız VaultLockCubit'li ekranlar) toggle gizli.
+    VaultCubit? vault;
+    try {
+      vault = context.read<VaultCubit>();
+    } catch (_) {
+      vault = null;
+    }
+    final live = _liveSync;
+    if (vault == null || !vault.syncEnabled || live == null) {
+      return const SizedBox.shrink();
+    }
+    return SwitchListTile(
+      secondary: const Icon(Icons.cloud_sync_outlined),
+      title: const Text('Canlı senkron'),
+      subtitle: const Text(
+        'Vault\'u diğer cihazlarla gerçek zamanlı senkronize et. Kapalıyken '
+        'açılışta yine senkron olur; yalnız anlık güncelleme kapanır.',
+      ),
+      value: live,
+      onChanged: _liveBusy ? null : (v) => _toggleLiveSync(v),
     );
   }
 }

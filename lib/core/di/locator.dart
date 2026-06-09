@@ -20,8 +20,10 @@ import '../../features/auth/data/biometric_service_impl.dart';
 import '../../features/auth/data/key_attributes_store.dart';
 import '../../features/auth/domain/biometric_service.dart';
 import '../../features/auth/domain/key_manager.dart';
+import '../../features/vault/data/supabase_token_repository.dart';
 import '../../features/vault/data/vault_migration.dart';
 import '../../features/vault/data/view_mode_store.dart';
+import '../../features/vault/domain/remote_token_repository.dart';
 import '../crypto/crypto_service.dart';
 import '../crypto/sodium_crypto_service.dart';
 import '../otp/otp_generator.dart';
@@ -70,6 +72,10 @@ Future<void> configureDependencies() async {
   // Faz 3 Patch 2: kripto metadatası (key_attributes) sunucu deposu (upload/restore).
   locator.registerLazySingleton<KeyAttributesRepository>(
       () => SupabaseKeyAttributesRepository(locator<SupabaseClient>()));
+
+  // Faz 3 Patch 3: şifreli token sunucu deposu (push/pull + Realtime tetikleyici).
+  locator.registerLazySingleton<RemoteTokenRepository>(
+      () => SupabaseTokenRepository(locator<SupabaseClient>()));
 
   // Multi-vault (kullanıcı kararı 7): aktif uid + per-uid legacy karar + onay store.
   locator.registerLazySingleton<ActiveAccountStore>(

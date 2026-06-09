@@ -1,7 +1,7 @@
 /// E2E şifreli vault deposu — token-bazlı kayıtlar (Faz 2 Patch 3).
 ///
 /// Her token ayrı bir şifreli kayıt: `{id, version, nonce, ciphertext, updatedAt,
-/// deleted}`. Plaintext (`OtpAccount.toJson`) masterKey + XChaCha20-Poly1305 ile
+/// deleted, sv}`. Plaintext (`OtpAccount.toJson`) masterKey + XChaCha20-Poly1305 ile
 /// şifrelenir; AAD = `token|1|<id>` kaydı kimliğine bağlar (bir blob başka id'de
 /// veya bağlamda çözülemez). Bu şema Faz 3 `tokens` tablosuna birebir taşınır.
 ///
@@ -15,6 +15,11 @@
 ///   çözülemeyen kayıt SİLİNMEZ). Yalnız `purgeCorrupted()` açık onayla siler.
 /// - **Sessiz veri kaybı yok:** top-level bozulma (malformed/non-list) VEYA tüm
 ///   kayıtların decrypt fail'i → `VaultIntegrityException` ("boş vault" gösterilmez).
+///
+/// **Faz 3 Patch 3 — `RawTokenStore` (token sync):** çözülmüş `VaultRepository`
+/// arayüzü DEĞİŞMEZ; sync için AYRI ham port eklenir (`exportRaw`/`importRemote`/
+/// `markDeleted`). Bunlar masterKey GEREKTİRMEZ (opak ciphertext'i açmadan okur/yazar);
+/// tombstone (soft-delete) ve `sv` (sunucu cursor'u) bu sınıfta tutulur.
 library;
 
 import 'dart:convert';
@@ -27,17 +32,21 @@ import '../../../core/crypto/crypto_service.dart';
 import '../../../core/crypto/encrypted_blob.dart';
 import '../../../core/crypto/key_handle.dart';
 import '../../../core/otp/otp_account.dart';
+import '../domain/raw_token_record.dart';
+import '../domain/remote_token_repository.dart';
 import 'vault_load_result.dart';
 import 'vault_repository.dart';
 
-/// Tek bir şifreli token kaydı (storage temsili). `deleted` Faz 2'de hep false
-/// (soft-delete Faz 3 API genişlemesi gerektirir — bkz. plan).
+/// Tek bir şifreli token kaydı (storage temsili). `deleted=true` → tombstone
+/// (soft-delete; `load()` hesaplarda göstermez ama `exportRaw` döndürür). `sv` =
+/// bu kaydın en son uzlaşıldığı SUNUCU `updated_at`'i (null = lokal-dirty / hiç sync edilmemiş).
 class _TokenRecord {
   final String id;
   final int version;
   final EncryptedBlob blob;
-  final int updatedAt; // epoch ms (client-side; Faz 3 server trigger ezer)
+  final int updatedAt; // epoch ms (client-side; sunucu trigger'ı ayrı tutulur — sv)
   final bool deleted;
+  final String? serverUpdatedAtIso; // 'sv' — sunucu cursor'u (LWW); null = dirty
 
   _TokenRecord({
     required this.id,
@@ -45,6 +54,7 @@ class _TokenRecord {
     required this.updatedAt,
     this.version = 1,
     this.deleted = false,
+    this.serverUpdatedAtIso,
   });
 
   Map<String, dynamic> toJson() => {
@@ -54,10 +64,20 @@ class _TokenRecord {
         'c': base64Encode(blob.ciphertext),
         'updatedAt': updatedAt,
         'deleted': deleted,
+        if (serverUpdatedAtIso != null) 'sv': serverUpdatedAtIso,
       };
+
+  RawTokenRecord toRaw() => RawTokenRecord(
+        id: id,
+        blob: blob,
+        updatedAtMs: updatedAt,
+        version: version,
+        deleted: deleted,
+        serverUpdatedAtIso: serverUpdatedAtIso,
+      );
 }
 
-class EncryptedVaultRepository implements VaultRepository {
+class EncryptedVaultRepository implements VaultRepository, RawTokenStore {
   /// Token-bazlı şifreli kayıt dizisinin tutulduğu depo anahtarı (taban).
   static const vaultKey = 'vault_encrypted_v1';
 
@@ -74,9 +94,11 @@ class EncryptedVaultRepository implements VaultRepository {
   final String _vaultStorageKey;
 
   /// Bir önceki `load()`'tan kalan durum (unchanged-blob + bozuk-kayıt koruması):
-  ///   - `_lastById`: id → (plaintext'i bilinen) sağlam kayıt + blob'u + meta.
+  ///   - `_lastById`: id → (plaintext'i bilinen) sağlam CANLI kayıt + blob'u + meta.
+  ///   - `_tombstones`: id → soft-delete tombstone (deleted=true; `load` accounts'a koymaz).
   ///   - `_corruptedRaw`: decode/decrypt edilemeyen ham JSON kayıtları (aynen taşınır).
   final Map<String, _LoadedRecord> _lastById = {};
+  final Map<String, _TokenRecord> _tombstones = {};
   final List<Object?> _corruptedRaw = [];
 
   EncryptedVaultRepository({
@@ -96,6 +118,7 @@ class EncryptedVaultRepository implements VaultRepository {
   @override
   Future<VaultLoadResult> load() async {
     _lastById.clear();
+    _tombstones.clear();
     _corruptedRaw.clear();
 
     final raw = await _storage.read(key: _vaultStorageKey);
@@ -125,19 +148,24 @@ class EncryptedVaultRepository implements VaultRepository {
         corrupted++;
         continue;
       }
-      final (id, version, blob, updatedAt, deleted) = parsed;
+      // Tombstone (soft-delete): hesaplarda gösterme ama push için sakla.
+      if (parsed.deleted) {
+        _tombstones[parsed.id] = parsed;
+        continue;
+      }
+      final id = parsed.id;
       try {
         final plaintext =
-            _crypto.decrypt(blob: blob, key: _masterKey, aad: _aad(id));
+            _crypto.decrypt(blob: parsed.blob, key: _masterKey, aad: _aad(id));
         final account = OtpAccount.fromJson(
             _coerceStringKeys(jsonDecode(utf8.decode(plaintext)) as Map));
         accounts.add(account);
         _lastById[id] = _LoadedRecord(
           account: account,
-          blob: blob,
-          version: version,
-          updatedAt: updatedAt,
-          deleted: deleted,
+          blob: parsed.blob,
+          version: parsed.version,
+          updatedAt: parsed.updatedAt,
+          serverUpdatedAtIso: parsed.serverUpdatedAtIso,
         );
       } catch (_) {
         // decrypt fail (tamper/yanlış key) VEYA çözülen plaintext bozuk →
@@ -148,7 +176,8 @@ class EncryptedVaultRepository implements VaultRepository {
     }
 
     // Tüm kayıtlar fail (yanlış masterKey / toptan bozulma) → integrity error,
-    // boş vault gösterme (review).
+    // boş vault gösterme (review). NOT: tombstone-only vault (canlı 0 + corrupted 0)
+    // GEÇERLİDİR (kullanıcı hepsini sildi) → integrity hatası DEĞİL.
     if (accounts.isEmpty && corrupted > 0) {
       throw VaultIntegrityException(
           'Hiçbir kayıt çözülemedi ($corrupted kayıt) — yanlış anahtar/bozulma');
@@ -159,6 +188,12 @@ class EncryptedVaultRepository implements VaultRepository {
 
   @override
   Future<void> save(List<OtpAccount> accounts) async {
+    await _writeRecords(accounts);
+  }
+
+  /// Canlı hesapları (+ tombstone + corrupted) tek atomik JSON-array olarak yazar.
+  /// `save` ve `markDeleted` bunu paylaşır.
+  Future<void> _writeRecords(List<OtpAccount> accounts) async {
     // Object? — sağlam kayıtlar Map; korunan bozuk raw kayıtlar herhangi bir
     // JSON değeri olabilir (map/scalar/null). Hepsi AYNEN geri yazılır.
     final records = <Object?>[];
@@ -172,14 +207,14 @@ class EncryptedVaultRepository implements VaultRepository {
           blob: prev.blob,
           version: prev.version,
           updatedAt: prev.updatedAt,
-          deleted: prev.deleted,
+          serverUpdatedAtIso: prev.serverUpdatedAtIso,
         ).toJson());
       } else {
-        // Yeni veya değişmiş → şifrele + updatedAt yenile.
+        // Yeni veya değişmiş → şifrele + updatedAt yenile + sv temizle (dirty).
         final plaintext =
             Uint8List.fromList(utf8.encode(jsonEncode(account.toJson())));
-        final blob =
-            _crypto.encrypt(plaintext: plaintext, key: _masterKey, aad: _aad(account.id));
+        final blob = _crypto.encrypt(
+            plaintext: plaintext, key: _masterKey, aad: _aad(account.id));
         final updatedAt = _nowMs();
         records.add(_TokenRecord(
           id: account.id,
@@ -191,9 +226,15 @@ class EncryptedVaultRepository implements VaultRepository {
           blob: blob,
           version: 1,
           updatedAt: updatedAt,
-          deleted: false,
+          serverUpdatedAtIso: null, // lokal değişiklik → dirty (push edilecek)
         );
       }
+    }
+
+    // Tombstone'lar (soft-delete) AYNEN korunur → push edilebilsin + bir sonraki
+    // save token'ı diriltmesin (sunucu hâlâ row'a sahip; tombstone gitmezse LWW geri ekler).
+    for (final t in _tombstones.values) {
+      records.add(t.toJson());
     }
 
     // Çözülemeyen eski raw kayıtlar AYNEN korunur (kullanıcı banner'a rağmen
@@ -212,14 +253,142 @@ class EncryptedVaultRepository implements VaultRepository {
   Future<void> purgeCorrupted() async {
     if (_corruptedRaw.isEmpty) return; // no-op (sağlamlara dokunma)
     _corruptedRaw.clear();
-    // Yalnız sağlam (bilinen) kayıtları yeniden yaz — unchanged blob'lar korunur.
+    // Yalnız sağlam (bilinen) kayıtları yeniden yaz — unchanged blob'lar + tombstone korunur.
     final survivors =
         _lastById.values.map((r) => r.account).toList(growable: false);
-    await save(survivors);
+    await _writeRecords(survivors);
+  }
+
+  // --- RawTokenStore (Faz 3 Patch 3 — token sync; masterKey GEREKTİRMEZ) ---
+
+  @override
+  Future<List<RawTokenRecord>> exportRaw() async {
+    // DİSKTEN okur (decrypt YOK) → in-memory `_lastById`/`_tombstones` tazeliğine
+    // BAĞLI DEĞİL (merge-sonrası-reload yarışına kapalı). Bozuk kayıtlar atlanır
+    // (push edilemez; zaten geçersiz). Canlı + tombstone döner.
+    final raw = await _storage.read(key: _vaultStorageKey);
+    if (raw == null || raw.isEmpty) return const [];
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(raw);
+    } on FormatException {
+      return const [];
+    }
+    if (decoded is! List) return const [];
+    final out = <RawTokenRecord>[];
+    for (final item in decoded) {
+      final rec = _tryParseRecord(item);
+      if (rec != null) out.add(rec.toRaw());
+    }
+    return out;
+  }
+
+  @override
+  Future<void> markDeleted(String id) async {
+    final prev = _lastById[id];
+    if (prev == null) {
+      // Zaten yok / zaten tombstone → idempotent no-op (tombstone'a dokunma).
+      return;
+    }
+    // Son bilinen blob'u koru (sunucu zaten ona sahip; tombstone geçerli EncryptedBlob
+    // taşımalı — 24B nonce/16B ct minimumu). deleted=true + taze updatedAt + sv=null (dirty).
+    _tombstones[id] = _TokenRecord(
+      id: id,
+      blob: prev.blob,
+      version: prev.version,
+      updatedAt: _nowMs(),
+      deleted: true,
+    );
+    _lastById.remove(id);
+    // Canlı kalanları + güncel tombstone'ları ATOMİK yaz.
+    final survivors =
+        _lastById.values.map((r) => r.account).toList(growable: false);
+    await _writeRecords(survivors);
+  }
+
+  @override
+  Future<TokenMergeOutcome> importRemote(
+    List<RemoteTokenRow> remote, {
+    required String? pullCursorIso,
+  }) async {
+    // KENDİ KENDİNE YETER (decrypt YOK + `_lastById`'ye bağlı DEĞİL): diskteki ham
+    // kayıtları DOĞRUDAN okur, merge eder, ham yazar. Import sonrası VaultCubit
+    // `reloadFromStore()` çağırır → `_lastById` decrypt'le yeniden dolar (zorunlu).
+    final raw = await _storage.read(key: _vaultStorageKey);
+    final byId = <String, _TokenRecord>{}; // canlı + tombstone (id → kayıt)
+    final corruptedRaw = <Object?>[]; // verbatim korunur (decode edilemeyenler)
+
+    if (raw != null && raw.isNotEmpty) {
+      final Object? decoded;
+      try {
+        decoded = jsonDecode(raw);
+      } on FormatException {
+        // Top-level bozulma → merge etme (token kaybını maskeleme); değişiklik yok.
+        return TokenMergeOutcome.none;
+      }
+      if (decoded is! List) return TokenMergeOutcome.none;
+      for (final item in decoded) {
+        final rec = _tryParseRecord(item);
+        if (rec == null) {
+          corruptedRaw.add(item);
+        } else {
+          byId[rec.id] = rec;
+        }
+      }
+    }
+
+    var changed = false;
+    var applied = 0;
+
+    for (final r in remote) {
+      final local = byId[r.id];
+      final accept = local == null
+          ? true // remote-only → kabul
+          : local.serverUpdatedAtIso == null
+              // Lokal dirty (push beklemede): server YALNIZ pull-cursor'dan SONRAki
+              // bir değişiklikse kazanır (başka cihaz); aksi halde kendi echo'muz → KORU.
+              ? (pullCursorIso == null ||
+                  _isoNewer(r.serverUpdatedAtIso, pullCursorIso))
+              // sv'de uzlaşılmış: server daha yeniyse kazanır (idempotent).
+              : _isoNewer(r.serverUpdatedAtIso, local.serverUpdatedAtIso!);
+
+      if (!accept) continue;
+
+      // Kazanan remote satırı uygula (deleted bir alandır; tombstone = deleted=true kayıt).
+      byId[r.id] = _TokenRecord(
+        id: r.id,
+        blob: r.blob,
+        version: r.version,
+        updatedAt: _nowMs(), // lokal bookkeeping; merge kararı sv ile yapılır
+        deleted: r.deleted,
+        serverUpdatedAtIso: r.serverUpdatedAtIso,
+      );
+      changed = true;
+      applied++;
+    }
+
+    if (!changed) return TokenMergeOutcome.none;
+
+    // Ham yaz: tüm kayıtlar (canlı + tombstone) + corrupted verbatim. Decrypt YOK.
+    final records = <Object?>[
+      for (final rec in byId.values) rec.toJson(),
+      ...corruptedRaw,
+    ];
+    await _storage.write(key: _vaultStorageKey, value: jsonEncode(records));
+    return TokenMergeOutcome(changed: changed, appliedCount: applied);
+  }
+
+  /// ISO-8601 UTC string kıyası — DateTime parse ile (ham leksik kıyas YASAK).
+  /// `a > b` (a, b'den kesin yeni) → true.
+  static bool _isoNewer(String a, String b) {
+    final da = DateTime.tryParse(a)?.toUtc();
+    final db = DateTime.tryParse(b)?.toUtc();
+    if (da == null || db == null) return false; // güvenli: kıyaslanamazsa kabul etme
+    return da.isAfter(db);
   }
 
   /// Tek record JSON'ını ayrıştırır. Şema bozuksa null (çağıran bozuk sayar).
-  (String, int, EncryptedBlob, int, bool)? _tryParseRecord(Object? item) {
+  _TokenRecord? _tryParseRecord(Object? item) {
     if (item is! Map) return null;
     final map = _coerceStringKeys(item);
     final id = map['id'];
@@ -235,27 +404,35 @@ class EncryptedVaultRepository implements VaultRepository {
     final version = map['v'] is num ? (map['v'] as num).toInt() : 1;
     final updatedAt = map['updatedAt'] is num ? (map['updatedAt'] as num).toInt() : 0;
     final deleted = map['deleted'] == true;
-    return (id, version, blob, updatedAt, deleted);
+    final sv = map['sv'] is String ? map['sv'] as String : null;
+    return _TokenRecord(
+      id: id,
+      blob: blob,
+      version: version,
+      updatedAt: updatedAt,
+      deleted: deleted,
+      serverUpdatedAtIso: sv,
+    );
   }
 
   static Map<String, dynamic> _coerceStringKeys(Map<dynamic, dynamic> m) =>
       {for (final e in m.entries) e.key.toString(): e.value};
 }
 
-/// `load()` sonrası bellekte tutulan sağlam kayıt (unchanged-blob karşılaştırması
-/// + purge survivor'ı için).
+/// `load()` sonrası bellekte tutulan sağlam CANLI kayıt (unchanged-blob karşılaştırması
+/// + purge survivor'ı + raw export için).
 class _LoadedRecord {
   final OtpAccount account;
   final EncryptedBlob blob;
   final int version;
   final int updatedAt;
-  final bool deleted;
+  final String? serverUpdatedAtIso;
 
   _LoadedRecord({
     required this.account,
     required this.blob,
     required this.version,
     required this.updatedAt,
-    required this.deleted,
+    required this.serverUpdatedAtIso,
   });
 }

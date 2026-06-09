@@ -3,6 +3,10 @@
 /// Faz 1: token'lar `VaultRepository` (flutter_secure_storage) ile cihazda
 /// kalıcı; her mutasyon sonrası kaydedilir. Faz 2: repository katmanı aynı
 /// kalır, altına masterKey ile E2E şifreleme eklenir.
+///
+/// Faz 3 Patch 3: opsiyonel [TokenSyncService] ile bulut senkronu (push-on-save +
+/// Realtime-tetikli reload-on-merge). `sync == null` (legacy/uid-siz) → davranış
+/// BİREBİR korunur (sync inert). Token soft-delete (tombstone) sync'li yolda.
 library;
 
 import 'dart:async';
@@ -13,6 +17,9 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../../core/otp/otp_account.dart';
 import '../../data/vault_load_result.dart';
 import '../../data/vault_repository.dart';
+import '../../domain/raw_token_record.dart';
+import '../../domain/remote_token_repository.dart';
+import '../../domain/token_sync_service.dart';
 
 class VaultState extends Equatable {
   /// İlk yükleme tamamlandı mı (depodan okuma). UI splash/boş-durum ayrımı için.
@@ -26,11 +33,15 @@ class VaultState extends Equatable {
   /// Set ise UI "boş vault" yerine bütünlük hata ekranı gösterir.
   final Object? error;
 
+  /// Faz 3 Patch 3 — bulut senkron durumu (gösterge). `sync == null` → idle kalır.
+  final SyncState syncState;
+
   const VaultState({
     this.loaded = false,
     this.accounts = const [],
     this.corruptedCount = 0,
     this.error,
+    this.syncState = SyncState.idle,
   });
 
   VaultState copyWith({
@@ -39,42 +50,61 @@ class VaultState extends Equatable {
     int? corruptedCount,
     Object? error,
     bool clearError = false,
+    SyncState? syncState,
   }) =>
       VaultState(
         loaded: loaded ?? this.loaded,
         accounts: accounts ?? this.accounts,
         corruptedCount: corruptedCount ?? this.corruptedCount,
         error: clearError ? null : (error ?? this.error),
+        syncState: syncState ?? this.syncState,
       );
 
   @override
-  List<Object?> get props => [loaded, accounts, corruptedCount, error];
+  List<Object?> get props => [loaded, accounts, corruptedCount, error, syncState];
 }
 
 class VaultCubit extends Cubit<VaultState> {
   final VaultRepository _repository;
 
-  VaultCubit(this._repository) : super(const VaultState());
+  /// Faz 3 Patch 3 — opsiyonel sync (null → legacy/uid-siz; davranış birebir).
+  final TokenSyncService? _sync;
+
+  /// Soft-delete + import için ham port (genelde `_repository` ile aynı instance).
+  final RawTokenStore? _rawStore;
+
+  VaultCubit(
+    this._repository, {
+    TokenSyncService? sync,
+    RawTokenStore? rawStore,
+  })  : _sync = sync,
+        _rawStore = rawStore,
+        super(const VaultState());
 
   /// İlk `load()` tamamlanma sinyali. Mutasyonlar (add/remove/increment) bunu
   /// bekler → henüz okunmamış depo kayıtlarını `save()` ile EZMEZ (review P1).
-  ///
-  /// Kök sebep: `save()` yalnız o anki `accounts` + repo'nun load'da dolan
-  /// bellek cache'i (`_lastById`/`_corruptedRaw`) üzerinden yazar. Load bitmeden
-  /// save edilirse diskteki şifreli kayıtlar (henüz okunmamış) kaybolur — bellek
-  /// merge bunu düzeltemez (disk zaten ezilmiştir). Çözüm: mutasyonu load'a
-  /// sıralamak (kuyruğa almak yerine basitçe beklemek; tek ilk-yükleme).
   final Completer<void> _firstLoad = Completer<void>();
 
   /// `load()` çağrıldı mı (idempotency + mutasyon-önce-load tetikleme için).
   bool _loadStarted = false;
 
-  /// İlk `load()`'ı bekler. Normalde açılışta `..load()` çağrılır; çağrılmadıysa
-  /// (örn. doğrudan `add` ile başlayan akış/test) mutasyon load'ı kendi tetikler
-  /// → deadlock olmaz, yine de okunmamış depoyu ezmez.
+  /// Mutasyon + merge-reload serileştirici (Faz 3 Patch 3 — reload-vs-mutation
+  /// yarışını önler; her kritik bölüm bir öncekini bekler).
+  Future<void> _opChain = Future<void>.value();
+
+  /// İşlemleri sıraya alır (tek sequencer). Hata zinciri kırmaz (bir sonraki op çalışır).
+  Future<void> _sequence(Future<void> Function() op) =>
+      _sequenceValue<void>(op);
+
+  /// Değer döndüren sequencer (importRemote outcome'ı için). Zincir hatada kırılmaz.
+  Future<T> _sequenceValue<T>(Future<T> Function() op) {
+    final next = _opChain.then((_) => op());
+    _opChain = next.then((_) {}, onError: (_) {});
+    return next;
+  }
+
   Future<void> _awaitLoaded() {
     if (!_loadStarted) {
-      // load()'ı başlat ama beklemesini ayrı tut (load kendi await'ini yapar).
       unawaited(load());
     }
     return _firstLoad.future;
@@ -93,68 +123,167 @@ class VaultCubit extends Cubit<VaultState> {
       if (!_firstLoad.isCompleted) _firstLoad.complete();
       return;
     }
-    emit(VaultState(
+    emit(state.copyWith(
       loaded: true,
       accounts: result.accounts,
       corruptedCount: result.corruptedCount,
+      clearError: true,
     ));
     if (!_firstLoad.isCompleted) _firstLoad.complete();
+
+    // Faz 3 Patch 3 — ilk load BİTTİKTEN sonra sync başlat (post-unlock; key_attributes
+    // restore + unlock zaten gerçekleşti → kripto bağımlılık karşılandı). Best-effort.
+    final sync = _sync;
+    if (sync != null) {
+      // Canlı tercihi BURADA çözülür (reviewer [P2] — race yok): resolver async olsa da
+      // start ondan SONRA çağrılır. Resolver yoksa varsayılan kapalı. Hata → kapalı.
+      bool live = false;
+      try {
+        live = await (_liveResolver?.call() ?? Future<bool>.value(false));
+      } catch (_) {
+        live = false;
+      }
+      if (isClosed) return;
+      sync.start(live: live).ignore();
+    }
+  }
+
+  /// `start(live:)` için canlı tercih çözücüsü (LiveSyncPrefStore.read) — main.dart enjekte eder.
+  /// `load()` bunu start'tan ÖNCE await eder → persisted live=true unlock'ta uygulanır (race yok).
+  Future<bool> Function()? _liveResolver;
+  set liveSyncResolver(Future<bool> Function() r) => _liveResolver = r;
+
+  /// Sync durumu değişince UI'a yansıt (TokenSyncService.onStatus → bunu çağırır).
+  void updateSyncState(SyncState s) {
+    if (isClosed) return;
+    emit(state.copyWith(syncState: s));
+  }
+
+  /// TokenSyncService.mergeRemote → remote satırları diske MERGE eder + (değişikse) reload.
+  /// **Sequencer ALTINDA** (reviewer [P1]: import disk yazımı kullanıcı add/delete/increment
+  /// ile yarışmaz — hepsi tek `_opChain` kuyruğunda). `_firstLoad` bitmeden çalışmaz.
+  ///
+  /// **Dönüş `null` = merge UYGULANAMADI** (vault kapandı / ilk-load yok / rawStore yok) →
+  /// çağıran (TokenSyncService) cursor'u İLERLETMEMELİ (reviewer [P1]: aksi halde remote
+  /// satırlar diske yazılmadan cursor ilerler → sonraki pull onları atlar). Non-null
+  /// (boş pull'da `none` dahil) = merge ÇALIŞTI, disk tutarlı → cursor ilerleyebilir.
+  Future<TokenMergeOutcome?> applyRemoteMerge(
+          List<RemoteTokenRow> rows, String? pullCursorIso) =>
+      _sequenceValue<TokenMergeOutcome?>(() async {
+        final raw = _rawStore;
+        if (raw == null || !_firstLoad.isCompleted || isClosed) {
+          return null; // merge YAPILAMADI → cursor ilerletilmemeli
+        }
+        final outcome = await raw.importRemote(rows, pullCursorIso: pullCursorIso);
+        if (outcome.changed && !isClosed) {
+          await _reloadFromStoreUnsequenced(); // ZATEN sequencer içindeyiz
+        }
+        return outcome;
+      });
+
+  /// Canlı senkron desteği var mı (sync bağlı + uid'li). UI toggle'ı bununla gizlenir/gösterilir.
+  bool get syncEnabled => _sync != null;
+
+  /// Settings toggle → canlı senkronu oturum-içi aç (Realtime abone).
+  void enableLiveSync() => _sync?.enableLive();
+
+  /// Settings toggle → canlı senkronu oturum-içi kapat (catch-up sync devam eder).
+  Future<void> disableLiveSync() async => _sync?.disableLive();
+
+  /// Göstergeden manuel "şimdi senkronize et" (opsiyonel).
+  Future<void> syncNow() async => _sync?.syncOnce();
+
+  /// Diskten yeniden yükle (manuel/test çağrısı). Sequencer ALTINDA çalışır → kullanıcı
+  /// mutasyonuyla serileşir; `_firstLoad` tamamlanmadan ÇALIŞMAZ. (Merge yolu
+  /// `applyRemoteMerge` import+reload'ı TEK kritik bölümde yapar; bunu ayrıca çağırmaz.)
+  Future<void> reloadFromStore() => _sequence(_reloadFromStoreUnsequenced);
+
+  /// Reload çekirdeği — sequencer'a SARMALANMAZ (çağıran zaten kritik bölümde olabilir,
+  /// örn. `applyRemoteMerge`). `load()` once-guard'ını BYPASS eder; integrity/corrupted
+  /// muhasebesini KORUR; repo cache'ini (`_lastById`) repopulate eder (import sonrası ZORUNLU).
+  Future<void> _reloadFromStoreUnsequenced() async {
+    if (!_firstLoad.isCompleted) return; // ilk load bitmeden reload yok
+    if (isClosed) return;
+    final VaultLoadResult result;
+    try {
+      result = await _repository.load();
+    } catch (e) {
+      if (!isClosed) emit(state.copyWith(loaded: true, error: e));
+      return;
+    }
+    if (isClosed) return;
+    emit(state.copyWith(
+      loaded: true,
+      accounts: result.accounts,
+      corruptedCount: result.corruptedCount,
+      clearError: true,
+    ));
   }
 
   /// Bozuk/çözülemeyen kayıtları KALICI siler (yalnız açık kullanıcı onayıyla
-  /// çağrılmalı). Ardından yeniden yükler → banner temizlenir.
+  /// çağrılmalı). Ardından yeniden yükler → banner temizlenir. **Sequencer ALTINDA**
+  /// (reviewer [P2]: purge disk yazımı sync import / mutasyon ile yarışmasın — tek yazma kuyruğu).
   Future<void> purgeCorrupted() async {
     await _awaitLoaded(); // repo cache (_corruptedRaw) dolu olmalı
-    await _repository.purgeCorrupted();
-    final result = await _repository.load();
-    emit(VaultState(
-      loaded: true,
-      accounts: result.accounts,
-      corruptedCount: result.corruptedCount,
-    ));
+    return _sequence(() async {
+      if (isClosed) return;
+      await _repository.purgeCorrupted();
+      await _reloadFromStoreUnsequenced(); // ZATEN sequencer içindeyiz
+    });
   }
 
   Future<void> add(OtpAccount account) async {
-    // İlk load bitmeden ekleme depodaki okunmamış kayıtları ezerdi (review P1).
     await _awaitLoaded();
-    _guardIntegrity();
-    await _emitAndPersist([...state.accounts, account]);
+    return _sequence(() async {
+      _guardIntegrity();
+      await _emitAndPersist([...state.accounts, account]);
+      _pushAfterMutation();
+    });
   }
 
-  /// Stabil token id'sine göre siler (index değil — liste reorder/eşzamanlı
-  /// değişimde yanlış öğeyi silmeyi önler).
+  /// Stabil token id'sine göre siler (index değil). Faz 3 Patch 3: sync'li yolda
+  /// **soft-delete** (tombstone push edilebilsin); legacy yolda eski hard-remove.
   Future<void> removeById(String id) async {
     await _awaitLoaded();
-    _guardIntegrity();
-    final next = state.accounts.where((a) => a.id != id).toList();
-    if (next.length == state.accounts.length) return; // bulunamadı → no-op
-    await _emitAndPersist(next);
+    return _sequence(() async {
+      _guardIntegrity();
+      if (!state.accounts.any((a) => a.id == id)) return; // bulunamadı → no-op
+      final next = state.accounts.where((a) => a.id != id).toList();
+
+      final rawStore = _rawStore;
+      if (_sync != null && rawStore != null) {
+        // ATOMİK: markDeleted ÖNCE (son blob'la tombstone üretir + diske yazar);
+        // _emitAndPersist/save ÇAĞIRMA (save listede-olmayan id'nin blob'unu düşürürdü).
+        await rawStore.markDeleted(id);
+        emit(state.copyWith(accounts: next));
+        _pushAfterMutation();
+      } else {
+        // Legacy (sync yok) → eski hard-remove davranışı (regresyon yok).
+        await _emitAndPersist(next);
+      }
+    });
   }
 
-  /// HOTP sayaç artırma (kod isteğe bağlı yenilenir). id-bazlı.
+  /// HOTP sayaç artırma. id-bazlı.
   Future<void> incrementCounter(String id) async {
     await _awaitLoaded();
-    _guardIntegrity();
-    var changed = false;
-    final next = [
-      for (final a in state.accounts)
-        if (a.id == id && a.type == OtpType.hotp)
-          (changed = true) ? a.copyWith(counter: a.counter + 1) : a
-        else
-          a,
-    ];
-    if (!changed) return; // hedef HOTP yok → no-op (gereksiz yazma yapma)
-    await _emitAndPersist(next);
+    return _sequence(() async {
+      _guardIntegrity();
+      var changed = false;
+      final next = [
+        for (final a in state.accounts)
+          if (a.id == id && a.type == OtpType.hotp)
+            (changed = true) ? a.copyWith(counter: a.counter + 1) : a
+          else
+            a,
+      ];
+      if (!changed) return; // hedef HOTP yok → no-op
+      await _emitAndPersist(next);
+      _pushAfterMutation();
+    });
   }
 
   /// Bütünlük hatası state'inde mutasyonu reddeder (review P1 — kritik).
-  ///
-  /// Top-level bozulma / tüm-kayıt decrypt-fail durumunda `load()` erken fırlar:
-  /// `state.accounts` boş VE repo'nun bozuk-kayıt cache'i (`_corruptedRaw`) BOŞ
-  /// kalır (load repopulate edemeden çıktı). Bu state'te bir `save()` çalışırsa
-  /// diskteki bozuk-ama-belki-kurtarılabilir ham vault'u, kullanıcının açık
-  /// "Vault'u sıfırla" onayı OLMADAN ezer. Mutasyonu burada durdur → UI
-  /// `_runMutation`/`_addAndClose` bunu yakalar ve SnackBar gösterir.
   void _guardIntegrity() {
     if (state.error != null) {
       throw StateError(
@@ -163,10 +292,22 @@ class VaultCubit extends Cubit<VaultState> {
     }
   }
 
-  /// State'i günceller ve depoya yazar. Yazma hatası state'i geri almaz
-  /// (bellek-içi doğru kalır); kalıcılık bir sonraki başarılı mutasyonda yakalar.
+  /// add/edit/increment sonrası best-effort push (delete kendi push'unu yapar).
+  void _pushAfterMutation() {
+    _sync?.pushChanged().ignore();
+  }
+
+  /// State'i günceller ve depoya yazar. Yazma hatası state'i geri almaz.
   Future<void> _emitAndPersist(List<OtpAccount> accounts) async {
     emit(state.copyWith(loaded: true, accounts: accounts));
     await _repository.save(accounts);
+  }
+
+  @override
+  Future<void> close() {
+    // Faz 3 Patch 3 — subtree teardown (lock/arka-plan/signOut) → Realtime aboneliğini
+    // kapat (abone-on-unlock / unsubscribe-on-lock subtree lifecycle'a bağlı).
+    _sync?.dispose().ignore();
+    return super.close();
   }
 }

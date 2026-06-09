@@ -66,6 +66,16 @@ class SupabaseKeyAttributesRepository implements KeyAttributesRepository {
     }
   }
 
+  @override
+  Future<void> update(String uid, KeyAttributes attrs) async {
+    try {
+      // updated_at GÖNDERİLMEZ (toRow'da yok → trigger now() ezer; LWW).
+      await _client.from(_table).update(toRow(uid, attrs)).eq('user_id', uid);
+    } catch (e) {
+      throw _mapError(e);
+    }
+  }
+
   /// KeyAttributes → sunucu satırı. `EncryptedBlob` İKİ kolona BÖLÜNÜR.
   /// `bmk`/blob-version GÖNDERİLMEZ (sunucuda kolon yok). Yalnız zaten-şifreli
   /// alanlar + KDF parametreleri — masterKey/KEK/secret ASLA yer almaz.

@@ -62,3 +62,13 @@ admin_users · key_attributes · tokens · devices · announcements · catalog_s
 - [ ] **Faz 3 Patch 1 — E-posta onayı:** Dashboard > Auth > Providers > Email → "Confirm email" AÇIK (kayıt sonrası onay maili).
 - [ ] **Faz 3 Patch 1 — Redirect URL:** Dashboard > Auth > URL Configuration > Redirect URLs → `dev.mustafakara.projectauth://login-callback` ekle (PKCE deep-link callback; native intent-filter/URL scheme ile eşleşir).
 - [ ] **Faz 3 Patch 2 — bytea format teyidi (manuel, şema değişmez):** `key_attributes` upload/restore cihazda gerçek Supabase'e karşı test edilmeli — `ByteaCodec` (`\x`+hex) ile `insert` PostgREST'in bytea kabulüyle uyumlu mu, `select` round-trip kayıpsız mı, RLS owner-only mı. Format farklıysa `lib/features/account/data/bytea_codec.dart` tek noktadan düzeltilir (DB migration GEREKMEZ).
+- [ ] **Faz 3 Patch 3 — token sync cihaz testi (manuel, şema değişmez):** gerçek Supabase'e karşı:
+  (1) `tokens` bytea `upsert(onConflict:id)`/`select(gt updated_at)` round-trip kayıpsız + RLS owner-only;
+  (2) Realtime `tokens` publication tetikleyici geliyor mu → REST pull (payload bytea OKUNMAZ — #1180);
+  (3) yeni cihaz: login → key_attributes restore → unlock → token full-pull → liste dolu;
+  (4) soft-delete cross-device (`deleted=true` UPDATE → diğer cihaz gizler; hard DELETE YOK);
+  (5) arrival-order LWW (iki cihaz aynı token → son ulaşan kazanır; echo loop yok);
+  (6) changePassword sonrası fresh-restore YENİ parola sarmalını çeker (`key_attributes` UPDATE edildi);
+  (7) bozuk satır karantinası (manuel bozuk satır → atlanır, vault düşmez, cursor gap'i atlamaz).
+  bytea format farklıysa `bytea_codec.dart` tek noktadan düzeltilir (DB migration GEREKMEZ).
+- [ ] **Faz 3 Patch 3 — Realtime publication kontrolü:** `tokens` zaten `supabase_realtime` publication'da (init migration §7b). Yeni/temiz projede `alter publication supabase_realtime add table public.tokens;` uygulanmış olmalı.

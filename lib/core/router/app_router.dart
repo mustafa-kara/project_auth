@@ -30,6 +30,7 @@ import '../../features/auth/presentation/pages/setup_password_page.dart';
 import '../../features/auth/presentation/pages/unlock_page.dart';
 import '../../features/scan/presentation/scan_page.dart';
 import '../../features/settings/presentation/settings_page.dart';
+import '../../features/vault/data/live_sync_pref_store.dart';
 import '../../features/vault/data/view_mode_store.dart';
 import '../../features/vault/presentation/bloc/vault_cubit.dart';
 import '../../features/vault/presentation/pages/vault_page.dart';
@@ -82,11 +83,16 @@ typedef VaultCubitBuilder = VaultCubit Function();
 /// (reviewer [P3] — global singleton yerine per-uid). main tarafından enjekte edilir.
 typedef ViewModeStoreBuilder = ViewModeStore Function();
 
+/// Faz 3 Patch 3 — Settings'in canlı-senkron toggle'ı için (aktif uid namespace'li)
+/// `LiveSyncPrefStore` builder'ı. main tarafından enjekte edilir.
+typedef LiveSyncStoreBuilder = LiveSyncPrefStore Function();
+
 AppRouterBundle createAppRouter(
   VaultLockCubit lock, {
   required SessionCubit session,
   required VaultCubitBuilder vaultCubitBuilder,
   required ViewModeStoreBuilder viewModeStoreBuilder,
+  required LiveSyncStoreBuilder liveSyncStoreBuilder,
 }) {
   // İKİ AYRI notifier (lock + session) → merge yalnız dinler, sahibi değil.
   // Bundle her ikisini de tutar + dispose eder (reviewer [P2]).
@@ -141,9 +147,12 @@ AppRouterBundle createAppRouter(
             // global singleton yerine bunu okur (per-uid kart/liste tercihi).
             RepositoryProvider<ViewModeStore>(
           create: (_) => viewModeStoreBuilder(),
-          child: BlocProvider<VaultCubit>(
-            create: (_) => vaultCubitBuilder()..load(),
-            child: child,
+          child: RepositoryProvider<LiveSyncPrefStore>(
+            create: (_) => liveSyncStoreBuilder(),
+            child: BlocProvider<VaultCubit>(
+              create: (_) => vaultCubitBuilder()..load(),
+              child: child,
+            ),
           ),
         ),
         routes: [

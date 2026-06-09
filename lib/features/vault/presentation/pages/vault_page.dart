@@ -12,6 +12,7 @@ import '../../../../core/router/app_router.dart';
 import '../../../../core/ui/tokens.dart';
 import '../../../auth/presentation/bloc/vault_lock_cubit.dart';
 import '../../data/view_mode_store.dart';
+import '../../domain/token_sync_service.dart';
 import '../bloc/vault_cubit.dart';
 import '../widgets/otp_card.dart';
 
@@ -101,6 +102,7 @@ class _VaultPageState extends State<VaultPage> {
       appBar: AppBar(
         title: const Text('Authenticator'),
         actions: [
+          _SyncIndicator(syncState: state.syncState),
           IconButton(
             icon: Icon(_viewMode == VaultViewMode.card
                 ? Icons.view_list_outlined
@@ -273,6 +275,51 @@ class _VaultPageState extends State<VaultPage> {
     );
     if (confirmed == true) {
       await _runMutation(cubit.purgeCorrupted(), 'Temizlenemedi');
+    }
+  }
+}
+
+/// Faz 3 Patch 3 — AppBar bulut senkron göstergesi. `syncing` → dönen ikon; `error`
+/// → uyarı ikonu (tooltip); `malformedCount>0` → uyarı rozeti; `idle` & temiz → boş.
+/// a11y: Semantics label. Sync desteklenmiyorsa (legacy/uid-siz) durum hep idle → boş.
+class _SyncIndicator extends StatelessWidget {
+  final SyncState syncState;
+  const _SyncIndicator({required this.syncState});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    switch (syncState.phase) {
+      case SyncPhase.syncing:
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Center(
+            child: Semantics(
+              label: 'Senkronize ediliyor',
+              child: const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+          ),
+        );
+      case SyncPhase.error:
+        return IconButton(
+          icon: Icon(Icons.sync_problem, color: scheme.error),
+          tooltip: 'Senkron hatası — sonra tekrar denenecek',
+          onPressed: () => context.read<VaultCubit>().syncNow(),
+        );
+      case SyncPhase.idle:
+        if (syncState.malformedCount > 0) {
+          return IconButton(
+            icon: Icon(Icons.warning_amber, color: scheme.tertiary),
+            tooltip:
+                '${syncState.malformedCount} kayıt sunucuda okunamadı (atlandı)',
+            onPressed: () => context.read<VaultCubit>().syncNow(),
+          );
+        }
+        return const SizedBox.shrink();
     }
   }
 }

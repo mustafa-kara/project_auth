@@ -30,6 +30,7 @@ import '../../../../core/crypto/key_handle.dart';
 import '../../../auth/domain/biometric_exceptions.dart';
 import '../../../auth/domain/biometric_service.dart';
 import '../../../auth/domain/key_manager.dart';
+import '../../../account/data/attrs_dirty_store.dart';
 import '../../../account/domain/key_attributes_repository.dart';
 import '../../../account/domain/sync_exceptions.dart';
 import '../../data/key_attributes_store.dart';
@@ -44,6 +45,12 @@ class VaultStorageKeys {
   static const migrationMarker = 'vault_migration_v1';
   static const viewMode = 'vault_view_mode_v1';
 
+  /// Faz 3 Patch 3 — token sync cursor + canlı-senkron tercihi + key_attributes
+  /// dirty (changePassword retry) marker'ı. Hepsi per-uid (reset namespace'i temizler).
+  static const tokenSyncCursor = 'token_sync_cursor_v1';
+  static const liveSyncEnabled = 'live_sync_enabled_v1';
+  static const attrsDirty = 'attrs_dirty_v1';
+
   /// Patch 5: biyometrik anahtar. Ayrı options'lı/namespace'li storage'da olduğu
   /// için `_deleteKeys` (default storage) ona ULAŞAMAYABİLİR → asıl temizlik
   /// `resetVault` içinde `biometric.disable()` ile yapılır. Burada listede olması
@@ -56,6 +63,9 @@ class VaultStorageKeys {
     plaintextVault,
     migrationMarker,
     viewMode,
+    tokenSyncCursor,
+    liveSyncEnabled,
+    attrsDirty,
     biometricKey,
   ];
 
@@ -68,6 +78,9 @@ class VaultStorageKeys {
         '$prefix$keyAttributes',
         '$prefix$migrationMarker',
         '$prefix$viewMode',
+        '$prefix$tokenSyncCursor',
+        '$prefix$liveSyncEnabled',
+        '$prefix$attrsDirty',
         biometricKey,
       ];
 }
@@ -125,6 +138,11 @@ class VaultLockCubit extends Cubit<VaultLockState> {
   final KeyAttributesRepository? _remoteRepo;
   final String? _uid;
 
+  /// Faz 3 Patch 3 (Adım K) — changePassword sonrası sunucu UPDATE'i ağ hatasına
+  /// düşerse SET kalır → unlock'ta dirty-replay yeniden dener. Opsiyonel (null →
+  /// retry yok; eski testler/legacy etkilenmez).
+  final AttrsDirtyStore? _attrsDirtyStore;
+
   VaultLockCubit({
     required KeyManager keyManager,
     required KeyAttributesStore attrsStore,
@@ -133,6 +151,7 @@ class VaultLockCubit extends Cubit<VaultLockState> {
     required Future<void> Function(List<String> keys) deleteKeys,
     KeyAttributesRepository? remoteRepo,
     String? uid,
+    AttrsDirtyStore? attrsDirtyStore,
   })  : _keyManager = keyManager,
         _attrsStore = attrsStore,
         _migrate = migrate,
@@ -140,6 +159,7 @@ class VaultLockCubit extends Cubit<VaultLockState> {
         _deleteKeys = deleteKeys,
         _remoteRepo = remoteRepo,
         _uid = uid,
+        _attrsDirtyStore = attrsDirtyStore,
         super(const VaultLockState.uninitialized());
 
   /// `locked` emit'i biyometri field'larını taşıyarak yapar (tek nokta — reviewer 4.tur [P1]).
@@ -265,6 +285,43 @@ class VaultLockCubit extends Cubit<VaultLockState> {
     }
   }
 
+  /// Faz 3 Patch 3 (Adım K) — changePassword/recovery-new-password sonrası sunucudaki
+  /// `key_attributes` satırını GÜNCELLER (sunucu sarmalı eski parolada kalmasın → yeni
+  /// cihazda fresh-restore yeni parolayı kullanır). masterKey DEĞİŞMEZ → token re-encrypt YOK.
+  /// Best-effort: ağ hatası → `attrsDirty` marker SET kalır (unlock'ta dirty-replay tekrar dener);
+  /// başarı → marker CLEAR. existsRemote'a göre update (varsa) / upload (ilk insert).
+  Future<void> _syncAttrsAfterPasswordChange() async {
+    final repo = _remoteRepo;
+    final uid = _uid;
+    if (repo == null || uid == null) return; // legacy/uid-siz → no-op
+    try {
+      final attrs = await _attrsStore.read();
+      if (attrs == null) return;
+      if (await repo.existsRemote(uid)) {
+        await repo.update(uid, attrs); // changePassword → UPDATE (LWW)
+      } else {
+        await repo.upload(uid, attrs); // hiç yoksa ilk insert
+      }
+      await _attrsDirtyStore?.clear(); // başarı → marker temizle
+    } catch (_) {
+      // marker SET kalır (recoverWithNewPassword set etti) → unlock'ta yeniden denenir.
+    }
+  }
+
+  /// Unlock/bootstrap-locked-finalize sonrası: dirty marker SET ise sunucu sarmalını
+  /// yeniden yazmayı dener (changePassword ağ hatasının gerçek retry'ı). Best-effort.
+  Future<void> _replayDirtyAttrsIfNeeded() async {
+    final dirtyStore = _attrsDirtyStore;
+    if (dirtyStore == null || _remoteRepo == null || _uid == null) return;
+    try {
+      if (await dirtyStore.isDirty()) {
+        await _syncAttrsAfterPasswordChange();
+      }
+    } catch (_) {
+      // best-effort.
+    }
+  }
+
   // --- Setup akışı (recovery DOĞRULANMADAN persist YOK) ---
 
   /// SetupPassword → masterKey + attrs + mnemonic üretir; DİSKE YAZMAZ. Recovery
@@ -387,6 +444,8 @@ class VaultLockCubit extends Cubit<VaultLockState> {
       owned = true;
       emit(_unlocked());
       unawaited(_backfillRemote()); // Patch 2: backfill (best-effort, guard'lı)
+      // Patch 3 (Adım K): önceki changePassword sunucuya yazılamadıysa (dirty) yeniden dene.
+      unawaited(_replayDirtyAttrsIfNeeded());
     } finally {
       if (!owned) key.dispose(); // migration fail / background-abort → key sızmaz
     }
@@ -405,6 +464,9 @@ class VaultLockCubit extends Cubit<VaultLockState> {
       final newAttrs =
           await _keyManager.changePassword(attrs, key, newPassword);
       await _attrsStore.write(newAttrs);
+      // Faz 3 Patch 3 (Adım K): parola değişti → sunucu sarmalı GÜNCELLENMELİ. Marker
+      // SET (ağ hatasında unlock'ta dirty-replay yeniden dener); başarıda _sync... clear eder.
+      await _attrsDirtyStore?.setDirty();
       await _refreshBiometricState(newAttrs); // bmk korunmuşsa enrolled true kalır
       // Migration BAŞARIYLA bitmeden sahiplenme (review P1): _migrate fırlatırsa
       // key finally'de dispose edilir, _masterKey null kalır (locked invariant'ı korunur).
@@ -419,7 +481,9 @@ class VaultLockCubit extends Cubit<VaultLockState> {
       _masterKey = key;
       owned = true;
       emit(_unlocked());
-      unawaited(_backfillRemote()); // Patch 2: backfill (best-effort, guard'lı)
+      // Patch 3 (Adım K): parola değişti → sunucu sarmalını GÜNCELLE (best-effort;
+      // _backfillRemote DEĞİL — o insert-once guard'lı, var olan satırı güncellemez).
+      unawaited(_syncAttrsAfterPasswordChange());
     } on WrongRecoveryKeyException {
       emit(_locked(error: VaultLockError.wrongRecovery));
     } on WeakPasswordException {
@@ -693,6 +757,9 @@ class VaultLockCubit extends Cubit<VaultLockState> {
       _masterKey = key;
       owned = true;
       emit(_unlocked());
+      // Patch 3 (Adım K): biyometrik unlock'ta da dirty changePassword'ı yeniden dene.
+      unawaited(_backfillRemote());
+      unawaited(_replayDirtyAttrsIfNeeded());
     } finally {
       if (!owned) key.dispose();
     }

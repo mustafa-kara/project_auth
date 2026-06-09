@@ -381,6 +381,36 @@ biyometriyi yeniden enroll eder.
 - **Multi-vault:** her uid kendi namespace'inde; RLS owner-only + uid namespace ile A'nın attrs'ı B'ye görünmez.
   legacy uid-siz vault sunucuya bağlanmaz (`uid=null` → restore/upload no-op).
 
+### token push/pull + changePassword UPDATE (Faz 3 Patch 3 — uygulandı)
+
+Patch 3 şifreli **token'ları** senkronlar + Patch 2'nin changePassword açığını kapatır. Sunucuya yalnız
+opak `ciphertext`/`nonce` (+ `version`, `deleted`) gider; AAD `token|1|<id>`. Token sync masterKey GÖRMEZ.
+
+- **Katmanlar:** `RawTokenStore` (= `EncryptedVaultRepository`'nin AYRI yüzü — `exportRaw`/`importRemote`/
+  `markDeleted`; decrypt YOK, diskten ham okur/yazar) + `RemoteTokenRepository`/`SupabaseTokenRepository`
+  (opak transport; `ByteaCodec` + `SyncError`) + `TokenSyncService` (cursor + push/pull/merge + Realtime).
+  Çözülmüş `VaultRepository` (`load/save/purgeCorrupted`) DEĞİŞMEZ → mevcut testler/VaultCubit korunur.
+- **Arrival-order LWW:** sunucu `updated_at` tek geçerli sıra (client epoch-ms ile kıyaslanmaz); her kayıt
+  `sv` (son uzlaşılan sunucu cursor'u) tutar. Lokal-dirty (`sv=null`) için pull-cursor ile echo-vs-yeni ayrımı.
+  Merge id-bazlı + idempotent. `importRemote(rows, {pullCursorIso})` — cursor merge'e parametre.
+- **Merge yazımı = VaultCubit mutasyon kuyruğu ALTINDA:** `TokenSyncService` `importRemote`'u DOĞRUDAN
+  çağırmaz; `mergeRemote` callback'i → `VaultCubit.applyRemoteMerge` (import + reload TEK kritik bölümde,
+  `_opChain` sequencer) → eşzamanlı kullanıcı add/delete/increment ile yarışmaz (merge ile mutasyon aynı
+  tek yazma kuyruğunda serileşir). Push best-effort (kendi `try/catch`'i) → push hatası pull'u engellemez.
+- **Soft-delete (tombstone):** `markDeleted` son blob'la tombstone + atomik yazar; `load()` accounts'ta
+  göstermez, `exportRaw` push için döndürür; save'ler arası korunur (token diriltilmez).
+- **Realtime = yalnız tetikleyici (#1180):** payload OKUNMAZ → REST `pullSince`. Sıra: abone-önce → catch-up
+  pull → idempotent merge. Abonelik VaultCubit subtree lifecycle'ına bağlı (unlock'ta start, lock/arka-plan/
+  signOut'ta `VaultCubit.close → sync.dispose → unsubscribe`). Canlı senkron Settings toggle'ı (varsayılan kapalı).
+- **Bozuk-remote-satır karantinası:** başarılı yanıttaki tek malformed satır atlanır + sayılır (vault düşmez);
+  cursor yalnız ilk-malformed'dan önceki son-valid'e ilerler (`safeCursorIso` cap) → gap atlanmaz. Ağ/RLS
+  hatası (tüm istek) `SyncError` (cursor ilerlemez) — tek bozuk satırdan AYRI.
+- **changePassword (key_attributes UPDATE):** masterKey DEĞİŞMEZ → token re-encrypt YOK; yalnız
+  `key_attributes` satırı UPDATE (LWW). Ağ hatası → `attrs_dirty_v1` marker → unlock'ta dirty-replay retry.
+  Çakışmada son-ulaşan kazanır (veri kaybı yok; kaybeden lokal attrs ile çalışır, recovery sarmalı değişmez).
+- **`uid==null` (legacy/uid-siz) → sync INERT** (byte-identical eski davranış). KASITLI sınırlar: token sync
+  yalnız unlocked; push-zorla re-wrap kapsam dışı; tombstone GC ileride.
+
 ---
 
 ## 8. Test Stratejisi

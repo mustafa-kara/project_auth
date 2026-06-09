@@ -15,6 +15,7 @@ import 'package:project_auth/core/crypto/crypto_exceptions.dart';
 import 'package:project_auth/core/crypto/encrypted_blob.dart';
 import 'package:project_auth/core/crypto/key_attributes.dart';
 import 'package:project_auth/core/crypto/key_handle.dart';
+import 'package:project_auth/features/account/data/attrs_dirty_store.dart';
 import 'package:project_auth/features/account/domain/key_attributes_repository.dart';
 import 'package:project_auth/features/account/domain/sync_exceptions.dart';
 import 'package:project_auth/features/auth/data/key_attributes_store.dart';
@@ -232,6 +233,7 @@ VaultLockCubit _build(
   BiometricService? biometric,
   KeyAttributesRepository? remoteRepo,
   String? uid,
+  AttrsDirtyStore? attrsDirtyStore,
 }) {
   final mig = migrated ?? <String>[];
   return VaultLockCubit(
@@ -250,6 +252,7 @@ VaultLockCubit _build(
     },
     remoteRepo: remoteRepo,
     uid: uid,
+    attrsDirtyStore: attrsDirtyStore,
   );
 }
 
@@ -270,6 +273,13 @@ class FakeKeyAttributesRepository implements KeyAttributesRepository {
   int uploadCount = 0;
   KeyAttributes? uploaded;
 
+  /// Faz 3 Patch 3 (Adım K) — update çağrı sayısı + son yazılan (changePassword sync).
+  int updateCount = 0;
+  KeyAttributes? updated;
+
+  /// upload/update bu hatayı fırlatır (ağ hatası → dirty marker testi).
+  SyncError? writeError;
+
   @override
   Future<KeyAttributes?> fetch(String uid) async {
     if (fetchGate != null) await fetchGate;
@@ -285,8 +295,16 @@ class FakeKeyAttributesRepository implements KeyAttributesRepository {
 
   @override
   Future<void> upload(String uid, KeyAttributes attrs) async {
+    if (writeError != null) throw writeError!;
     uploadCount++;
     uploaded = attrs;
+  }
+
+  @override
+  Future<void> update(String uid, KeyAttributes attrs) async {
+    if (writeError != null) throw writeError!;
+    updateCount++;
+    updated = attrs;
   }
 }
 
@@ -1148,6 +1166,90 @@ void main() {
       await cubit.unlock('parola123');
       await Future<void>.delayed(Duration.zero);
       expect(cubit.state.status, VaultLockStatus.unlocked);
+      await cubit.close();
+    });
+  });
+
+  group('Patch 3 (Adım K) — key_attributes UPDATE senkronu + dirty retry', () {
+    test('recoverWithNewPassword + sunucuda VAR → update çağrılır (insert DEĞİL)',
+        () async {
+      await store.write(_fakeAttrs());
+      final repo = FakeKeyAttributesRepository()..exists = true;
+      final dirty = AttrsDirtyStore(storage: storage);
+      final cubit = _build(FakeKeyManager(), store,
+          remoteRepo: repo, uid: 'uA', attrsDirtyStore: dirty);
+      await cubit.bootstrap();
+      await cubit.recoverWithNewPassword(
+          List.generate(24, (i) => 'word$i'), 'yeniParola1');
+      await Future<void>.delayed(Duration.zero);
+      expect(cubit.state.status, VaultLockStatus.unlocked);
+      expect(repo.updateCount, 1, reason: 'var olan satır UPDATE edildi');
+      expect(repo.uploadCount, 0, reason: 'insert DEĞİL');
+      expect(await dirty.isDirty(), isFalse, reason: 'başarı → marker temizlendi');
+      await cubit.close();
+    });
+
+    test('recoverWithNewPassword + sunucuda YOK → upload (ilk insert)', () async {
+      await store.write(_fakeAttrs());
+      final repo = FakeKeyAttributesRepository()..exists = false;
+      final dirty = AttrsDirtyStore(storage: storage);
+      final cubit = _build(FakeKeyManager(), store,
+          remoteRepo: repo, uid: 'uA', attrsDirtyStore: dirty);
+      await cubit.bootstrap();
+      await cubit.recoverWithNewPassword(
+          List.generate(24, (i) => 'word$i'), 'yeniParola1');
+      await Future<void>.delayed(Duration.zero);
+      expect(repo.uploadCount, 1);
+      expect(repo.updateCount, 0);
+      expect(await dirty.isDirty(), isFalse);
+      await cubit.close();
+    });
+
+    test('update ağ hatası → dirty marker SET kalır (unlocked\'ı bozmaz)', () async {
+      await store.write(_fakeAttrs());
+      final repo = FakeKeyAttributesRepository()
+        ..exists = true
+        ..writeError = const SyncNetworkError();
+      final dirty = AttrsDirtyStore(storage: storage);
+      final cubit = _build(FakeKeyManager(), store,
+          remoteRepo: repo, uid: 'uA', attrsDirtyStore: dirty);
+      await cubit.bootstrap();
+      await cubit.recoverWithNewPassword(
+          List.generate(24, (i) => 'word$i'), 'yeniParola1');
+      await Future<void>.delayed(Duration.zero);
+      expect(cubit.state.status, VaultLockStatus.unlocked,
+          reason: 'best-effort: ağ hatası unlocked\'ı bozmaz');
+      expect(await dirty.isDirty(), isTrue, reason: 'retry için SET kalır');
+      await cubit.close();
+    });
+
+    test('dirty-replay: sonraki unlock + ağ var → update + marker CLEAR', () async {
+      await store.write(_fakeAttrs());
+      // Marker'ı önceden SET et (önceki turda changePassword ağ hatasına düşmüş gibi).
+      final dirty = AttrsDirtyStore(storage: storage);
+      await dirty.setDirty();
+      final repo = FakeKeyAttributesRepository()..exists = true;
+      final cubit = _build(FakeKeyManager(), store,
+          remoteRepo: repo, uid: 'uA', attrsDirtyStore: dirty);
+      await cubit.bootstrap();
+      await cubit.unlock('parola123');
+      await Future<void>.delayed(Duration.zero);
+      expect(repo.updateCount, 1, reason: 'unlock dirty-replay → update');
+      expect(await dirty.isDirty(), isFalse, reason: 'başarı → temizlendi');
+      await cubit.close();
+    });
+
+    test('uid=null → changePassword sync no-op (legacy regresyon)', () async {
+      await store.write(_fakeAttrs());
+      final dirty = AttrsDirtyStore(storage: storage);
+      final cubit = _build(FakeKeyManager(), store,
+          attrsDirtyStore: dirty); // remoteRepo/uid yok
+      await cubit.bootstrap();
+      await cubit.recoverWithNewPassword(
+          List.generate(24, (i) => 'word$i'), 'yeniParola1');
+      await Future<void>.delayed(Duration.zero);
+      expect(cubit.state.status, VaultLockStatus.unlocked);
+      // marker setDirty edildi ama replay no-op (repo yok) → SET kalır, zararsız.
       await cubit.close();
     });
   });

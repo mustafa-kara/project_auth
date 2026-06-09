@@ -51,8 +51,13 @@
   yeni cihazda restore → master parola → unlock. `ByteaCodec` (tek nokta), `SupabaseKeyAttributesRepository`,
   `restoring`/`restoreFailed` state + `RestoreFailedPage` (ağ hatasında setup'a düşmez). masterKey/KEK/secret/bmk
   ASLA sunucuya gitmez. **Token sync DEĞİL (Patch 3).** **host 257→293.** *(Flutter)*
-- [ ] **Patch 3** — Şifreli token push/pull; **payload opaklık testi**; arrival-order LWW + soft delete;
-  Realtime tetikleyici → REST pull. **Lokal→bulut backfill** (idempotent upsert, ARCHITECTURE §7.5). *(Flutter)*
+- [x] **Patch 3 — Şifreli token push/pull + key_attributes UPDATE.** ✅ Token ciphertext/nonce sunucuyla
+  senkronlanır (opak; AAD `token|1|<id>`). Arrival-order LWW (sunucu `updated_at`; per-kayıt `sv` cursor) +
+  soft-delete (tombstone) + Realtime yalnız tetikleyici → REST pull (bytea #1180) + bozuk-satır karantinası
+  (`safeCursorIso` cap). `RawTokenStore` (decrypt'siz ham port) + `SupabaseTokenRepository` + `TokenSyncService`.
+  **changePassword artık `key_attributes`'ı UPDATE eder** (`attrs_dirty_v1` retry; masterKey değişmez → token
+  re-encrypt yok). Settings canlı-senkron toggle + AppBar göstergesi. `uid==null` legacy inert. **host 293→347.**
+  Gerçek-ağ round-trip = manuel/integration checklist. *(Flutter)*
 - [ ] **Patch 4** — `devices` kayıt (stable device_id + last_seen) + `catalog_services`/`feature_flags`/`announcements` okuma. *(Flutter)*
 - [x] Uygulama kilidi (biyometrik) feature'ı — **Faz 2 Patch 5'te tamamlandı.** ✅
 

@@ -27,4 +27,9 @@ abstract interface class KeyAttributesRepository {
   /// Çağıran ÖNCE [existsRemote] ile guard'lar (server-wins: var olanı EZME).
   /// Ağ/izin hatası → [SyncError].
   Future<void> upload(String uid, KeyAttributes attrs);
+
+  /// Mevcut satırı GÜNCELLER (Faz 3 Patch 3 — changePassword/recovery-new-password
+  /// sonrası sunucudaki sarmal yenilenir; LWW `updated_at` trigger ile). masterKey
+  /// DEĞİŞMEZ (yalnız KEK-sarmalı döner) → token re-encrypt gerekmez. Ağ/izin → [SyncError].
+  Future<void> update(String uid, KeyAttributes attrs);
 }

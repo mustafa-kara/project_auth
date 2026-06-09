@@ -26,7 +26,7 @@ E2E (uçtan uca) şifreli, çoklu cihaz senkronize **TOTP/HOTP authenticator** �
 
 ---
 
-## Mevcut durum (2026-06-08)
+## Mevcut durum (2026-06-09)
 
 | Aşama | Durum |
 |---|---|
@@ -40,6 +40,7 @@ E2E (uçtan uca) şifreli, çoklu cihaz senkronize **TOTP/HOTP authenticator** �
 | Flutter — Faz 2 biyometri (Patch 5) | ✅ Biyometrik unlock kısayolu: 3. wrap (`biometricEncryptedMasterKey`) + OS-keystore erişim kontrolü (iOS Secure Enclave + `biometryCurrentSet`, Android `strongBiometricOnly`+`enforceBiometrics`), gerçek geçit = `storage.read` (çift prompt yok; `local_auth` yalnız availability), Settings enable/disable + UnlockPage butonu, `device_info_plus` API<28 gate, lifecycle inactive-vs-paused ayrımı, parola+recovery her zaman çalışır · **host 220/220** · bkz. [docs/CRYPTO.md §11](docs/CRYPTO.md) |
 | Flutter — Faz 3 auth (Patch 1) | ✅ Supabase email/parola kimlik (kayıt/giriş/çıkış + e-posta onayı, PKCE deep-link). İki-kapı guard (kimlik EN DIŞTA → vault kilidi), `unknown→/splash` (masterKey crash'i yok), `onAuthStateChange` `onError` (crash önleme), signOut → vault kilit + ağ-hatası-dirençli `signedOut`, multi-vault per uid (namespace + account-linking + legacy `bmk` temizleme). Login parolası ≠ master parola. **Sync YOK (Patch 2–3).** · **host 257/257** |
 | Flutter — Faz 3 sync (Patch 2) | ✅ `key_attributes` upload/restore (zaten-şifreli KDF + KEK/recovery-wrapped master key). Yeni cihazda Supabase login → buluttan çek → master parola → unlock. `ByteaCodec` (bytea↔Uint8List tek nokta), upload `unlocked`'ta guard'lı insert (server-wins). `restoring`/`restoreFailed` state: fetch sürerken `/splash` (setup'a düşmez), ağ hatası ayrı ekran. **masterKey/KEK/secret/bmk ASLA sunucuya gitmez.** Sunucu şeması değişmedi. **Token sync YOK (Patch 3).** · **host 293/293** |
+| Flutter — Faz 3 token sync (Patch 3) | ✅ Şifreli token push/pull + soft-delete (tombstone) + arrival-order LWW (sunucu `updated_at`; per-kayıt `sv` cursor). `RawTokenStore` (decrypt'siz ham port) + `SupabaseTokenRepository` + `TokenSyncService`. Realtime = yalnız tetikleyici → REST pull (bytea #1180); bozuk-satır karantinası (`safeCursorIso` cap). **changePassword artık `key_attributes`'ı UPDATE eder** (`attrs_dirty_v1` retry marker); masterKey değişmez → token re-encrypt yok. Settings canlı-senkron toggle + AppBar sync göstergesi. **Sunucuya yalnız opak ciphertext/nonce gider; `uid==null` legacy yolu inert.** · **host 347/347** |
 | Admin paneli (Next.js) | ⏳ Faz 6 |
 
 **Backend canlı proje:** `authenticator-dev` (Supabase, eu-central-1, PG17). Detay: [PROJECT_INFO.md](supabase/PROJECT_INFO.md).
@@ -51,7 +52,7 @@ E2E (uçtan uca) şifreli, çoklu cihaz senkronize **TOTP/HOTP authenticator** �
 0. **Temel kurulum** — Flutter iskeleti, bağımlılıklar, go_router, DI
 1. **OTP motoru** — TOTP/HOTP/Steam (RFC 6238/4226), QR tarama, vault UI (sunucusuz çalışır)
 2. **E2E kripto** — libsodium, master key + recovery key, lokal vault şifreleme
-3. **Supabase auth + senkron** — DB ✅ hazır; Flutter Patch 1 (auth) ✅; sync (Patch 2–3) sırada
+3. **Supabase auth + senkron** — DB ✅; Flutter Patch 1 (auth) ✅ + Patch 2 (key_attributes) ✅ + Patch 3 (token sync + changePassword UPDATE) ✅
 4. **Sosyal giriş + push** — Google/Apple Sign-In, FCM *(developer hesapları gerekli)*
 5. **Import/Export + katalog** — Google Auth / Aegis / 2FAS göçü
 6. **Admin paneli** — Next.js, analitik, duyuru/push, feature flag
@@ -86,7 +87,7 @@ Proje kökü Flutter uygulamasıdır (`lib/`, `pubspec.yaml`). Gereken: Flutter 
 ```bash
 flutter pub get
 flutter analyze          # lint — şu an temiz
-flutter test             # 293/293 host (OTP RFC vektörleri + URI validasyon + VaultCubit + crypto blob/attrs/BIP39 + VaultLockCubit/guard/KeyAttributesStore + lifecycle arka-plan-yarışı + corruption/integrity-guard/a11y widget + CountdownColors + recovery-verify/textScaler + biyometri + Faz 3 auth: SessionCubit/sessionGuard/onAuthSignedOut/multi-vault-namespace/login-register widget + Patch 2 sync: ByteaCodec/key_attributes-mapping/restore-restoring-restoreFailed/upload-guard/RestoreFailedPage)
+flutter test             # 347/347 host (OTP RFC vektörleri + URI validasyon + VaultCubit + crypto blob/attrs/BIP39 + VaultLockCubit/guard/KeyAttributesStore + lifecycle arka-plan-yarışı + corruption/integrity-guard/a11y widget + CountdownColors + recovery-verify/textScaler + biyometri + Faz 3 auth: SessionCubit/sessionGuard/onAuthSignedOut/multi-vault-namespace/login-register widget + Patch 2 sync: ByteaCodec/key_attributes-mapping/restore-restoring-restoreFailed/upload-guard/RestoreFailedPage + Patch 3 token sync: RawTokenStore/LWW-merge/tombstone/SupabaseTokenRepository-mapping/TokenSyncService/changePassword-UPDATE+dirty-replay/sync-göstergesi/canlı-toggle)
 flutter run              # cihaz/emülatörde çalıştır
 ```
 
