@@ -12,6 +12,7 @@ import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
 import 'features/account/domain/account_vault_manager.dart';
 import 'features/account/domain/auth_repository.dart';
+import 'features/account/domain/key_attributes_repository.dart';
 import 'features/account/data/pending_confirmation_store.dart';
 import 'features/account/presentation/bloc/session_cubit.dart';
 import 'features/account/presentation/bloc/session_state.dart';
@@ -125,10 +126,16 @@ class _AuthenticatorAppState extends State<AuthenticatorApp>
       storage: storage,
       keyPrefix: prefix,
     );
+    // Faz 3 Patch 2: uid prefix'ten türetilir ('<uid>/' → '<uid>'; boş → null).
+    // legacy/uid-siz vault (prefix='') → uid=null → restore/upload NO-OP (Patch 1 ile
+    // tutarlı; account-linking sonrası uid namespace'ine geçince aktifleşir).
+    final uid = prefix.isEmpty ? null : prefix.substring(0, prefix.length - 1);
     _lock = VaultLockCubit(
       keyManager: locator<KeyManager>(),
       attrsStore: KeyAttributesStore(storage: storage, keyPrefix: prefix),
       biometric: locator<BiometricService>(),
+      remoteRepo: locator<KeyAttributesRepository>(),
+      uid: uid,
       migrate: (masterKey) => migration.migrateIfNeeded(masterKey: masterKey),
       deleteKeys: (keys) async {
         // Namespace'li reset: forUser(prefix) anahtarlarını sil (prefix boşsa Faz2 all).

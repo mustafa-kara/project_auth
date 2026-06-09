@@ -18,6 +18,7 @@ import '../../features/account/presentation/pages/account_link_page.dart';
 import '../../features/account/presentation/pages/email_confirm_pending_page.dart';
 import '../../features/account/presentation/pages/login_page.dart';
 import '../../features/account/presentation/pages/register_page.dart';
+import '../../features/account/presentation/pages/restore_failed_page.dart';
 import '../../features/account/presentation/pages/splash_page.dart';
 import '../../features/auth/presentation/bloc/vault_lock_cubit.dart';
 import '../../features/auth/presentation/bloc/vault_lock_state.dart';
@@ -52,6 +53,9 @@ abstract final class Routes {
   static const authRegister = '/auth/register';
   static const authConfirm = '/auth/confirm';
   static const authLink = '/auth/link';
+
+  /// Faz 3 Patch 2 — bulut restore (`key_attributes` fetch) AĞ/RLS hatası ekranı.
+  static const authRestoreFailed = '/auth/restore-failed';
 }
 
 /// Router + ona bağlı refresh notifier'ları birlikte taşıyan paket. Kök widget bunu
@@ -123,6 +127,12 @@ AppRouterBundle createAppRouter(
         path: Routes.authLink,
         name: 'authLink',
         builder: (context, state) => const AccountLinkPage(),
+      ),
+      // Faz 3 Patch 2 — bulut restore başarısız (vault ShellRoute DIŞINDA; masterKey gerektirmez).
+      GoRoute(
+        path: Routes.authRestoreFailed,
+        name: 'authRestoreFailed',
+        builder: (context, state) => const RestoreFailedPage(),
       ),
       // --- Unlocked subtree: VaultCubit + (per-uid) ViewModeStore yalnız burada ---
       ShellRoute(
@@ -227,15 +237,26 @@ String? sessionGuard(
       if (session.linkRequired) {
         return location == Routes.authLink ? null : Routes.authLink;
       }
-      // 2) Sonra vault guard (masterKey gerektiren shell yalnız buradan sonra).
-      // splash/auth rotasındaysak vault giriş noktasına git: lock'un istediği yer
-      // (uninitialized→/setup, locked→/unlock, unlocked→/). `guardRedirect(.., vault)`
-      // null dönerse (unlocked → vault zaten doğru) açıkça `/`'a yönlendir (kullanıcı
-      // hâlâ /auth/login'de olduğu için orada KALMAMALI).
+      // 2) Özel vault statüleri (restoring/restoreFailed/keyAttributesCorrupted) GERÇEK
+      //    `location` ile ele alınır (review [P1] location-kaybı): bunların DEDICATED
+      //    hedefleri (/splash, /auth/restore-failed, /auth-integrity) AUTH ROUTE olduğundan,
+      //    aşağıdaki splash/auth rewrite'ı `guardRedirect(lock, Routes.vault)` çağırıp
+      //    gerçek location'ı KAYBEDERSE "hedefteyse null" koruması devre dışı kalır →
+      //    redirect loop. Bu yüzden rewrite'tan ÖNCE, gerçek location ile yönet.
+      final vaultRedirect = guardRedirect(lock, location);
+      if (lock.status == VaultLockStatus.restoring ||
+          lock.status == VaultLockStatus.restoreFailed ||
+          lock.status == VaultLockStatus.keyAttributesCorrupted) {
+        return vaultRedirect; // hedefteyse null → döngü yok
+      }
+      // 3) Normal vault statüleri (uninitialized/locked/unlocked/setupPending/locking):
+      //    splash/auth rotasındaysak vault giriş noktasına git: lock'un istediği yer
+      //    (uninitialized→/setup, locked→/unlock, unlocked→/). null dönerse (unlocked →
+      //    vault doğru) açıkça `/`'a (kullanıcı /auth/login'de KALMAMALI).
       if (location == Routes.splash || isAuthRoute) {
         return guardRedirect(lock, Routes.vault) ?? Routes.vault;
       }
-      return guardRedirect(lock, location);
+      return vaultRedirect;
   }
 }
 
@@ -267,5 +288,14 @@ String? guardRedirect(VaultLockState lock, String location) {
       return Routes.vault;
     case VaultLockStatus.keyAttributesCorrupted:
       return location == Routes.authIntegrity ? null : Routes.authIntegrity;
+    case VaultLockStatus.restoring:
+      // Faz 3 Patch 2: sunucudan attrs ÇEKİLİYOR → /splash (spinner). ASLA /setup
+      // (fetch bitmeden yeni vault kurulmasın — review [P1] #1). "hedefteyse null" → döngü yok.
+      return location == Routes.splash ? null : Routes.splash;
+    case VaultLockStatus.restoreFailed:
+      // Faz 3 Patch 2: fetch AĞ/RLS hatası → ayrı ekran (uninitialized'a DÜŞME).
+      return location == Routes.authRestoreFailed
+          ? null
+          : Routes.authRestoreFailed;
   }
 }

@@ -46,7 +46,11 @@
   (PKCE), `SessionCubit` (signedIn/out/emailConfirmPending), iki-kapı guard (kimlik + vault),
   e-posta onay deep-link, signOut→vault kilit + ağ-hatası-dirençli `signedOut`, multi-vault per uid
   (namespace + account-linking + legacy migration `bmk` temizleme). **host 220→257.** *(Flutter)*
-- [ ] **Patch 2** — `key_attributes` upload/download; cihazlar arası master key kurtarma + bytea hex codec. *(Flutter)*
+- [x] **Patch 2 — `key_attributes` upload/restore + bytea codec.** ✅ Zaten-şifreli metadata (KDF + KEK/
+  recovery-wrapped master key + nonce'lar) sunucuya backfill (unlocked'ta guard'lı insert, server-wins) +
+  yeni cihazda restore → master parola → unlock. `ByteaCodec` (tek nokta), `SupabaseKeyAttributesRepository`,
+  `restoring`/`restoreFailed` state + `RestoreFailedPage` (ağ hatasında setup'a düşmez). masterKey/KEK/secret/bmk
+  ASLA sunucuya gitmez. **Token sync DEĞİL (Patch 3).** **host 257→293.** *(Flutter)*
 - [ ] **Patch 3** — Şifreli token push/pull; **payload opaklık testi**; arrival-order LWW + soft delete;
   Realtime tetikleyici → REST pull. **Lokal→bulut backfill** (idempotent upsert, ARCHITECTURE §7.5). *(Flutter)*
 - [ ] **Patch 4** — `devices` kayıt (stable device_id + last_seen) + `catalog_services`/`feature_flags`/`announcements` okuma. *(Flutter)*

@@ -2,6 +2,45 @@
 
 Proje ilerleme günlüğü. En yeni en üstte.
 
+## 2026-06-08 (Faz 3 Patch 2 — key_attributes upload/restore)
+
+Kripto **metadatası** (`key_attributes`: KDF parametreleri + KEK/recovery ile zaten-şifreli master
+key) sunucuya yedeklenir ve **yeni cihazda geri yüklenir** — E2E garantisi KORUNARAK. Artık kullanıcı
+yeni cihazda Supabase'e girip master parolasıyla vault'u açabilir (token'lar henüz gelmez — Patch 3).
+**Token sync YOK.** Sunucu şeması DEĞİŞMEDİ. Üç tur plan review + iki tur implementasyon review (Codex),
+her API `.pub-cache`/Context7 kaynağından teyit edilerek. host **257/257 → 293/293**, APK debug build OK.
+
+- **Yalnız zaten-şifreli metadata gider:** `encrypted_master_key`/`recovery_encrypted_master_key` +
+  KDF `salt/ops/mem` + nonce'lar. **masterKey, KEK, recovery key, açık TOTP secret ASLA sunucuya gitmez.**
+  `bmk` (biyometri wrap) da gitmez (cihaz-yerel; sunucu şemasında kolon yok → yeni cihaz yeniden enroll).
+- **bytea interop tek noktada (`ByteaCodec`):** PostgreSQL `bytea` ↔ `Uint8List` (`\x`+hex). Lokal
+  `EncryptedBlob` nonce+ciphertext'i BİRLİKTE tutar; sunucu AYRI kolonlar → upload'ta blob İKİYE bölünür,
+  restore'da iki kolondan kurulur. bytea JSON-body INSERT formatı cihazda doğrulanacak açık risk → tek
+  dosyada izole (gerekirse oradan düzeltilir; şema değişmez).
+- **Restore (yeni cihaz):** `VaultLockCubit.bootstrap` lokal attrs yoksa sunucudan çeker. **Fetch
+  BAŞLAMADAN ÖNCE `restoring` state** → router `/splash` (spinner), **kullanıcı `/setup` GÖRMEZ** (fetch
+  bitmeden yeni vault kuramaz → çift-vault önlenir). remote VAR → lokale yaz + `locked` (master parola
+  sorulur); gerçek 0-row → `uninitialized` (setup); **ağ/RLS hatası → ayrı `restoreFailed` ekranı**
+  (`/auth/restore-failed`: tekrar dene + hesap değiştir; parola/recovery/biyometri YOK) — `uninitialized`'a
+  DÜŞMEZ (yanlış parola kurup sunucu vault'unu çakıştıramaz). `SyncError` ile gerçek 0-row KESİN ayrılır.
+- **Upload (backfill):** vault `unlocked` olunca (unlock/recover/commitSetup) `VaultLockCubit` içinde
+  best-effort guard'lı insert: sunucuda kayıt VARSA üzerine YAZMA (server-wins; changePassword çok-cihaz
+  senkronu KASITLI olarak Patch 3 `updated_at` LWW'ye ertelendi). Best-effort: kullanıcıyı bloklamaz, hata sessiz.
+- **Router guard (review [P1] location-kaybı fix):** `sessionGuard` signedIn dalında özel vault statüleri
+  (`restoring`/`restoreFailed`/`keyAttributesCorrupted`) `splash`/auth rewrite'ından ÖNCE GERÇEK `location`
+  ile ele alınır → hedefteyken `null` (redirect-loop yok). Yan fayda: mevcut `keyAttributesCorrupted`'ın
+  da aynı latent location-kaybı bug'ı kapandı.
+- **Regresyon yok:** `VaultLockCubit.remoteRepo`/`uid` NULLABLE → legacy/uid-siz vault ve Patch 1 testleri
+  eski davranışı birebir korur (restore/upload no-op). uid prefix'ten türetilir (`'<uid>/'`→`'<uid>'`; boş→null).
+- **Restore lokal-finalize hatası (review-sonrası [P2] fix):** remote fetch başarılı ama `attrsStore.write`
+  (Keychain/Keystore IO) fırlarsa, eskiden hata `bootstrap` future'ından kabarıp state `restoring`'te asılı
+  kalırdı (router `/splash`'te takılır, retry yok). `_restoreFromRemote` artık `SyncError` DIŞI beklenmeyen
+  hataları da `restoreFailed`'a çevirir (güvenli + retry edilebilir; `/setup`'a düşmez, unhandled future yok).
+- Yeni testler: `bytea_codec_test`, `supabase_key_attributes_repository_test` (mapping round-trip + bmk
+  gönderilmez), `vault_lock_cubit_test` (+restore 9 senaryo: fetch-pending→`restoring`, ağ→`restoreFailed`,
+  retry, upload-guard), `restore_failed_page_test` (parola/recovery YOK), `guard_test` (+restoring/restoreFailed
+  + location-kaybı regresyon). **293/293 host, analyze temiz, APK debug build OK.** Gerçek bytea ağ akışı = manuel checklist.
+
 ## 2026-06-08 (Faz 3 Patch 1 — Supabase kimlik / auth)
 
 Uygulamaya **kimlik katmanı** eklendi (Supabase email/parola): kayıt/giriş/çıkış + e-posta onayı.

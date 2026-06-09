@@ -210,3 +210,25 @@ açıkça `BiometricService.disable()` çağırır (default `_deleteKeys` yetmez
 2. Biyometri seti değiştir (yeni parmak ekle) → biyometri başarısız (`KeyMissing`) → parolaya düş,
    `bmk` temizlenir → Settings'ten yeniden enroll.
 3. Lockout (çok deneme) → parolaya düş. App<28 (Android) → buton hiç görünmez.
+
+## 12. Bulut metadata senkronu (Faz 3 Patch 2)
+
+**Amaç:** `key_attributes`'ı sunucuya yedekleyip yeni cihazda geri yüklemek — E2E ZAYIFLATMADAN.
+Token sync DEĞİL (Patch 3).
+
+**Sunucuya giden (hepsi zaten opak):**
+- `kdf_salt`, `kdf_ops`, `kdf_mem` — KDF parametreleri (parola → KEK türetmek için; parolanın kendisi değil).
+- `encrypted_master_key` + `master_key_nonce` — masterKey'in KEK ile sarmalı hâli (`masterkey-kek|1` AAD).
+- `recovery_encrypted_master_key` + `recovery_nonce` — masterKey'in recovery key ile sarmalı hâli.
+
+**Sunucuya ASLA gitmeyen:** `masterKey` (ham), `KEK`, `recovery key` (ham/mnemonic), açık TOTP secret,
+**`bmk`** (biyometri wrap — cihaz-yerel OS-keystore; sunucu şemasında kolon yok → yeni cihaz yeniden enroll).
+Login parolası ≠ master parola; biri diğerini türetmez.
+
+**Format:** lokal `EncryptedBlob` nonce+ciphertext'i BİRLİKTE; sunucu (`key_attributes`) AYRI bytea kolonlar.
+`ByteaCodec` (`\x`+hex, tek nokta) ile bölünür/birleştirilir. Restore'da blob `version = supportedVersion`.
+
+**Server-wins:** upload yalnız sunucuda kayıt YOKSA (ilk backfill insert). Var olan attrs EZİLMEZ →
+bir cihazdaki `changePassword` sunucuyu Patch 2'de güncellemez (çok-cihaz tutarlılığı Patch 3 LWW).
+Restore'da sunucu kazanır (yeni cihaz çeker). Ağ hatası ≠ 0-row: ağ koparsa `restoreFailed` (setup'a düşmez,
+çift-vault yok); yalnız gerçek 0-row'da setup.

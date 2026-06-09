@@ -15,6 +15,8 @@ import 'package:project_auth/core/crypto/crypto_exceptions.dart';
 import 'package:project_auth/core/crypto/encrypted_blob.dart';
 import 'package:project_auth/core/crypto/key_attributes.dart';
 import 'package:project_auth/core/crypto/key_handle.dart';
+import 'package:project_auth/features/account/domain/key_attributes_repository.dart';
+import 'package:project_auth/features/account/domain/sync_exceptions.dart';
 import 'package:project_auth/features/auth/data/key_attributes_store.dart';
 import 'package:project_auth/features/auth/domain/biometric_exceptions.dart';
 import 'package:project_auth/features/auth/domain/biometric_service.dart';
@@ -228,6 +230,8 @@ VaultLockCubit _build(
   bool migrationFails = false,
   Future<void>? migrateGate,
   BiometricService? biometric,
+  KeyAttributesRepository? remoteRepo,
+  String? uid,
 }) {
   final mig = migrated ?? <String>[];
   return VaultLockCubit(
@@ -244,7 +248,46 @@ VaultLockCubit _build(
     deleteKeys: (keys) async {
       deletedSink?.addAll(keys);
     },
+    remoteRepo: remoteRepo,
+    uid: uid,
   );
+}
+
+/// Faz 3 Patch 2 — sahte sunucu key_attributes deposu.
+class FakeKeyAttributesRepository implements KeyAttributesRepository {
+  /// fetch() döneceği değer (null = gerçek 0-row → setup).
+  KeyAttributes? remote;
+
+  /// fetch/existsRemote bu hatayı fırlatır (ağ/RLS senaryosu).
+  SyncError? fetchError;
+
+  /// fetch'i askıya almak için (fetch-pending iken state=restoring testi).
+  Future<void>? fetchGate;
+
+  /// existsRemote() sonucu (upload guard).
+  bool exists = false;
+
+  int uploadCount = 0;
+  KeyAttributes? uploaded;
+
+  @override
+  Future<KeyAttributes?> fetch(String uid) async {
+    if (fetchGate != null) await fetchGate;
+    if (fetchError != null) throw fetchError!;
+    return remote;
+  }
+
+  @override
+  Future<bool> existsRemote(String uid) async {
+    if (fetchError != null) throw fetchError!;
+    return exists;
+  }
+
+  @override
+  Future<void> upload(String uid, KeyAttributes attrs) async {
+    uploadCount++;
+    uploaded = attrs;
+  }
 }
 
 void main() {
@@ -949,6 +992,163 @@ void main() {
       expect(cubit.state.status, isNot(VaultLockStatus.unlocked),
           reason: 'abort sonrası unlocked emit edilmemeli');
       expect(km.issued.single.disposed, isTrue);
+    });
+  });
+
+  // --- Faz 3 Patch 2: restore (yeni cihaz) + backfill (upload) ---
+  group('Patch 2 — bootstrap restore', () {
+    test('lokal attrs VAR → fetch ATLANIR + locked (Patch 1 korunur)', () async {
+      await store.write(_fakeAttrs()); // lokal var
+      final repo = FakeKeyAttributesRepository()..remote = _fakeAttrs();
+      final cubit = _build(FakeKeyManager(), store, remoteRepo: repo, uid: 'uid-A');
+      await cubit.bootstrap();
+      expect(cubit.state.status, VaultLockStatus.locked);
+      expect(repo.uploadCount, 0); // backfill bootstrap'ta değil unlocked'ta
+      await cubit.close();
+    });
+
+    test('remoteRepo=null → eski davranış (uninitialized, regresyon)', () async {
+      final cubit = _build(FakeKeyManager(), store); // remoteRepo yok
+      await cubit.bootstrap();
+      expect(cubit.state.status, VaultLockStatus.uninitialized);
+      await cubit.close();
+    });
+
+    test('uid=null → restore yok (uninitialized)', () async {
+      final repo = FakeKeyAttributesRepository()..remote = _fakeAttrs();
+      final cubit = _build(FakeKeyManager(), store, remoteRepo: repo); // uid yok
+      await cubit.bootstrap();
+      expect(cubit.state.status, VaultLockStatus.uninitialized);
+      await cubit.close();
+    });
+
+    test('remote VAR → lokale yazılır + locked (yeni cihaz restore)', () async {
+      final repo = FakeKeyAttributesRepository()..remote = _fakeAttrs();
+      final cubit = _build(FakeKeyManager(), store, remoteRepo: repo, uid: 'uid-A');
+      await cubit.bootstrap();
+      expect(cubit.state.status, VaultLockStatus.locked);
+      // server-wins: lokale yazıldı (sonraki bootstrap fetch atlar).
+      expect(await store.read(), isNotNull);
+      await cubit.close();
+    });
+
+    test('remote 0-row (gerçek yeni hesap) → uninitialized (setup)', () async {
+      final repo = FakeKeyAttributesRepository()..remote = null; // 0-row
+      final cubit = _build(FakeKeyManager(), store, remoteRepo: repo, uid: 'uid-A');
+      await cubit.bootstrap();
+      expect(cubit.state.status, VaultLockStatus.uninitialized);
+      await cubit.close();
+    });
+
+    test('remote AĞ HATASI → restoreFailed (setup\'a DÜŞMEZ — kritik)', () async {
+      final repo = FakeKeyAttributesRepository()
+        ..fetchError = const SyncNetworkError();
+      final cubit = _build(FakeKeyManager(), store, remoteRepo: repo, uid: 'uid-A');
+      await cubit.bootstrap();
+      expect(cubit.state.status, VaultLockStatus.restoreFailed);
+      expect(cubit.state.status, isNot(VaultLockStatus.uninitialized)); // çift-vault yok
+      await cubit.close();
+    });
+
+    test('remote VAR ama LOKAL write IO hatası → restoreFailed (restoring\'te ASILMAZ, '
+        'setup DEĞİL, unhandled future YOK — reviewer [P2])', () async {
+      final repo = FakeKeyAttributesRepository()..remote = _fakeAttrs();
+      storage.failWrites = true; // _attrsStore.write Keychain/Keystore IO hatası
+      final cubit = _build(FakeKeyManager(), store, remoteRepo: repo, uid: 'uid-A');
+      await cubit.bootstrap(); // kabaran hata YOK (catch (_) yakalar)
+      expect(cubit.state.status, VaultLockStatus.restoreFailed);
+      expect(cubit.state.status, isNot(VaultLockStatus.restoring)); // asılı kalmaz
+      expect(cubit.state.status, isNot(VaultLockStatus.uninitialized)); // setup'a düşmez
+      await cubit.close();
+    });
+
+    test('fetch PENDING iken state=restoring (asla uninitialized/setup — review [P1] #1)',
+        () async {
+      final gate = Completer<void>();
+      final repo = FakeKeyAttributesRepository()
+        ..remote = _fakeAttrs()
+        ..fetchGate = gate.future;
+      final cubit = _build(FakeKeyManager(), store, remoteRepo: repo, uid: 'uid-A');
+      final booting = cubit.bootstrap(); // fetch'te asılı
+      await Future<void>.delayed(Duration.zero);
+      expect(cubit.state.status, VaultLockStatus.restoring,
+          reason: 'fetch sürerken /setup görünmemeli');
+      gate.complete();
+      await booting;
+      expect(cubit.state.status, VaultLockStatus.locked);
+      await cubit.close();
+    });
+
+    test('retryRestore: restoreFailed → tekrar dener → başarı locked', () async {
+      final repo = FakeKeyAttributesRepository()
+        ..fetchError = const SyncNetworkError();
+      final cubit = _build(FakeKeyManager(), store, remoteRepo: repo, uid: 'uid-A');
+      await cubit.bootstrap();
+      expect(cubit.state.status, VaultLockStatus.restoreFailed);
+      // ağ geldi: hata temizle + remote dolu.
+      repo
+        ..fetchError = null
+        ..remote = _fakeAttrs();
+      await cubit.retryRestore();
+      expect(cubit.state.status, VaultLockStatus.locked);
+      await cubit.close();
+    });
+
+    test('retryRestore yalnız restoreFailed\'da çalışır (başka state no-op)', () async {
+      final repo = FakeKeyAttributesRepository()..remote = _fakeAttrs();
+      final cubit = _build(FakeKeyManager(), store, remoteRepo: repo, uid: 'uid-A');
+      await cubit.bootstrap(); // locked
+      await cubit.retryRestore(); // no-op
+      expect(cubit.state.status, VaultLockStatus.locked);
+      await cubit.close();
+    });
+  });
+
+  group('Patch 2 — backfill (upload guard)', () {
+    test('unlock başarı + sunucuda YOK → insert (backfill)', () async {
+      await store.write(_fakeAttrs());
+      final repo = FakeKeyAttributesRepository()..exists = false;
+      final cubit = _build(FakeKeyManager(), store, remoteRepo: repo, uid: 'uid-A');
+      await cubit.bootstrap(); // locked (lokal var)
+      await cubit.unlock('parola123');
+      await Future<void>.delayed(Duration.zero); // unawaited backfill
+      expect(cubit.state.status, VaultLockStatus.unlocked);
+      expect(repo.uploadCount, 1);
+      await cubit.close();
+    });
+
+    test('unlock başarı + sunucuda VAR → upload ÇAĞRILMAZ (server-wins guard)',
+        () async {
+      await store.write(_fakeAttrs());
+      final repo = FakeKeyAttributesRepository()..exists = true;
+      final cubit = _build(FakeKeyManager(), store, remoteRepo: repo, uid: 'uid-A');
+      await cubit.bootstrap();
+      await cubit.unlock('parola123');
+      await Future<void>.delayed(Duration.zero);
+      expect(repo.uploadCount, 0);
+      await cubit.close();
+    });
+
+    test('backfill ağ hatası unlocked\'ı BOZMAZ (best-effort sessiz)', () async {
+      await store.write(_fakeAttrs());
+      final repo = FakeKeyAttributesRepository()
+        ..fetchError = const SyncNetworkError(); // existsRemote throw
+      final cubit = _build(FakeKeyManager(), store, remoteRepo: repo, uid: 'uid-A');
+      await cubit.bootstrap();
+      await cubit.unlock('parola123');
+      await Future<void>.delayed(Duration.zero);
+      expect(cubit.state.status, VaultLockStatus.unlocked); // hata yutuldu
+      await cubit.close();
+    });
+
+    test('remoteRepo=null → backfill no-op (regresyon)', () async {
+      await store.write(_fakeAttrs());
+      final cubit = _build(FakeKeyManager(), store); // remoteRepo yok
+      await cubit.bootstrap();
+      await cubit.unlock('parola123');
+      await Future<void>.delayed(Duration.zero);
+      expect(cubit.state.status, VaultLockStatus.unlocked);
+      await cubit.close();
     });
   });
 }

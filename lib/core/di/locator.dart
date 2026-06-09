@@ -12,8 +12,10 @@ import '../../features/account/data/active_account_store.dart';
 import '../../features/account/data/legacy_link_store.dart';
 import '../../features/account/data/pending_confirmation_store.dart';
 import '../../features/account/data/supabase_auth_repository.dart';
+import '../../features/account/data/supabase_key_attributes_repository.dart';
 import '../../features/account/domain/account_vault_manager.dart';
 import '../../features/account/domain/auth_repository.dart';
+import '../../features/account/domain/key_attributes_repository.dart';
 import '../../features/auth/data/biometric_service_impl.dart';
 import '../../features/auth/data/key_attributes_store.dart';
 import '../../features/auth/domain/biometric_service.dart';
@@ -64,6 +66,10 @@ Future<void> configureDependencies() async {
   locator.registerLazySingleton<SupabaseClient>(() => Supabase.instance.client);
   locator.registerLazySingleton<AuthRepository>(
       () => SupabaseAuthRepository(locator<SupabaseClient>()));
+
+  // Faz 3 Patch 2: kripto metadatası (key_attributes) sunucu deposu (upload/restore).
+  locator.registerLazySingleton<KeyAttributesRepository>(
+      () => SupabaseKeyAttributesRepository(locator<SupabaseClient>()));
 
   // Multi-vault (kullanıcı kararı 7): aktif uid + per-uid legacy karar + onay store.
   locator.registerLazySingleton<ActiveAccountStore>(

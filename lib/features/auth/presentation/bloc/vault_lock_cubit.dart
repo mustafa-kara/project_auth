@@ -30,6 +30,8 @@ import '../../../../core/crypto/key_handle.dart';
 import '../../../auth/domain/biometric_exceptions.dart';
 import '../../../auth/domain/biometric_service.dart';
 import '../../../auth/domain/key_manager.dart';
+import '../../../account/domain/key_attributes_repository.dart';
+import '../../../account/domain/sync_exceptions.dart';
 import '../../data/key_attributes_store.dart';
 import 'vault_lock_state.dart';
 
@@ -117,17 +119,27 @@ class VaultLockCubit extends Cubit<VaultLockState> {
   /// kendisi sonlandırır (attrs yazıldıysa `locked`); yoksa `cancelSetup`.
   bool _commitInFlight = false;
 
+  /// Faz 3 Patch 2 — sunucu `key_attributes` deposu + aktif uid. **Opsiyonel:**
+  /// null (legacy/uid-siz vault, Patch 1 testleri) → restore/upload NO-OP, eski
+  /// davranış birebir korunur (regresyon yok). Dolu → bootstrap'ta restore + unlocked'ta backfill.
+  final KeyAttributesRepository? _remoteRepo;
+  final String? _uid;
+
   VaultLockCubit({
     required KeyManager keyManager,
     required KeyAttributesStore attrsStore,
     required MigrationRunner migrate,
     required BiometricService biometric,
     required Future<void> Function(List<String> keys) deleteKeys,
+    KeyAttributesRepository? remoteRepo,
+    String? uid,
   })  : _keyManager = keyManager,
         _attrsStore = attrsStore,
         _migrate = migrate,
         _biometric = biometric,
         _deleteKeys = deleteKeys,
+        _remoteRepo = remoteRepo,
+        _uid = uid,
         super(const VaultLockState.uninitialized());
 
   /// `locked` emit'i biyometri field'larını taşıyarak yapar (tek nokta — reviewer 4.tur [P1]).
@@ -171,15 +183,85 @@ class VaultLockCubit extends Cubit<VaultLockState> {
   Future<void> bootstrap() async {
     try {
       final attrs = await _attrsStore.read();
-      if (attrs == null) {
-        emit(const VaultLockState.uninitialized());
-      } else {
+      if (attrs != null) {
+        // LOKAL VAR → Patch 1 davranışı AYNEN (restore fetch ATLANIR).
         // Patch 5: biyometri enrolled mı (attrs.bmk) + cihaz uygun mu → state'e taşı.
         await _refreshBiometricState(attrs);
         emit(_locked());
+        return;
       }
+      // Lokal attrs YOK. Faz 3 Patch 2: sunucudan restore dene (uid varsa).
+      if (_remoteRepo == null || _uid == null) {
+        // legacy/uid-siz/test → restore yok → setup.
+        emit(const VaultLockState.uninitialized());
+        return;
+      }
+      await _restoreFromRemote();
     } on FormatException {
       emit(const VaultLockState.keyAttributesCorrupted());
+    }
+  }
+
+  /// Faz 3 Patch 2 — yeni cihazda sunucudan `key_attributes` restore.
+  ///
+  /// **KRİTİK (review [P1] #1):** fetch BAŞLAMADAN ÖNCE `restoring` emit edilir →
+  /// router `/splash`'e tutar, kullanıcı fetch sürerken `/setup` GÖRMEZ (yeni vault
+  /// kuramaz). Sonuç:
+  /// - remote VAR → lokale yaz + `locked` (mevcut unlock akışı master parolayı sorar).
+  /// - remote 0-row (gerçekten yeni hesap) → `uninitialized` (setup).
+  /// - ağ/RLS/format hatası ([SyncError]) → `restoreFailed` (setup'a DÜŞMEZ → çift-vault yok).
+  /// - lokal finalize hatası (Keychain/Keystore IO `write`) → YİNE `restoreFailed` (reviewer
+  ///   [P2]): aksi halde hata `bootstrap` future'ından kabarıp state `restoring`'te ASILI kalırdı
+  ///   (router `/splash`'te takılır, kullanıcının retry yolu yok). Güvenli + retry edilebilir state.
+  Future<void> _restoreFromRemote() async {
+    final repo = _remoteRepo;
+    final uid = _uid;
+    if (repo == null || uid == null) {
+      emit(const VaultLockState.uninitialized());
+      return;
+    }
+    emit(const VaultLockState.restoring()); // fetch ÖNCESİ → /setup görünmez
+    try {
+      final remote = await repo.fetch(uid);
+      if (remote == null) {
+        emit(const VaultLockState.uninitialized()); // gerçek 0-row → setup
+        return;
+      }
+      await _attrsStore.write(remote); // server-wins: lokale yaz (IO hatası fırlatabilir)
+      await _refreshBiometricState(remote);
+      emit(_locked()); // master parola sorulur (mevcut unlock)
+    } on SyncError {
+      emit(const VaultLockState.restoreFailed()); // ağ/RLS → setup'a DÜŞME
+    } catch (_) {
+      // SyncError DIŞI beklenmeyen hata (lokal secure-storage write IO / biyometri availability).
+      // `restoring`'te asılı kalma → güvenli `restoreFailed` (retry edilebilir; setup'a DÜŞMEZ).
+      emit(const VaultLockState.restoreFailed());
+    }
+    // (FormatException repository içinde SyncMalformedRemote'a çevrilir → buraya SyncError gelir.)
+  }
+
+  /// `restoreFailed`'dan yeniden restore dener (RestoreFailedPage "Tekrar dene").
+  Future<void> retryRestore() async {
+    if (state.status != VaultLockStatus.restoreFailed) return;
+    await _restoreFromRemote();
+  }
+
+  /// Faz 3 Patch 2 — unlocked olunca best-effort backfill (kullanıcı kararı 4/5).
+  ///
+  /// GUARD'LI insert: sunucuda kayıt VARSA üzerine YAZMA (server-wins; changePassword
+  /// gibi kasıtlı değişiklik Patch 3 `updated_at` LWW). Best-effort: kullanıcıyı
+  /// BLOKLAMAZ, hata SESSİZ yutulur (sync zorunlu değil, vault lokalde çalışır).
+  /// **Yalnız zaten-şifreli attrs gider; masterKey/KEK/secret ASLA.**
+  Future<void> _backfillRemote() async {
+    final repo = _remoteRepo;
+    final uid = _uid;
+    if (repo == null || uid == null) return; // legacy/uid-siz → no-op
+    try {
+      if (await repo.existsRemote(uid)) return; // server-wins guard
+      final attrs = await _attrsStore.read();
+      if (attrs != null) await repo.upload(uid, attrs);
+    } catch (_) {
+      // best-effort: ağ/izin hatası kullanıcıyı etkilemez; bir sonraki unlocked'ta yeniden denenir.
     }
   }
 
@@ -258,6 +340,7 @@ class VaultLockCubit extends Cubit<VaultLockState> {
         return;
       }
       emit(_unlocked());
+      unawaited(_backfillRemote()); // Patch 2: yeni hesabın ilk attrs'ını sunucuya yaz (best-effort)
     } finally {
       _commitInFlight = false;
     }
@@ -303,6 +386,7 @@ class VaultLockCubit extends Cubit<VaultLockState> {
       _masterKey = key;
       owned = true;
       emit(_unlocked());
+      unawaited(_backfillRemote()); // Patch 2: backfill (best-effort, guard'lı)
     } finally {
       if (!owned) key.dispose(); // migration fail / background-abort → key sızmaz
     }
@@ -335,6 +419,7 @@ class VaultLockCubit extends Cubit<VaultLockState> {
       _masterKey = key;
       owned = true;
       emit(_unlocked());
+      unawaited(_backfillRemote()); // Patch 2: backfill (best-effort, guard'lı)
     } on WrongRecoveryKeyException {
       emit(_locked(error: VaultLockError.wrongRecovery));
     } on WeakPasswordException {
@@ -418,6 +503,9 @@ class VaultLockCubit extends Cubit<VaultLockState> {
       case VaultLockStatus.uninitialized:
       case VaultLockStatus.locked:
       case VaultLockStatus.keyAttributesCorrupted:
+      case VaultLockStatus.restoring:
+      case VaultLockStatus.restoreFailed:
+        // Bu state'lerde bellekte masterKey/mnemonic YOK (restore henüz unlock etmedi).
         // Devam eden unlock/recover/beginSetup/biometricUnlock async işlemi varsa
         // unlocked/setupPending'e geçmesini engelle.
         _abortToBackground = true;
@@ -447,8 +535,10 @@ class VaultLockCubit extends Cubit<VaultLockState> {
       case VaultLockStatus.uninitialized:
       case VaultLockStatus.locked:
       case VaultLockStatus.keyAttributesCorrupted:
-        // Devam eden unlock/recover/beginSetup/biometricUnlock async işlemi varsa
-        // unlocked/setupPending'e geçmesini engelle.
+      case VaultLockStatus.restoring:
+      case VaultLockStatus.restoreFailed:
+        // Bu state'lerde bellekte masterKey/mnemonic YOK. Devam eden unlock/recover/
+        // beginSetup/biometricUnlock async işlemi varsa unlocked/setupPending'e geçmesini engelle.
         _abortToBackground = true;
     }
   }

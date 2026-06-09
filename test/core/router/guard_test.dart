@@ -69,6 +69,19 @@ void main() {
       expect(guardRedirect(s, Routes.unlock), Routes.authIntegrity);
       expect(guardRedirect(s, Routes.authIntegrity), isNull);
     });
+
+    test('restoring → /splash (ASLA /setup — review [P1] #1) + hedefte null', () {
+      const s = VaultLockState.restoring();
+      expect(guardRedirect(s, Routes.vault), Routes.splash);
+      expect(guardRedirect(s, Routes.setup), Routes.splash); // setup'a DÜŞMEZ
+      expect(guardRedirect(s, Routes.splash), isNull); // döngü yok
+    });
+
+    test('restoreFailed → /auth/restore-failed + hedefte null', () {
+      const s = VaultLockState.restoreFailed();
+      expect(guardRedirect(s, Routes.vault), Routes.authRestoreFailed);
+      expect(guardRedirect(s, Routes.authRestoreFailed), isNull); // döngü yok
+    });
   });
 
   group('sessionGuard (Faz 3 Patch 1 — kimlik kapısı)', () {
@@ -128,6 +141,42 @@ void main() {
       expect(sessionGuard(s, unlockedVault, Routes.vault), isNull);
       expect(sessionGuard(s, unlockedVault, Routes.authLogin), Routes.vault);
       expect(sessionGuard(s, unlockedVault, Routes.splash), Routes.vault);
+    });
+
+    // --- Faz 3 Patch 2: özel vault statüleri sessionGuard'da GERÇEK location'la
+    // ele alınır → hedefteyken null (review [P1] location-kaybı; redirect-loop yok). ---
+    group('Patch 2 — restoring/restoreFailed (location korunur)', () {
+      const restoring = VaultLockState.restoring();
+      const restoreFailed = VaultLockState.restoreFailed();
+      const corrupted = VaultLockState.keyAttributesCorrupted();
+
+      test('signedIn + restoring → /splash, hedefte null (ASLA /setup)', () {
+        final s = session(SessionStatus.signedIn);
+        expect(sessionGuard(s, restoring, Routes.vault), Routes.splash);
+        expect(sessionGuard(s, restoring, Routes.setup), Routes.splash);
+        // KRİTİK: /splash hedefindeyken null (yoksa rewrite loop yapardı).
+        expect(sessionGuard(s, restoring, Routes.splash), isNull);
+      });
+
+      test('signedIn + restoreFailed → /auth/restore-failed, HEDEFTE NULL (loop yok)',
+          () {
+        final s = session(SessionStatus.signedIn);
+        expect(sessionGuard(s, restoreFailed, Routes.vault),
+            Routes.authRestoreFailed);
+        expect(sessionGuard(s, restoreFailed, Routes.authLogin),
+            Routes.authRestoreFailed);
+        // KRİTİK (review [P1]): /auth/restore-failed auth route → eski kodda rewrite
+        // gerçek location'ı kaybedip burada da hedef döndürürdü = loop. Artık null.
+        expect(sessionGuard(s, restoreFailed, Routes.authRestoreFailed), isNull);
+      });
+
+      test('signedIn + keyAttributesCorrupted → /auth-integrity, HEDEFTE NULL (regresyon)',
+          () {
+        final s = session(SessionStatus.signedIn);
+        expect(sessionGuard(s, corrupted, Routes.vault), Routes.authIntegrity);
+        // /auth-integrity de "/auth" ile başlar → aynı location-kaybı bug'ı kapandı.
+        expect(sessionGuard(s, corrupted, Routes.authIntegrity), isNull);
+      });
     });
   });
 }

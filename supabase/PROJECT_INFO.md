@@ -61,3 +61,4 @@ admin_users · key_attributes · tokens · devices · announcements · catalog_s
 - [ ] İlk **gerçek** admin: `insert into public.admin_users (user_id) values ('<auth-user-uuid>');` (güvenli kanal) — gerçek kullanıcı oluşunca
 - [ ] **Faz 3 Patch 1 — E-posta onayı:** Dashboard > Auth > Providers > Email → "Confirm email" AÇIK (kayıt sonrası onay maili).
 - [ ] **Faz 3 Patch 1 — Redirect URL:** Dashboard > Auth > URL Configuration > Redirect URLs → `dev.mustafakara.projectauth://login-callback` ekle (PKCE deep-link callback; native intent-filter/URL scheme ile eşleşir).
+- [ ] **Faz 3 Patch 2 — bytea format teyidi (manuel, şema değişmez):** `key_attributes` upload/restore cihazda gerçek Supabase'e karşı test edilmeli — `ByteaCodec` (`\x`+hex) ile `insert` PostgREST'in bytea kabulüyle uyumlu mu, `select` round-trip kayıpsız mı, RLS owner-only mı. Format farklıysa `lib/features/account/data/bytea_codec.dart` tek noktadan düzeltilir (DB migration GEREKMEZ).

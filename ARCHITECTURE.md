@@ -357,6 +357,30 @@ Fazların vault üzerindeki net sorumluluğu (kavramsal çakışmayı gidermek i
 4. **Sıralama:** önce master key + `key_attributes` upload, sonra token backfill. Yarıda kesilirse bir sonraki açılışta `son_sync=epoch` ile yeniden denenir.
 5. **Çakışma:** aynı `id` hem lokalde hem buluttaysa (örn. ikinci cihaz) arrival-order LWW (server-side `updated_at`) uygulanır.
 
+### key_attributes upload/restore (Faz 3 Patch 2 — uygulandı; token sync Patch 3)
+
+Patch 2 YALNIZ kripto **metadatasını** senkronlar (token'lar değil). Sunucuya giden her şey zaten opak:
+`encrypted_master_key`/`recovery_encrypted_master_key` (masterKey'in KEK/recovery-key ile sarmalı hâli) +
+KDF `salt/ops/mem` + nonce'lar. **masterKey, KEK, recovery key, açık TOTP secret ASLA gitmez.** `bmk`
+(biyometri wrap) da gitmez — cihaz-yerel OS-keystore kısayolu (sunucu şemasında kolon yok); yeni cihaz
+biyometriyi yeniden enroll eder.
+
+- **bytea interop (`ByteaCodec`, tek nokta):** PostgreSQL `bytea` ↔ `Uint8List` (`\x`+hex). Lokal
+  `EncryptedBlob` nonce+ciphertext'i BİRLİKTE tutar; sunucu (`key_attributes`) AYRI kolonlar
+  (`*_nonce` / `encrypted_master_key`) → upload'ta blob İKİYE bölünür, restore'da iki kolondan kurulur.
+  `bytea` JSON-body INSERT formatı ilk cihazda doğrulanır; yanlışsa tek dosyada düzeltilir (şema değişmez).
+  Realtime `bytea`'yı çift-encode ettiği için (#1180) Realtime YALNIZ tetikleyici (Patch 3) — gerçek veri REST.
+- **Upload (backfill):** vault `unlocked` olunca (`VaultLockCubit` içinde, best-effort) sunucuda kayıt
+  YOKSA `insert` (guard'lı). VARSA üzerine YAZMA → **server-wins**; bir cihazda master parola değişimi
+  (`changePassword`) sunucuyu KASITLI olarak güncellemez (çok-cihaz tutarlılığı Patch 3 `updated_at` LWW).
+- **Restore (yeni cihaz):** `bootstrap` lokal attrs yoksa **fetch'ten ÖNCE `restoring` state** emit eder
+  (router `/splash`; kullanıcı `/setup` görmez → fetch bitmeden yeni vault kurup çift-vault yaratamaz).
+  remote VAR → lokale yaz + `locked` (master parola). Gerçek 0-row → `uninitialized` (setup). Ağ/RLS
+  hatası (`SyncError`) → **`restoreFailed`** ayrı ekran (tekrar dene / hesap değiştir) — `uninitialized`'a
+  DÜŞMEZ. Ağ hatası ile gerçek 0-row KESİN ayrılır (repository 0-row'da `null`, hata durumunda `SyncError` throw).
+- **Multi-vault:** her uid kendi namespace'inde; RLS owner-only + uid namespace ile A'nın attrs'ı B'ye görünmez.
+  legacy uid-siz vault sunucuya bağlanmaz (`uid=null` → restore/upload no-op).
+
 ---
 
 ## 8. Test Stratejisi

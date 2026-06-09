@@ -10,6 +10,16 @@ enum VaultLockStatus {
   unlocked,
   locking,
   keyAttributesCorrupted,
+
+  /// Faz 3 Patch 2: lokal attrs yok + sunucudan `key_attributes` ÇEKİLİYOR.
+  /// Geçici. Router `/splash`'e tutar — **ASLA `/setup`'a değil** (fetch bitmeden
+  /// kullanıcı yeni vault kuramaz → "yalnız gerçek 0-row'da setup" garantisi).
+  restoring,
+
+  /// Faz 3 Patch 2: sunucudan çekme AĞ/RLS hatası verdi (gerçek 0-row DEĞİL).
+  /// Ayrı `/auth/restore-failed` ekranı (tekrar dene / hesap değiştir). `uninitialized`'a
+  /// DÜŞÜLMEZ → kullanıcı yanlış parola kurup sunucudaki vault'u çakıştıramaz.
+  restoreFailed,
 }
 
 /// Unlock/recover ekranlarında gösterilen inline hata sebebi.
@@ -75,6 +85,11 @@ class VaultLockState extends Equatable {
 
   const VaultLockState.keyAttributesCorrupted()
       : this._(VaultLockStatus.keyAttributesCorrupted);
+
+  const VaultLockState.restoring() : this._(VaultLockStatus.restoring);
+
+  const VaultLockState.restoreFailed()
+      : this._(VaultLockStatus.restoreFailed);
 
   /// UnlockPage biyometri butonu görünürlüğü: enrolled VE cihaz uygun.
   bool get biometricUnlockAvailable =>

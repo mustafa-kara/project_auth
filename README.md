@@ -39,6 +39,7 @@ E2E (uçtan uca) şifreli, çoklu cihaz senkronize **TOTP/HOTP authenticator** �
 | Flutter — Faz 2 UI/oturum (Patch 4) | ✅ Setup/Unlock/Recovery UI + route guard (lock state'ine göre) + lifecycle lock (paused/inactive) + corruption banner/integrity ekranı + `KeyAttributesStore`/`resetVault` + DI/main rewiring + **tam UI/UX redesign** (Geist/GeistMono gömülü, simple-icons CC0, CountdownRing, IssuerAvatar, kart/liste toggle, tap-to-copy, a11y) · **host 186/186** · bkz. [docs/Design.md](docs/Design.md) |
 | Flutter — Faz 2 biyometri (Patch 5) | ✅ Biyometrik unlock kısayolu: 3. wrap (`biometricEncryptedMasterKey`) + OS-keystore erişim kontrolü (iOS Secure Enclave + `biometryCurrentSet`, Android `strongBiometricOnly`+`enforceBiometrics`), gerçek geçit = `storage.read` (çift prompt yok; `local_auth` yalnız availability), Settings enable/disable + UnlockPage butonu, `device_info_plus` API<28 gate, lifecycle inactive-vs-paused ayrımı, parola+recovery her zaman çalışır · **host 220/220** · bkz. [docs/CRYPTO.md §11](docs/CRYPTO.md) |
 | Flutter — Faz 3 auth (Patch 1) | ✅ Supabase email/parola kimlik (kayıt/giriş/çıkış + e-posta onayı, PKCE deep-link). İki-kapı guard (kimlik EN DIŞTA → vault kilidi), `unknown→/splash` (masterKey crash'i yok), `onAuthStateChange` `onError` (crash önleme), signOut → vault kilit + ağ-hatası-dirençli `signedOut`, multi-vault per uid (namespace + account-linking + legacy `bmk` temizleme). Login parolası ≠ master parola. **Sync YOK (Patch 2–3).** · **host 257/257** |
+| Flutter — Faz 3 sync (Patch 2) | ✅ `key_attributes` upload/restore (zaten-şifreli KDF + KEK/recovery-wrapped master key). Yeni cihazda Supabase login → buluttan çek → master parola → unlock. `ByteaCodec` (bytea↔Uint8List tek nokta), upload `unlocked`'ta guard'lı insert (server-wins). `restoring`/`restoreFailed` state: fetch sürerken `/splash` (setup'a düşmez), ağ hatası ayrı ekran. **masterKey/KEK/secret/bmk ASLA sunucuya gitmez.** Sunucu şeması değişmedi. **Token sync YOK (Patch 3).** · **host 293/293** |
 | Admin paneli (Next.js) | ⏳ Faz 6 |
 
 **Backend canlı proje:** `authenticator-dev` (Supabase, eu-central-1, PG17). Detay: [PROJECT_INFO.md](supabase/PROJECT_INFO.md).
@@ -85,7 +86,7 @@ Proje kökü Flutter uygulamasıdır (`lib/`, `pubspec.yaml`). Gereken: Flutter 
 ```bash
 flutter pub get
 flutter analyze          # lint — şu an temiz
-flutter test             # 257/257 host (OTP RFC vektörleri + URI validasyon + VaultCubit + crypto blob/attrs/BIP39 + VaultLockCubit/guard/KeyAttributesStore + lifecycle arka-plan-yarışı + corruption/integrity-guard/a11y widget + CountdownColors + recovery-verify/textScaler + biyometri + Faz 3 auth: SessionCubit/sessionGuard/onAuthSignedOut/multi-vault-namespace/login-register widget)
+flutter test             # 293/293 host (OTP RFC vektörleri + URI validasyon + VaultCubit + crypto blob/attrs/BIP39 + VaultLockCubit/guard/KeyAttributesStore + lifecycle arka-plan-yarışı + corruption/integrity-guard/a11y widget + CountdownColors + recovery-verify/textScaler + biyometri + Faz 3 auth: SessionCubit/sessionGuard/onAuthSignedOut/multi-vault-namespace/login-register widget + Patch 2 sync: ByteaCodec/key_attributes-mapping/restore-restoring-restoreFailed/upload-guard/RestoreFailedPage)
 flutter run              # cihaz/emülatörde çalıştır
 ```
 
