@@ -1,111 +1,121 @@
-# Geliştirme Planı — Fazlı Yol Haritası
+# Development Plan — Phased Roadmap
 
-> Hedef: baştan sağlam tam mimari. Google/Apple developer hesapları hazır olmadığı için
-> sosyal giriş ve push, hesap-bağımsız kısımlar bittikten sonra "takılır" — geliştirme hiçbir an bloke olmaz.
-> Detaylı mimari için bkz. [ARCHITECTURE.md](ARCHITECTURE.md).
+> Goal: a solid, complete architecture from the start. Because the Google/Apple developer accounts are not yet ready,
+> social sign-in and push are "plugged in" after the account-independent parts are done — development is never blocked at any point.
+> For the detailed architecture, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ---
 
-## Faz 0 — Temel kurulum (1. hafta) — ÇOĞU TAMAMLANDI (2026-06-06)
-- [x] Flutter projesi (3.38.6) + feature-first klasör iskeleti (`lib/core/*`, `lib/features/{vault,scan}/*`). ✅
-- [x] Bağımlılıklar eklendi + sürümler çözüldü: `flutter_bloc 9.1`, `go_router 17.3`, `get_it 9.2`, `injectable 2.5`, `freezed 3.2`, `supabase_flutter 2.14`, `sodium_libs 3.4`, `flutter_secure_storage 10.3`, `mobile_scanner 7.2`, `local_auth 3.0`, `crypto`. ✅
-  - 🔐 **Kripto (Faz 2'de uygulandı):** `sodium ^3.4.6` + `sodium_libs ^3.4.6+4`. sodium 4.x Dart 3.11+ ister; proje Dart 3.10.7 → 4.x çözülemez, 3.x bilinçli karar (pre-built binary, native-assets flag gerekmez; integration testleriyle kanıtlı). `sodium_libs` "discontinued" etiketli ama 3.x hattı çalışıyor. Detay docs/CRYPTO.md. `json_annotation` 4.9'a sabitlendi (4.12 henüz `json_serializable` ile uyumsuz). `injectable` 2.x'e sabit (generator 3.x'i desteklemiyor).
-- [x] `core/`: tema (Material 3 açık/koyu), go_router, DI composition root (get_it manuel — injectable codegen'e sonra geçilebilir). ✅
-  - [ ] l10n iskeleti, Failure tipleri, Supabase client wrapper *(Faz 3 öncesi)*.
-- [x] go_router temel rotalar (`/`, `/scan`) + ekranlar + redirect guard yorum-iskeleti. ✅
-- [ ] CI: `flutter analyze` + `flutter test` (şu an LOKAL geçiyor: analyze temiz, host 220/220 + integration 34/34; CI dosyası eklenecek).
+## Phase 0 — Foundation setup (week 1) — MOSTLY COMPLETE (2026-06-06)
+- [x] Flutter project (3.38.6) + feature-first folder skeleton (`lib/core/*`, `lib/features/{vault,scan}/*`). ✅
+- [x] Dependencies added + versions resolved: `flutter_bloc 9.1`, `go_router 17.3`, `get_it 9.2`, `injectable 2.5`, `freezed 3.2`, `supabase_flutter 2.14`, `sodium_libs 3.4`, `flutter_secure_storage 10.3`, `mobile_scanner 7.2`, `local_auth 3.0`, `crypto`. ✅
+  - 🔐 **Crypto (implemented in Phase 2):** `sodium ^3.4.6` + `sodium_libs ^3.4.6+4`. sodium 4.x requires Dart 3.11+; the project is on Dart 3.10.7 → 4.x cannot be resolved, so 3.x is a deliberate decision (pre-built binaries, no native-assets flag needed; proven by integration tests). `sodium_libs` is tagged "discontinued" but the 3.x line works. Details in docs/CRYPTO.md. `json_annotation` pinned to 4.9 (4.12 is not yet compatible with `json_serializable`). `injectable` pinned to 2.x (does not support generator 3.x).
+- [x] `core/`: theme (Material 3 light/dark), go_router, DI composition root (get_it manual — can switch to injectable codegen later). ✅
+  - [ ] l10n skeleton, Failure types, Supabase client wrapper *(before Phase 3)*.
+- [x] go_router base routes (`/`, `/scan`) + screens + redirect guard comment-skeleton. ✅
+- [ ] CI: `flutter analyze` + `flutter test` (currently passing LOCALLY: analyze clean, host 220/220 + integration 34/34; CI file to be added).
 
-## Faz 1 — Çekirdek OTP motoru (sunucusuz, tam çalışır) (1–2. hafta) — TAMAMLANDI
-- [x] `core/otp/`: TOTP (RFC 6238), HOTP (RFC 4226), Steam Guard algoritmaları + Base32 (RFC 4648). ✅
-- [x] **RFC test vektörlerine karşı birim testleri — GEÇTİ** (HOTP Appendix D 10 vektör, TOTP Appendix B 10 vektör SHA1/256/512, Base32, Steam, URI + input validasyon + VaultCubit id-bazlı + JSON round-trip/dayanıklılık + kalıcılık/yarış). Faz 1 sonu 79/79; **Faz 2 Patch 3 sonrası host 122/122; Patch 4 sonrası host 186/186; Patch 5 (biyometri) sonrası host 220/220** (+33: bmk attrs JSON/copyWith, VaultLockCubit biyometri (bootstrap enrolled+deviceAvailable ayrı, enableBiometric atomik catch→disable, disableBiometric, biometricUnlock unlock-guard birebir, KeyMissing→clearBiometric persist + write-fail döngü-önleme, **lifecycle inactive-vs-paused: prompt-in-flight muafiyeti**), guard /settings, Settings/UnlockPage widget) (+ integration: enrollBiometric/biometricUnlock round-trip + changePassword-sonrası-geçerli). Not: otomatik reinstall-reset (FirstRunGuard) eklenip review P0 nedeniyle GERİ ALINDI — mevcut kullanıcı vault'unu riske atardı (bkz. CHANGELOG 2026-06-07). ✅
+## Phase 1 — Core OTP engine (serverless, fully working) (weeks 1–2) — COMPLETE
+- [x] `core/otp/`: TOTP (RFC 6238), HOTP (RFC 4226), Steam Guard algorithms + Base32 (RFC 4648). ✅
+- [x] **Unit tests against RFC test vectors — PASSED** (HOTP Appendix D 10 vectors, TOTP Appendix B 10 vectors SHA1/256/512, Base32, Steam, URI + input validation + VaultCubit id-based + JSON round-trip/robustness + persistence/race). End of Phase 1: 79/79; **after Phase 2 Patch 3 host 122/122; after Patch 4 host 186/186; after Patch 5 (biometrics) host 220/220** (+33: bmk attrs JSON/copyWith, VaultLockCubit biometrics (bootstrap enrolled+deviceAvailable separated, enableBiometric atomic catch→disable, disableBiometric, biometricUnlock unlock-guard exact, KeyMissing→clearBiometric persist + write-fail loop-prevention, **lifecycle inactive-vs-paused: prompt-in-flight exemption**), guard /settings, Settings/UnlockPage widget) (+ integration: enrollBiometric/biometricUnlock round-trip + valid-after-changePassword). Note: automatic reinstall-reset (FirstRunGuard) was added then ROLLED BACK due to review P0 — it would have put an existing user's vault at risk (see CHANGELOG 2026-06-07). ✅
 - [x] `otpauth://` URI parse/serialize (`OtpAuthUri`) + round-trip test. ✅
-- [x] Vault ekranı: kod kartları + geri sayım halkası + kopyalama + manuel `otpauth://` ekleme. ✅
-- [x] Stabil token `id` (uuid v4) — `OtpAccount.id`, id-bazlı `VaultCubit` + `OtpCard ValueKey` (ARCHITECTURE §7.5 backfill temeli). ✅
-- [x] QR tarama (`mobile_scanner` v7) — kamera izni akışı (iOS `NSCameraUsageDescription` + Android `CAMERA`), çift-algılama guard, flaş/kamera değiştir, izin-reddi hata UI'ı. ✅
-- [x] Vault'ta **arama** (issuer/hesap/label filtresi) + HOTP sayaç kalıcılığı (her artış depoya yazılır). ✅
-- [x] Lokal `flutter_secure_storage` ile token saklama, **şifrelenmemiş** (henüz master key yok, sadece OS koruması): `VaultRepository` + `OtpAccount` JSON (id/counter korur), `VaultCubit` açılışta `load()` + her mutasyonda persist. ✅
-- [x] **Çıktı:** internetsiz çalışan gerçek bir authenticator — QR/manuel ekleme, kalıcı vault, arama. ✅
+- [x] Vault screen: code cards + countdown ring + copy + manual `otpauth://` adding. ✅
+- [x] Stable token `id` (uuid v4) — `OtpAccount.id`, id-based `VaultCubit` + `OtpCard ValueKey` (ARCHITECTURE §7.5 backfill foundation). ✅
+- [x] QR scanning (`mobile_scanner` v7) — camera permission flow (iOS `NSCameraUsageDescription` + Android `CAMERA`), double-detection guard, flash/camera switch, permission-denied error UI. ✅
+- [x] **Search** in vault (issuer/account/label filter) + HOTP counter persistence (every increment is written to the store). ✅
+- [x] Local token storage via `flutter_secure_storage`, **unencrypted** (no master key yet, OS protection only): `VaultRepository` + `OtpAccount` JSON (preserves id/counter), `VaultCubit` `load()` on startup + persist on every mutation. ✅
+- [x] **Output:** a real authenticator that works without internet — QR/manual adding, persistent vault, search. ✅
 
-## Faz 2 — E2E kripto katmanı + lokal vault'u şifrele (2–3. hafta)
-> İlerleme: **Patch 1–5 tamam** (crypto service, KeyManager, BIP39, encrypted repo, migration; Patch 4: Setup/Unlock/Recovery UI, route guard, lifecycle lock, corruption/integrity UI, DI rewiring, **tam UI/UX redesign** — [docs/Design.md](docs/Design.md); **Patch 5: biyometrik unlock kısayolu** — 3. wrap + OS-keystore erişim kontrolü, Settings, [docs/CRYPTO.md §11](docs/CRYPTO.md)). **Patch 6 (doküman finalizasyonu) bu turda.** Detay: [docs/CRYPTO.md](docs/CRYPTO.md).
-- [x] `core/crypto/`: `CryptoService` interface + libsodium impl — Argon2id (`crypto_pwhash`), XChaCha20-Poly1305 IETF (`crypto_aead_xchacha20poly1305_ietf_*`), key wrap aynı AEAD ailesi. **`crypto_secretbox` KULLANILMADI.** ✅ (Patch 1; sodium 3.4.6+sodium_libs — sodium 4.x Dart 3.11+ ister)
-- [x] Anahtar hiyerarşisi: masterKey üretimi, KEK türetme (Argon2id isolate'ta), recovery key üretimi/sarmalama (`KeyManager` setup/unlock/recoverUnlock/changePassword). ✅ (Patch 2)
-- [x] Round-trip ve recovery testleri (host 122 + integration 34: encrypt/decrypt/tamper, KEK determinizmi, BIP39 resmi Trezor vektörleri, setup→unlock/recover, changePassword). ✅ (Patch 2)
-- [x] **Lokal vault'u E2E şifreli hale getir:** `EncryptedVaultRepository` (token-bazlı record, unchanged-blob + bozuk-kayıt koruması, top-level/all-fail integrity), Faz 1→2 `VaultMigration` (commit-marker idempotency, id-bazlı upsert), raw-storage güvenlik testleri (secret/issuer/accountName sızmıyor). Vault artık offline+E2E. ✅ (Patch 3)
-- [x] Master parola belirleme + recovery key gösterme/doğrulama UI'ı + route guard (lock state'ine göre, kendi `CubitRefreshNotifier` adapter'ı — go_router 17.x'te `GoRouterRefreshStream` yok) + lifecycle lock (paused/inactive) + corruption banner/integrity ekranı + `/auth-integrity` + `KeyAttributesStore` + `resetVault` + DI/main rewiring (StatefulWidget root, unlock sonrası `VaultCubit`) + **tam UI/UX redesign** (Geist/GeistMono gömülü, simple-icons CC0, CountdownRing, IssuerAvatar, kart/liste toggle, tap-to-copy, a11y kapıları). ✅ (Patch 4; bkz. [docs/Design.md](docs/Design.md))
-- [x] Cihazda biyometrik-korumalı master key unlock — **Patch 5 TAMAM.** 3. wrap (`biometricEncryptedMasterKey`) + OS-keystore erişim kontrolü (iOS Secure Enclave + `biometryCurrentSet`; Android `strongBiometricOnly` + `enforceBiometrics`), gerçek geçit = `storage.read` (çift prompt yok), `device_info_plus` API<28 gate, Settings enable/disable + UnlockPage butonu, lifecycle inactive-vs-paused. Parola+recovery her zaman çalışır. ✅ (bkz. [docs/CRYPTO.md §11](docs/CRYPTO.md))
+## Phase 2 — E2E crypto layer + encrypt the local vault (weeks 2–3)
+> Progress: **Patches 1–5 done** (crypto service, KeyManager, BIP39, encrypted repo, migration; Patch 4: Setup/Unlock/Recovery UI, route guard, lifecycle lock, corruption/integrity UI, DI rewiring, **full UI/UX redesign** — [docs/Design.md](docs/Design.md); **Patch 5: biometric unlock shortcut** — 3rd wrap + OS-keystore access control, Settings, [docs/CRYPTO.md §11](docs/CRYPTO.md)). **Patch 6 (documentation finalization) this round.** Details: [docs/CRYPTO.md](docs/CRYPTO.md).
+- [x] `core/crypto/`: `CryptoService` interface + libsodium impl — Argon2id (`crypto_pwhash`), XChaCha20-Poly1305 IETF (`crypto_aead_xchacha20poly1305_ietf_*`), key wrap from the same AEAD family. **`crypto_secretbox` NOT USED.** ✅ (Patch 1; sodium 3.4.6+sodium_libs — sodium 4.x requires Dart 3.11+)
+- [x] Key hierarchy: masterKey generation, KEK derivation (Argon2id in an isolate), recovery key generation/wrapping (`KeyManager` setup/unlock/recoverUnlock/changePassword). ✅ (Patch 2)
+- [x] Round-trip and recovery tests (host 122 + integration 34: encrypt/decrypt/tamper, KEK determinism, BIP39 official Trezor vectors, setup→unlock/recover, changePassword). ✅ (Patch 2)
+- [x] **Make the local vault E2E encrypted:** `EncryptedVaultRepository` (token-based record, unchanged-blob + corrupt-record protection, top-level/all-fail integrity), Phase 1→2 `VaultMigration` (commit-marker idempotency, id-based upsert), raw-storage security tests (secret/issuer/accountName do not leak). The vault is now offline+E2E. ✅ (Patch 3)
+- [x] Master password setup + recovery key display/verification UI + route guard (based on lock state, its own `CubitRefreshNotifier` adapter — go_router 17.x has no `GoRouterRefreshStream`) + lifecycle lock (paused/inactive) + corruption banner/integrity screen + `/auth-integrity` + `KeyAttributesStore` + `resetVault` + DI/main rewiring (StatefulWidget root, `VaultCubit` after unlock) + **full UI/UX redesign** (embedded Geist/GeistMono, simple-icons CC0, CountdownRing, IssuerAvatar, card/list toggle, tap-to-copy, a11y gates). ✅ (Patch 4; see [docs/Design.md](docs/Design.md))
+- [x] On-device biometric-protected master key unlock — **Patch 5 DONE.** 3rd wrap (`biometricEncryptedMasterKey`) + OS-keystore access control (iOS Secure Enclave + `biometryCurrentSet`; Android `strongBiometricOnly` + `enforceBiometrics`), the real gate = `storage.read` (no double prompt), `device_info_plus` API<28 gate, Settings enable/disable + UnlockPage button, lifecycle inactive-vs-paused. Password+recovery always work. ✅ (see [docs/CRYPTO.md §11](docs/CRYPTO.md))
 
-## Faz 3 — Supabase auth + senkron (3–5. hafta)
-> **DB tarafı TAMAMLANDI ve test edildi** (2026-06-06). Proje: `authenticator-dev`. Bkz. [supabase/PROJECT_INFO.md](supabase/PROJECT_INFO.md) + [test raporu](supabase/tests/TEST_REPORT.md). Kalan maddeler Flutter client'a bağlı.
-- [x] DB şeması migration'ları — **tüm tablolar** (`tokens`, `key_attributes`, `devices`, `announcements`, `catalog_services`, `audit_logs`, `feature_flags`). ✅
-- [x] Her tabloda sıra: `create table` → **`enable row level security`** → politikalar → **explicit `grant`**. ✅ (advisor security: 0 uyarı)
-- [x] `admin_users` + `custom_access_token_hook` + `is_admin()` + tüm hook izinleri **+ `supabase_auth_admin` SELECT policy**. Hook Dashboard'dan etkinleştirildi. ✅ (uçtan uca test: admin claim true/false doğru)
+## Phase 3 — Supabase auth + sync (weeks 3–5)
+> **DB side COMPLETE and tested** (2026-06-06). Project: `authenticator-dev`. See [supabase/PROJECT_INFO.md](supabase/PROJECT_INFO.md) + [test report](supabase/tests/TEST_REPORT.md). Remaining items depend on the Flutter client.
+- [x] DB schema migrations — **all tables** (`tokens`, `key_attributes`, `devices`, `announcements`, `catalog_services`, `audit_logs`, `feature_flags`). ✅
+- [x] Order per table: `create table` → **`enable row level security`** → policies → **explicit `grant`**. ✅ (advisor security: 0 warnings)
+- [x] `admin_users` + `custom_access_token_hook` + `is_admin()` + all hook permissions **+ `supabase_auth_admin` SELECT policy**. Hook enabled from the Dashboard. ✅ (end-to-end test: admin claim true/false correct)
 - [x] `updated_at` trigger (`touch_timestamps`/`touch_updated_at`) + `alter publication supabase_realtime add table tokens`. ✅
-- [x] **cross-user RLS testi** + with check + audit_logs admin-only + FK cascade. ✅ (8/8 test geçti)
-- [x] **Patch 1 — `AuthRepository` (email/parola) + kayıt/giriş/çıkış akışı.** ✅ Supabase init
-  (PKCE), `SessionCubit` (signedIn/out/emailConfirmPending), iki-kapı guard (kimlik + vault),
-  e-posta onay deep-link, signOut→vault kilit + ağ-hatası-dirençli `signedOut`, multi-vault per uid
-  (namespace + account-linking + legacy migration `bmk` temizleme). **host 220→257.** *(Flutter)*
-- [x] **Patch 2 — `key_attributes` upload/restore + bytea codec.** ✅ Zaten-şifreli metadata (KDF + KEK/
-  recovery-wrapped master key + nonce'lar) sunucuya backfill (unlocked'ta guard'lı insert, server-wins) +
-  yeni cihazda restore → master parola → unlock. `ByteaCodec` (tek nokta), `SupabaseKeyAttributesRepository`,
-  `restoring`/`restoreFailed` state + `RestoreFailedPage` (ağ hatasında setup'a düşmez). masterKey/KEK/secret/bmk
-  ASLA sunucuya gitmez. **Token sync DEĞİL (Patch 3).** **host 257→293.** *(Flutter)*
-- [x] **Patch 3 — Şifreli token push/pull + key_attributes UPDATE.** ✅ Token ciphertext/nonce sunucuyla
-  senkronlanır (opak; AAD `token|1|<id>`). Arrival-order LWW (sunucu `updated_at`; per-kayıt `sv` cursor) +
-  soft-delete (tombstone) + Realtime yalnız tetikleyici → REST pull (bytea #1180) + bozuk-satır karantinası
-  (`safeCursorIso` cap). `RawTokenStore` (decrypt'siz ham port) + `SupabaseTokenRepository` + `TokenSyncService`.
-  **changePassword artık `key_attributes`'ı UPDATE eder** (`attrs_dirty_v1` retry; masterKey değişmez → token
-  re-encrypt yok). Settings canlı-senkron toggle + AppBar göstergesi. `uid==null` legacy inert. **host 293→347.**
-  Gerçek-ağ round-trip = manuel/integration checklist. *(Flutter)*
-- [ ] **Patch 4** — `devices` kayıt (stable device_id + last_seen) + `catalog_services`/`feature_flags`/`announcements` okuma. *(Flutter)*
-- [x] Uygulama kilidi (biyometrik) feature'ı — **Faz 2 Patch 5'te tamamlandı.** ✅
+- [x] **cross-user RLS test** + with check + audit_logs admin-only + FK cascade. ✅ (8/8 tests passed)
+- [x] **Patch 1 — `AuthRepository` (email/password) + registration/login/logout flow.** ✅ Supabase init
+  (PKCE), `SessionCubit` (signedIn/out/emailConfirmPending), two-gate guard (identity + vault),
+  email confirmation deep-link, signOut→vault lock + network-error-resilient `signedOut`, multi-vault per uid
+  (namespace + account-linking + legacy migration `bmk` cleanup). **host 220→257.** *(Flutter)*
+- [x] **Patch 2 — `key_attributes` upload/restore + bytea codec.** ✅ Already-encrypted metadata (KDF + KEK/
+  recovery-wrapped master key + nonces) backfilled to the server (guarded `unlocked` insert, server-wins) +
+  restore on a new device → master password → unlock. `ByteaCodec` (single point), `SupabaseKeyAttributesRepository`,
+  `restoring`/`restoreFailed` state + `RestoreFailedPage` (does not fall back to setup on network error). masterKey/KEK/secret/bmk
+  NEVER go to the server. **NOT token sync (Patch 3).** **host 257→293.** *(Flutter)*
+- [x] **Patch 3 — Encrypted token push/pull + key_attributes UPDATE.** ✅ Token ciphertext/nonce is synced
+  with the server (opaque; AAD `token|1|<id>`). Arrival-order LWW (server `updated_at`; per-record `sv` cursor) +
+  soft-delete (tombstone) + Realtime as trigger only → REST pull (bytea #1180) + corrupt-row quarantine
+  (`safeCursorIso` cap). `RawTokenStore` (raw port without decrypt) + `SupabaseTokenRepository` + `TokenSyncService`.
+  **changePassword now performs an UPDATE on `key_attributes`** (`attrs_dirty_v1` retry; masterKey does not change → no token
+  re-encryption). Settings live-sync toggle + AppBar indicator. `uid==null` legacy inert. **host 293→347.**
+  Real-network round-trip = manual/integration checklist. *(Flutter)*
+- [x] **Patch 4 — `devices` record + catalog/feature_flags/announcements reading.** ✅ `devices` register
+  (random `device_id` uuid v4, GLOBAL secure storage — NOT hardware-derived; signedIn→register idempotent
+  upsert composite PK, resume→`last_seen` heartbeat + 0-row register-fallback; owner-only RLS). Public read
+  tables, read-only: `catalog_services` → add-token issuer canonicalization (`IssuerAvatar.slugFor` is shared;
+  `logo_url` is IGNORED — offline/privacy); `feature_flags` → **`token_sync_enabled` kill-switch** (gate
+  inside `TokenSyncService` → Realtime bypass disabled; `ensureLoaded` cache-ready guarantee; fallback=true; token
+  sync ONLY — `key_attributes` EXCLUDED); `announcements` → read-only Settings section (`audience` client-filtered).
+  NO Realtime → fetch-on-signedIn + global cache + offline fallback. **Cross-account correlation tradeoff
+  documented** (same device/multiple accounts → same device_id; accepted). Server schema unchanged; E2E untouched;
+  legacy/test paths exact via optional params. **host 347→413.** Real-network round-trip = manual/integration
+  checklist. *(Flutter)* → **Phase 3 DONE**
+- [x] App lock (biometric) feature — **completed in Phase 2 Patch 5.** ✅
 
-## Faz 4 — Sosyal giriş + push *(developer hesapları hazır olunca)*
-- [ ] Google Sign-In + Apple Sign-In (`AuthRepository`'ye eklenir, çekirdek değişmez).
-- [ ] FCM kurulumu (Firebase projesi + APNs sertifikası).
-- [ ] Cihaz push token kaydı (`devices`) + admin→push Edge Function.
+## Phase 4 — Social sign-in + push *(once developer accounts are ready)*
+- [ ] Google Sign-In + Apple Sign-In (added to `AuthRepository`, core unchanged).
+- [ ] FCM setup (Firebase project + APNs certificate).
+- [ ] Device push token registration (`devices`) + admin→push Edge Function.
 
-## Faz 5 — Import/Export + servis kataloğu (5–6. hafta)
+## Phase 5 — Import/Export + service catalog (weeks 5–6)
 - [ ] Import: Google Authenticator (migration payload), Aegis, 2FAS.
-- [ ] Export (şifreli yedek).
-- [ ] `catalog_services` ile issuer logo/eşleştirme.
-- [ ] Etiket/klasör organizasyonu.
+- [ ] Export (encrypted backup).
+- [ ] Issuer logo/matching via `catalog_services`.
+- [ ] Tag/folder organization.
 
-## Faz 6 — Admin paneli (Next.js) (paralel başlanabilir, 3. fazda tablolar hazır olunca)
+## Phase 6 — Admin panel (Next.js) (can start in parallel, once the tables are ready in Phase 3)
 - [ ] Next.js + Supabase SDK + shadcn/ui + admin claim middleware (`app_metadata.admin`).
-- [ ] **Okuma:**
-  - Admin-public tablolar (`announcements`, `catalog_services`, `feature_flags`) → normal `authenticated` client.
-  - **İki erişim yolu (karıştırma):** (a) cross-user **okuma** → server-side **doğrudan Postgres bağlantısı** (`DATABASE_URL`/pooler + DB rolü) ile özel şemadaki `security definer` aggregate fonksiyonu (ham satır değil, sayım/metadata). (b) `auth.admin`/REST işlemleri → **secret key** (REST API kimliği, DB bağlantısı değil). Secret key DB fonksiyonunu doğrudan çağırmaz.
-  - **Cross-user okuma** RLS `user_id=auth.uid()` nedeniyle client ile yapılamaz; private şema Data API'ye expose edilmediğinden `supabase-js .rpc()` ile de çağrılamaz → (a) yolu. Guardrail'ler: özel şema + `set search_path=''` + `revoke execute from public/anon/authenticated` + `grant execute` yalnızca backend DB rolüne. Bkz. ARCHITECTURE §6.
-- [ ] **Yazma/yetkili işlemler server-side route handler / Edge Function + secret key ile** (secret key tarayıcıya gömülmez):
-  - Kullanıcı askıya alma/silme (`auth.admin` API).
-  - `audit_logs` insert; her yetkili işlem loglanır.
-  - Duyuru CRUD + FCM push tetikleme.
-- [ ] **Key terminolojisi:** yeni projede client → publishable key, backend → secret key (legacy `anon`/`service_role` 2026 sonuna kadar deprecate ediliyor — baştan yenisini kullan). Yeni secret key Edge Function/HTTP'de **`apikey` header** ile, `Bearer` ile DEĞİL (yoksa `Invalid JWT` 401); ilgili function'da `verify_jwt=false`. Bkz. ARCHITECTURE §6.
-- [ ] Servis kataloğu CRUD; `feature_flags` yönetimi; audit log görüntüleme.
+- [ ] **Reading:**
+  - Admin-public tables (`announcements`, `catalog_services`, `feature_flags`) → normal `authenticated` client.
+  - **Two access paths (do not mix):** (a) cross-user **reading** → a `security definer` aggregate function in a private schema via a server-side **direct Postgres connection** (`DATABASE_URL`/pooler + DB role) (returns counts/metadata, not raw rows). (b) `auth.admin`/REST operations → **secret key** (REST API identity, not a DB connection). The secret key does not call the DB function directly.
+  - **Cross-user reading** cannot be done from the client because of RLS `user_id=auth.uid()`, and since the private schema is not exposed to the Data API it cannot be called via `supabase-js .rpc()` either → path (a). Guardrails: private schema + `set search_path=''` + `revoke execute from public/anon/authenticated` + `grant execute` only to the backend DB role. See ARCHITECTURE §6.
+- [ ] **Writes/privileged operations server-side via route handler / Edge Function + secret key** (the secret key is not embedded in the browser):
+  - User suspension/deletion (`auth.admin` API).
+  - `audit_logs` insert; every privileged operation is logged.
+  - Announcement CRUD + FCM push triggering.
+- [ ] **Key terminology:** in a new project, client → publishable key, backend → secret key (legacy `anon`/`service_role` are being deprecated by the end of 2026 — use the new ones from the start). The new secret key in Edge Functions/HTTP uses the **`apikey` header**, NOT `Bearer` (otherwise `Invalid JWT` 401); set `verify_jwt=false` on the relevant function. See ARCHITECTURE §6.
+- [ ] Service catalog CRUD; `feature_flags` management; audit log viewing.
 
-## Faz 7 — Sertleştirme & yayın
-- [ ] Güvenlik gözden geçirmesi (anahtar yaşam döngüsü, bellek temizleme, screenshot engelleme).
-- [ ] Erişilebilirlik, dil desteği, store materyalleri.
-- [ ] App Store / Play Store yayını (Apple developer hesabı gerekli).
+## Phase 7 — Hardening & release
+- [ ] Security review (key lifecycle, memory wiping, screenshot blocking).
+- [ ] Accessibility, language support, store materials.
+- [ ] App Store / Play Store release (Apple developer account required).
 
 ---
 
-## Bağımlılık takvimi (kritik yol)
+## Dependency timeline (critical path)
 ```
-Faz 0 → Faz 1 → Faz 2 → Faz 3 ─┬─► Faz 5 ─► Faz 7
-                                └─► Faz 6 (admin, paralel)
-Faz 4 (sosyal+push) ── developer hesapları hazır olunca herhangi bir noktada takılır
+Phase 0 → Phase 1 → Phase 2 → Phase 3 ─┬─► Phase 5 ─► Phase 7
+                                        └─► Phase 6 (admin, parallel)
+Phase 4 (social+push) ── plugs in at any point once developer accounts are ready
 ```
 
-## Şimdiki engeller / kullanıcı aksiyonu
-- [x] **Supabase projesi aç** ✅ — `authenticator-dev` açıldı, migration uygulandı, hook etkin.
-- [ ] Google Play + Apple Developer hesapları (Faz 4 ve yayın için — beklerken Faz 0–3 ilerler).
-- [ ] Firebase projesi (Faz 4 push için).
-- [ ] (Faz 6 öncesi) Backend DB rolü + `private` şema grant (admin aggregate çağrısı için).
+## Current blockers / user action
+- [x] **Open a Supabase project** ✅ — `authenticator-dev` created, migration applied, hook enabled.
+- [ ] Google Play + Apple Developer accounts (for Phase 4 and release — Phases 0–3 progress while waiting).
+- [ ] Firebase project (for Phase 4 push).
+- [ ] (Before Phase 6) Backend DB role + `private` schema grant (for the admin aggregate call).
 
-## Açık tasarım kararları (ileride netleştirilecek)
-- Conflict çözümü **arrival-order LWW** ile başlıyor (sunucuya son ulaşan kazanır; bkz. ARCHITECTURE §5); çok cihazlı ağır kullanımda CRDT/gerçek-modified-time'a geçiş değerlendirilebilir.
-- Recovery key formatı: BIP39 kelime listesi mi hex mi? (UX testiyle karar.)
-- Admin analitik metrikleri E2E nedeniyle yalnızca metadata; hangi metrikler tam liste netleşecek.
+## Open design decisions (to be clarified later)
+- Conflict resolution starts with **arrival-order LWW** (the last to reach the server wins; see ARCHITECTURE §5); for heavy multi-device usage a move to CRDT/true-modified-time can be evaluated.
+- Recovery key format: BIP39 word list or hex? (Decide via UX testing.)
+- Admin analytics metrics are metadata-only because of E2E; the exact full list of which metrics will be clarified.

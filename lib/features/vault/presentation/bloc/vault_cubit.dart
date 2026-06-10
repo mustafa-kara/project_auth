@@ -17,6 +17,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../../core/otp/otp_account.dart';
 import '../../data/vault_load_result.dart';
 import '../../data/vault_repository.dart';
+import '../../domain/issuer_catalog.dart';
 import '../../domain/raw_token_record.dart';
 import '../../domain/remote_token_repository.dart';
 import '../../domain/token_sync_service.dart';
@@ -73,13 +74,43 @@ class VaultCubit extends Cubit<VaultState> {
   /// Soft-delete + import için ham port (genelde `_repository` ile aynı instance).
   final RawTokenStore? _rawStore;
 
+  /// Faz 3 Patch 4 (Adım F) — token_sync_enabled kill-switch. `start` öncesi bellek
+  /// hazırlanır ([_ensureTokenSyncReady]) sonra okunur ([_tokenSyncEnabled]). null →
+  /// her zaman açık (legacy/test; Patch 3 davranışı birebir). **YALNIZ token sync'i
+  /// gate'ler — key_attributes (VaultLockCubit) flag-DIŞI.**
+  final bool Function()? _tokenSyncEnabled;
+  final Future<void> Function()? _ensureTokenSyncReady;
+
+  /// Faz 3 Patch 4 (Adım E) — add-token sonrası issuer kanonikleştirme. Resolver
+  /// güncel katalogu döner (refresh'te değişir); null → kanonikleştirme YOK (no-op,
+  /// legacy/test davranışı korunur). Katalog boş/eşleşme yok → issuer DEĞİŞMEZ.
+  final IssuerCatalog Function()? _issuerCatalogResolver;
+
   VaultCubit(
     this._repository, {
     TokenSyncService? sync,
     RawTokenStore? rawStore,
+    bool Function()? tokenSyncEnabled,
+    Future<void> Function()? ensureTokenSyncReady,
+    IssuerCatalog Function()? issuerCatalogResolver,
   })  : _sync = sync,
         _rawStore = rawStore,
+        _tokenSyncEnabled = tokenSyncEnabled,
+        _ensureTokenSyncReady = ensureTokenSyncReady,
+        _issuerCatalogResolver = issuerCatalogResolver,
         super(const VaultState());
+
+  /// Issuer'ı katalog kanonik adına hizalar; eşleşme yok/katalog yok → DEĞİŞTİRMEZ.
+  OtpAccount _canonicalize(OtpAccount account) {
+    final catalog = _issuerCatalogResolver?.call();
+    if (catalog == null) return account;
+    final canon = catalog.canonicalIssuer(account.issuer);
+    if (canon == null || canon == account.issuer) return account;
+    return account.copyWith(issuer: canon);
+  }
+
+  /// Kill-switch açık mı (null → daima açık).
+  bool get _syncFlagOn => _tokenSyncEnabled?.call() ?? true;
 
   /// İlk `load()` tamamlanma sinyali. Mutasyonlar (add/remove/increment) bunu
   /// bekler → henüz okunmamış depo kayıtlarını `save()` ile EZMEZ (review P1).
@@ -135,6 +166,16 @@ class VaultCubit extends Cubit<VaultState> {
     // restore + unlock zaten gerçekleşti → kripto bağımlılık karşılandı). Best-effort.
     final sync = _sync;
     if (sync != null) {
+      // Faz 3 Patch 4 (Adım F) — KILL-SWITCH cache-ready GARANTİSİ (review [P2]#2): start
+      // öncesi flag bounded çözülür; sunucu AÇIKÇA false derse start HİÇ çağrılmaz (cache-boş
+      // ilk açılışta fallback'in sync'i yanlışlıkla başlatmasını önler). timeout/offline →
+      // fallback=true (sync çalışır). key_attributes bundan ETKİLENMEZ (VaultLockCubit ayrı).
+      try {
+        await (_ensureTokenSyncReady?.call() ?? Future<void>.value());
+      } catch (_) {/* timeout/hata → fallback (isEnabled true) */}
+      if (isClosed) return;
+      if (!_syncFlagOn) return; // kill-switch: token sync başlamaz
+
       // Canlı tercihi BURADA çözülür (reviewer [P2] — race yok): resolver async olsa da
       // start ondan SONRA çağrılır. Resolver yoksa varsayılan kapalı. Hata → kapalı.
       bool live = false;
@@ -181,17 +222,25 @@ class VaultCubit extends Cubit<VaultState> {
         return outcome;
       });
 
-  /// Canlı senkron desteği var mı (sync bağlı + uid'li). UI toggle'ı bununla gizlenir/gösterilir.
-  bool get syncEnabled => _sync != null;
+  /// Canlı senkron desteği var mı (sync bağlı + uid'li + token_sync_enabled flag açık).
+  /// UI toggle'ı bununla gizlenir/gösterilir (flag false → toggle gizli — Adım F).
+  bool get syncEnabled => _sync != null && _syncFlagOn;
 
-  /// Settings toggle → canlı senkronu oturum-içi aç (Realtime abone).
-  void enableLiveSync() => _sync?.enableLive();
+  /// Settings toggle → canlı senkronu oturum-içi aç (Realtime abone). Flag kapalıysa no-op
+  /// (TokenSyncService de gate'li — savunma derinliği).
+  void enableLiveSync() {
+    if (!_syncFlagOn) return;
+    _sync?.enableLive();
+  }
 
   /// Settings toggle → canlı senkronu oturum-içi kapat (catch-up sync devam eder).
   Future<void> disableLiveSync() async => _sync?.disableLive();
 
-  /// Göstergeden manuel "şimdi senkronize et" (opsiyonel).
-  Future<void> syncNow() async => _sync?.syncOnce();
+  /// Göstergeden manuel "şimdi senkronize et" (opsiyonel). Flag kapalıysa no-op.
+  Future<void> syncNow() async {
+    if (!_syncFlagOn) return;
+    await _sync?.syncOnce();
+  }
 
   /// Diskten yeniden yükle (manuel/test çağrısı). Sequencer ALTINDA çalışır → kullanıcı
   /// mutasyonuyla serileşir; `_firstLoad` tamamlanmadan ÇALIŞMAZ. (Merge yolu
@@ -234,9 +283,11 @@ class VaultCubit extends Cubit<VaultState> {
 
   Future<void> add(OtpAccount account) async {
     await _awaitLoaded();
+    // Faz 3 Patch 4 (Adım E): issuer'ı katalog kanonik adına hizala (no-op'sa değişmez).
+    final normalized = _canonicalize(account);
     return _sequence(() async {
       _guardIntegrity();
-      await _emitAndPersist([...state.accounts, account]);
+      await _emitAndPersist([...state.accounts, normalized]);
       _pushAfterMutation();
     });
   }

@@ -9,6 +9,9 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:project_auth/core/otp/otp_account.dart';
+import 'package:project_auth/features/account/data/feature_flags_cache_store.dart';
+import 'package:project_auth/features/account/domain/feature_flags_repository.dart';
+import 'package:project_auth/features/account/domain/feature_flags_service.dart';
 import 'package:project_auth/features/auth/presentation/bloc/vault_lock_cubit.dart';
 import 'package:project_auth/features/auth/presentation/bloc/vault_lock_state.dart';
 import 'package:project_auth/features/settings/presentation/settings_page.dart';
@@ -85,6 +88,14 @@ class _FakeLockCubit extends Cubit<VaultLockState> implements VaultLockCubit {
       throw UnimplementedError('${invocation.memberName}');
 }
 
+/// token_sync_enabled değerini test kontrol eder (refresh sonrası servis belleğine yansır).
+class _FakeFlagsRepo implements FeatureFlagsRepository {
+  bool enabled = true;
+  @override
+  Future<List<FeatureFlag>> fetchAll() async =>
+      [FeatureFlag(key: 'token_sync_enabled', enabled: enabled)];
+}
+
 void main() {
   testWidgets('sync destekleniyor → Canlı senkron toggle görünür, açınca store+subscribe',
       (tester) async {
@@ -120,6 +131,62 @@ void main() {
     await tester.pumpAndSettle();
     expect(await liveStore.read(), isTrue, reason: 'tercih persist edildi');
     expect(remote.subscribeCount, 1, reason: 'enableLive → subscribe');
+
+    await vault.close();
+  });
+
+  testWidgets('token_sync_enabled false olunca toggle REAKTİF gizlenir (review [P2])',
+      (tester) async {
+    final storage = _MemStorage();
+    final liveStore = LiveSyncPrefStore(storage: storage);
+    await liveStore.write(true);
+    final remote = _FakeRemote();
+    late VaultCubit vault;
+    final flagsRepo = _FakeFlagsRepo();
+    final flags = FeatureFlagsService(
+      repo: flagsRepo,
+      cache: FeatureFlagsCacheStore(storage: _MemStorage()),
+    );
+    final sync = TokenSyncService(
+      remote: remote,
+      store: _FakeRawStore(),
+      lastSync: LastSyncStore(storage: storage),
+      uid: 'u1',
+      mergeRemote: (rows, cursor) async => TokenMergeOutcome.none,
+      onStatus: (_) {},
+      isEnabled: () => flags.isEnabled('token_sync_enabled', fallback: true),
+      flagListenable: flags.listenable,
+    );
+    vault = VaultCubit(
+      _EmptyRepo(),
+      sync: sync,
+      rawStore: _FakeRawStore(),
+      tokenSyncEnabled: () => flags.isEnabled('token_sync_enabled', fallback: true),
+    );
+
+    await tester.pumpWidget(MultiBlocProvider(
+      providers: [
+        BlocProvider<VaultCubit>.value(value: vault),
+        BlocProvider<VaultLockCubit>.value(value: _FakeLockCubit()),
+      ],
+      child: MultiRepositoryProvider(
+        providers: [
+          RepositoryProvider<LiveSyncPrefStore>.value(value: liveStore),
+          RepositoryProvider<FeatureFlagsService>.value(value: flags),
+        ],
+        child: const MaterialApp(home: SettingsPage()),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    // Flag fallback=true (henüz refresh yok) → toggle görünür.
+    expect(find.text('Canlı senkron'), findsOneWidget);
+
+    // Server token_sync_enabled=false → refresh → listenable notify → REAKTİF gizlenir.
+    flagsRepo.enabled = false;
+    await flags.refresh();
+    await tester.pumpAndSettle();
+    expect(find.text('Canlı senkron'), findsNothing,
+        reason: 'flag false → toggle reaktif gizlendi');
 
     await vault.close();
   });

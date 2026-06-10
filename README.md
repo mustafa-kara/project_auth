@@ -1,127 +1,128 @@
 # Authenticator App
 
-E2E (uçtan uca) şifreli, çoklu cihaz senkronize **TOTP/HOTP authenticator** — Ente Auth / Google Authenticator benzeri.
+End-to-end (E2E) encrypted, multi-device synchronized **TOTP/HOTP authenticator** — similar to Ente Auth / Google Authenticator.
 
-- **Mobil:** Flutter (iOS + Android), MVVM + Bloc, go_router, feature-first mimari
+- **Mobile:** Flutter (iOS + Android), MVVM + Bloc, go_router, feature-first architecture
 - **Backend:** Supabase (Auth + Postgres + Realtime + RLS)
-- **Admin panel:** Next.js / React (Faz 6)
-- **Şifreleme:** E2E — TOTP secret'ları cihazda libsodium (XChaCha20-Poly1305 + Argon2id) ile şifrelenir; sunucu yalnızca opak blob görür.
+- **Admin panel:** Next.js / React (Phase 6)
+- **Encryption:** E2E — TOTP secrets are encrypted on-device with libsodium (XChaCha20-Poly1305 + Argon2id); the server only ever sees an opaque blob.
 
-> **Güvenlik özü:** Sunucu (Supabase) hiçbir koşulda açık TOTP secret'ını göremez. Şifre çözme anahtarı yalnızca kullanıcının cihazında ve master parolasındadır.
+> **Security essence:** Under no circumstances can the server (Supabase) see a plaintext TOTP secret. The decryption key lives only on the user's device and in their master password.
 
 ---
 
-## Dokümantasyon haritası
+## Documentation map
 
-| Dosya | İçerik |
+| File | Contents |
 |---|---|
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Tam mimari: güvenlik/kripto modeli, katmanlar, Supabase şeması + RLS, admin panel, auth akışı, senkron, test stratejisi |
-| [PLAN.md](PLAN.md) | Fazlı yol haritası (Faz 0–7), bağımlılık takvimi, durum |
-| [supabase/PROJECT_INFO.md](supabase/PROJECT_INFO.md) | Canlı Supabase projesi: URL, publishable key, deployment checklist |
-| [supabase/migrations/](supabase/migrations/) | Çalıştırılabilir SQL migration'ları |
-| [supabase/tests/TEST_REPORT.md](supabase/tests/TEST_REPORT.md) | Güvenlik & RLS test raporu (uçtan uca, geçti) |
-| [supabase/tests/security_rls_tests.sql](supabase/tests/security_rls_tests.sql) | Tekrar-çalıştırılabilir güvenlik test betiği |
-| [docs/OTP_ENGINE.md](docs/OTP_ENGINE.md) | OTP çekirdeği (TOTP/HOTP/Steam/Base32) teknik notu + RFC test durumu |
-| [CHANGELOG.md](CHANGELOG.md) | Sürüm/ilerleme günlüğü |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Full architecture: security/crypto model, layers, Supabase schema + RLS, admin panel, auth flow, sync, testing strategy |
+| [PLAN.md](PLAN.md) | Phased roadmap (Phase 0–7), dependency timeline, status |
+| [supabase/PROJECT_INFO.md](supabase/PROJECT_INFO.md) | Live Supabase project: URL, publishable key, deployment checklist |
+| [supabase/migrations/](supabase/migrations/) | Runnable SQL migrations |
+| [supabase/tests/TEST_REPORT.md](supabase/tests/TEST_REPORT.md) | Security & RLS test report (end-to-end, passed) |
+| [supabase/tests/security_rls_tests.sql](supabase/tests/security_rls_tests.sql) | Re-runnable security test script |
+| [docs/OTP_ENGINE.md](docs/OTP_ENGINE.md) | OTP core (TOTP/HOTP/Steam/Base32) technical note + RFC test status |
+| [CHANGELOG.md](CHANGELOG.md) | Version/progress log |
 
 ---
 
-## Mevcut durum (2026-06-09)
+## Current status (2026-06-09)
 
-| Aşama | Durum |
+| Stage | Status |
 |---|---|
-| Mimari & plan | ✅ Olgunlaştı (çok turlu review + doğrulama) |
-| Supabase backend (Faz 3 DB) | ✅ Uygulandı + güvenlik taraması temiz (0 uyarı) + uçtan uca test (8/8) + least-privilege sertleştirme (0003) |
-| Custom Access Token Hook | ✅ Etkin + admin claim doğrulandı |
-| Flutter — Faz 0 iskelet | ✅ Proje + feature-first yapı + DI/router/tema + bağımlılıklar |
-| Flutter — Faz 1 OTP çekirdeği | ✅ TOTP/HOTP/Steam/Base32 + `otpauth://` (validasyonlu, stabil token id) + vault UI + QR tarama (mobile_scanner) + secure_storage kalıcılık + arama · `analyze` temiz |
-| Flutter — Faz 2 E2E kripto (Patch 1–3) | ✅ `CryptoService`/SodiumSumo (XChaCha20-Poly1305 IETF + Argon2id), `KeyManager` (setup/unlock/recovery/changePassword), kendi BIP39 (MIT, resmi vektörler), `EncryptedVaultRepository` (token-bazlı, unchanged-blob + bozuk-kayıt koruması, integrity), Faz 1→2 migration (commit-marker, upsert) · **host 122/122 + integration 34/34** (sim) |
-| Flutter — Faz 2 UI/oturum (Patch 4) | ✅ Setup/Unlock/Recovery UI + route guard (lock state'ine göre) + lifecycle lock (paused/inactive) + corruption banner/integrity ekranı + `KeyAttributesStore`/`resetVault` + DI/main rewiring + **tam UI/UX redesign** (Geist/GeistMono gömülü, simple-icons CC0, CountdownRing, IssuerAvatar, kart/liste toggle, tap-to-copy, a11y) · **host 186/186** · bkz. [docs/Design.md](docs/Design.md) |
-| Flutter — Faz 2 biyometri (Patch 5) | ✅ Biyometrik unlock kısayolu: 3. wrap (`biometricEncryptedMasterKey`) + OS-keystore erişim kontrolü (iOS Secure Enclave + `biometryCurrentSet`, Android `strongBiometricOnly`+`enforceBiometrics`), gerçek geçit = `storage.read` (çift prompt yok; `local_auth` yalnız availability), Settings enable/disable + UnlockPage butonu, `device_info_plus` API<28 gate, lifecycle inactive-vs-paused ayrımı, parola+recovery her zaman çalışır · **host 220/220** · bkz. [docs/CRYPTO.md §11](docs/CRYPTO.md) |
-| Flutter — Faz 3 auth (Patch 1) | ✅ Supabase email/parola kimlik (kayıt/giriş/çıkış + e-posta onayı, PKCE deep-link). İki-kapı guard (kimlik EN DIŞTA → vault kilidi), `unknown→/splash` (masterKey crash'i yok), `onAuthStateChange` `onError` (crash önleme), signOut → vault kilit + ağ-hatası-dirençli `signedOut`, multi-vault per uid (namespace + account-linking + legacy `bmk` temizleme). Login parolası ≠ master parola. **Sync YOK (Patch 2–3).** · **host 257/257** |
-| Flutter — Faz 3 sync (Patch 2) | ✅ `key_attributes` upload/restore (zaten-şifreli KDF + KEK/recovery-wrapped master key). Yeni cihazda Supabase login → buluttan çek → master parola → unlock. `ByteaCodec` (bytea↔Uint8List tek nokta), upload `unlocked`'ta guard'lı insert (server-wins). `restoring`/`restoreFailed` state: fetch sürerken `/splash` (setup'a düşmez), ağ hatası ayrı ekran. **masterKey/KEK/secret/bmk ASLA sunucuya gitmez.** Sunucu şeması değişmedi. **Token sync YOK (Patch 3).** · **host 293/293** |
-| Flutter — Faz 3 token sync (Patch 3) | ✅ Şifreli token push/pull + soft-delete (tombstone) + arrival-order LWW (sunucu `updated_at`; per-kayıt `sv` cursor). `RawTokenStore` (decrypt'siz ham port) + `SupabaseTokenRepository` + `TokenSyncService`. Realtime = yalnız tetikleyici → REST pull (bytea #1180); bozuk-satır karantinası (`safeCursorIso` cap). **changePassword artık `key_attributes`'ı UPDATE eder** (`attrs_dirty_v1` retry marker); masterKey değişmez → token re-encrypt yok. Settings canlı-senkron toggle + AppBar sync göstergesi. **Sunucuya yalnız opak ciphertext/nonce gider; `uid==null` legacy yolu inert.** · **host 347/347** |
-| Admin paneli (Next.js) | ⏳ Faz 6 |
+| Architecture & plan | ✅ Matured (multi-round review + verification) |
+| Supabase backend (Phase 3 DB) | ✅ Implemented + clean security scan (0 warnings) + end-to-end tests (8/8) + least-privilege hardening (0003) |
+| Custom Access Token Hook | ✅ Enabled + admin claim verified |
+| Flutter — Phase 0 skeleton | ✅ Project + feature-first structure + DI/router/theme + dependencies |
+| Flutter — Phase 1 OTP core | ✅ TOTP/HOTP/Steam/Base32 + `otpauth://` (validated, stable token id) + vault UI + QR scanning (mobile_scanner) + secure_storage persistence + search · `analyze` clean |
+| Flutter — Phase 2 E2E crypto (Patches 1–3) | ✅ `CryptoService`/SodiumSumo (XChaCha20-Poly1305 IETF + Argon2id), `KeyManager` (setup/unlock/recovery/changePassword), in-house BIP39 (MIT, official vectors), `EncryptedVaultRepository` (token-based, unchanged-blob + corrupt-record protection, integrity), Phase 1→2 migration (commit-marker, upsert) · **host 122/122 + integration 34/34** (sim) |
+| Flutter — Phase 2 UI/session (Patch 4) | ✅ Setup/Unlock/Recovery UI + route guard (based on lock state) + lifecycle lock (paused/inactive) + corruption banner/integrity screen + `KeyAttributesStore`/`resetVault` + DI/main rewiring + **full UI/UX redesign** (embedded Geist/GeistMono, simple-icons CC0, CountdownRing, IssuerAvatar, card/list toggle, tap-to-copy, a11y) · **host 186/186** · see [docs/Design.md](docs/Design.md) |
+| Flutter — Phase 2 biometrics (Patch 5) | ✅ Biometric unlock shortcut: 3rd wrap (`biometricEncryptedMasterKey`) + OS-keystore access control (iOS Secure Enclave + `biometryCurrentSet`, Android `strongBiometricOnly`+`enforceBiometrics`), the real gate = `storage.read` (no double prompt; `local_auth` for availability only), Settings enable/disable + UnlockPage button, `device_info_plus` API<28 gate, lifecycle inactive-vs-paused distinction, password+recovery always work · **host 220/220** · see [docs/CRYPTO.md §11](docs/CRYPTO.md) |
+| Flutter — Phase 3 auth (Patch 1) | ✅ Supabase email/password identity (registration/login/logout + email confirmation, PKCE deep-link). Two-gate guard (identity OUTERMOST → vault lock), `unknown→/splash` (no masterKey crash), `onAuthStateChange` `onError` (crash prevention), signOut → vault lock + network-error-resilient `signedOut`, multi-vault per uid (namespace + account-linking + legacy `bmk` cleanup). Login password ≠ master password. **NO sync yet (Patches 2–3).** · **host 257/257** |
+| Flutter — Phase 3 sync (Patch 2) | ✅ `key_attributes` upload/restore (already-encrypted KDF + KEK/recovery-wrapped master key). On a new device, Supabase login → pull from cloud → master password → unlock. `ByteaCodec` (single point for bytea↔Uint8List), guarded `unlocked` insert on upload (server-wins), `restoring`/`restoreFailed` state: while fetching shows `/splash` (does not fall back to setup), network error gets a separate screen. **masterKey/KEK/secret/bmk NEVER go to the server.** Server schema unchanged. **NO token sync yet (Patch 3).** · **host 293/293** |
+| Flutter — Phase 3 token sync (Patch 3) | ✅ Encrypted token push/pull + soft-delete (tombstone) + arrival-order LWW (server `updated_at`; per-record `sv` cursor). `RawTokenStore` (raw port without decrypt) + `SupabaseTokenRepository` + `TokenSyncService`. Realtime = trigger only → REST pull (bytea #1180); corrupt-row quarantine (`safeCursorIso` cap). **changePassword now performs an UPDATE on `key_attributes`** (`attrs_dirty_v1` retry marker); masterKey does not change → no token re-encryption. Settings live-sync toggle + AppBar sync indicator. **Only opaque ciphertext/nonce goes to the server; the `uid==null` legacy path is inert.** · **host 347/347** |
+| Flutter — Phase 3 devices+catalog (Patch 4) | ✅ `devices` record (random `device_id` uuid v4, GLOBAL; signedIn→register, resume→`last_seen` heartbeat + 0-row register-fallback; owner-only RLS). Public read tables (read-only): `catalog_services` → add-token issuer canonicalization (`logo_url` is IGNORED — offline/privacy), `feature_flags` → **`token_sync_enabled` kill-switch** (gate inside `TokenSyncService` → Realtime bypass disabled; `ensureLoaded` cache-ready; fallback=true; token sync ONLY — key_attributes excluded), `announcements` → read-only Settings section (`audience` client-filtered). NO Realtime → fetch+cache. **Cross-account correlation tradeoff documented.** Server schema unchanged; E2E untouched. · **host 413/413** |
+| Admin panel (Next.js) | ⏳ Phase 6 |
 
-**Backend canlı proje:** `authenticator-dev` (Supabase, eu-central-1, PG17). Detay: [PROJECT_INFO.md](supabase/PROJECT_INFO.md).
-
----
-
-## Fazlar (özet)
-
-0. **Temel kurulum** — Flutter iskeleti, bağımlılıklar, go_router, DI
-1. **OTP motoru** — TOTP/HOTP/Steam (RFC 6238/4226), QR tarama, vault UI (sunucusuz çalışır)
-2. **E2E kripto** — libsodium, master key + recovery key, lokal vault şifreleme
-3. **Supabase auth + senkron** — DB ✅; Flutter Patch 1 (auth) ✅ + Patch 2 (key_attributes) ✅ + Patch 3 (token sync + changePassword UPDATE) ✅
-4. **Sosyal giriş + push** — Google/Apple Sign-In, FCM *(developer hesapları gerekli)*
-5. **Import/Export + katalog** — Google Auth / Aegis / 2FAS göçü
-6. **Admin paneli** — Next.js, analitik, duyuru/push, feature flag
-7. **Sertleştirme & yayın** — güvenlik gözden geçirme, store
-
-Detaylı görev listesi: [PLAN.md](PLAN.md).
+**Live backend project:** `authenticator-dev` (Supabase, eu-central-1, PG17). Details: [PROJECT_INFO.md](supabase/PROJECT_INFO.md).
 
 ---
 
-## Geliştirme
+## Phases (summary)
+
+0. **Foundation setup** — Flutter skeleton, dependencies, go_router, DI
+1. **OTP engine** — TOTP/HOTP/Steam (RFC 6238/4226), QR scanning, vault UI (works serverless)
+2. **E2E crypto** — libsodium, master key + recovery key, local vault encryption
+3. **Supabase auth + sync** — DB ✅; Flutter Patch 1 (auth) ✅ + Patch 2 (key_attributes) ✅ + Patch 3 (token sync + changePassword UPDATE) ✅ + Patch 4 (devices + catalog/feature_flags/announcements + token_sync kill-switch) ✅ — **Phase 3 DONE**
+4. **Social sign-in + push** — Google/Apple Sign-In, FCM *(developer accounts required)*
+5. **Import/Export + catalog** — Google Auth / Aegis / 2FAS migration
+6. **Admin panel** — Next.js, analytics, announcements/push, feature flags
+7. **Hardening & release** — security review, store
+
+Detailed task list: [PLAN.md](PLAN.md).
+
+---
+
+## Development
 
 ### Backend (Supabase)
-Migration'lar `supabase/migrations/` altında (3 dosya, timestamp sıralı — bkz.
+Migrations live under `supabase/migrations/` (3 files, ordered by timestamp — see
 [supabase/migrations/README.md](supabase/migrations/README.md)).
 
-> ⚠️ **Mevcut canlı projeye (`authenticator-dev`) bu migration'lar ZATEN uygulanmıştır.**
-> Tekrar `db push` etme — "relation already exists" hatası alırsın.
+> ⚠️ **These migrations have ALREADY been applied to the existing live project (`authenticator-dev`).**
+> Do not run `db push` again — you will get a "relation already exists" error.
 
-**Yeni/temiz bir projeye** uygulamak için:
+To apply to a **new/clean project**:
 ```bash
-supabase link --project-ref <YENİ_REF>
-supabase db push          # üç migration'ı sırayla uygular
-# veya migration dosyalarını Supabase SQL editöründe / MCP ile sırayla çalıştır
+supabase link --project-ref <NEW_REF>
+supabase db push          # applies the three migrations in order
+# or run the migration files one by one in the Supabase SQL editor / via MCP
 ```
-Güvenlik testlerini çalıştırmak için: [supabase/tests/security_rls_tests.sql](supabase/tests/security_rls_tests.sql).
+To run the security tests: [supabase/tests/security_rls_tests.sql](supabase/tests/security_rls_tests.sql).
 
-**Manuel deployment adımları** (migration kapsamı dışında) için bkz. [PROJECT_INFO.md](supabase/PROJECT_INFO.md) → Deployment Checklist.
+For **manual deployment steps** (outside the migration scope), see [PROJECT_INFO.md](supabase/PROJECT_INFO.md) → Deployment Checklist.
 
 ### Flutter
-Proje kökü Flutter uygulamasıdır (`lib/`, `pubspec.yaml`). Gereken: Flutter 3.38+.
+The project root is the Flutter app (`lib/`, `pubspec.yaml`). Required: Flutter 3.38+.
 
 ```bash
 flutter pub get
-flutter analyze          # lint — şu an temiz
-flutter test             # 347/347 host (OTP RFC vektörleri + URI validasyon + VaultCubit + crypto blob/attrs/BIP39 + VaultLockCubit/guard/KeyAttributesStore + lifecycle arka-plan-yarışı + corruption/integrity-guard/a11y widget + CountdownColors + recovery-verify/textScaler + biyometri + Faz 3 auth: SessionCubit/sessionGuard/onAuthSignedOut/multi-vault-namespace/login-register widget + Patch 2 sync: ByteaCodec/key_attributes-mapping/restore-restoring-restoreFailed/upload-guard/RestoreFailedPage + Patch 3 token sync: RawTokenStore/LWW-merge/tombstone/SupabaseTokenRepository-mapping/TokenSyncService/changePassword-UPDATE+dirty-replay/sync-göstergesi/canlı-toggle)
-flutter run              # cihaz/emülatörde çalıştır
+flutter analyze          # lint — currently clean
+flutter test             # 347/347 host (OTP RFC vectors + URI validation + VaultCubit + crypto blob/attrs/BIP39 + VaultLockCubit/guard/KeyAttributesStore + lifecycle background-race + corruption/integrity-guard/a11y widget + CountdownColors + recovery-verify/textScaler + biometrics + Phase 3 auth: SessionCubit/sessionGuard/onAuthSignedOut/multi-vault-namespace/login-register widget + Patch 2 sync: ByteaCodec/key_attributes-mapping/restore-restoring-restoreFailed/upload-guard/RestoreFailedPage + Patch 3 token sync: RawTokenStore/LWW-merge/tombstone/SupabaseTokenRepository-mapping/TokenSyncService/changePassword-UPDATE+dirty-replay/sync-indicator/live-toggle)
+flutter run              # run on a device/emulator
 ```
 
-> **libsodium testleri cihaz/simülatörde:** `sodium_libs` platform plugin'i plain
-> `flutter test` VM host'unda yüklenmez → kripto round-trip testleri
-> `integration_test/` altında (34 test: sodium service 8 + KeyManager 8 +
-> encrypted vault/migration 18). Çalıştır: `flutter test integration_test/ -d <device>`.
+> **libsodium tests on device/simulator:** the `sodium_libs` platform plugin is not loaded
+> on the plain `flutter test` VM host → crypto round-trip tests live under
+> `integration_test/` (34 tests: sodium service 8 + KeyManager 8 +
+> encrypted vault/migration 18). Run: `flutter test integration_test/ -d <device>`.
 
-**Klasör yapısı** (feature-first + katmanlı):
+**Folder structure** (feature-first + layered):
 ```
 lib/
   core/
-    otp/        TOTP/HOTP/Steam/Base32 motoru + otpauth:// parse (saf Dart, test edilir)
+    otp/        TOTP/HOTP/Steam/Base32 engine + otpauth:// parse (pure Dart, tested)
     di/         get_it composition root (configureDependencies)
-    router/     go_router rotaları (Routes sabitleri)
-    theme/      Material 3 açık/koyu tema
+    router/     go_router routes (Routes constants)
+    theme/      Material 3 light/dark theme
   features/
-    vault/      data/ — VaultRepository (secure_storage kalıcılık)
-                presentation/{bloc,pages,widgets} — VaultCubit, VaultPage (arama), OtpCard
-    scan/       presentation — ScanPage (mobile_scanner QR tarama)
+    vault/      data/ — VaultRepository (secure_storage persistence)
+                presentation/{bloc,pages,widgets} — VaultCubit, VaultPage (search), OtpCard
+    scan/       presentation — ScanPage (mobile_scanner QR scanning)
   main.dart     DI init + MaterialApp.router + VaultCubit provider
 test/
-  core/otp/     RFC 4226/6238 test vektörleri + URI parse testleri
+  core/otp/     RFC 4226/6238 test vectors + URI parse tests
 ```
 
-> **OTP çekirdeği detayı:** [docs/OTP_ENGINE.md](docs/OTP_ENGINE.md).
+> **OTP core details:** [docs/OTP_ENGINE.md](docs/OTP_ENGINE.md).
 >
-> 🔐 **Kripto paket kararı (Faz 2'de uygulandı):** `sodium: ^3.4.6` + `sodium_libs: ^3.4.6+4`. `sodium 4.x` Dart SDK `^3.11.0` ister; proje Dart `3.10.7` (Flutter 3.38.6 stable) → **4.x çözülemez**, bu yüzden 3.x bilinçli ve doğru karardır. `sodium_libs` pub'da "discontinued" etiketli ama pre-built libsodium binary'lerini yükler ve native-assets/experiment flag GEREKTİRMEZ; 3.x hattı çalışır. İleride Flutter Dart 3.11+'a yükselince 4.x native assets'e geçiş ayrı bir küçük migration olur. XChaCha20-Poly1305 IETF + Argon2id algoritma kararı değişmez. Detay: [docs/CRYPTO.md](docs/CRYPTO.md).
+> 🔐 **Crypto package decision (implemented in Phase 2):** `sodium: ^3.4.6` + `sodium_libs: ^3.4.6+4`. `sodium 4.x` requires Dart SDK `^3.11.0`; the project is on Dart `3.10.7` (Flutter 3.38.6 stable) → **4.x cannot be resolved**, so 3.x is a deliberate and correct decision. `sodium_libs` is tagged "discontinued" on pub but it installs pre-built libsodium binaries and does NOT REQUIRE the native-assets/experiment flag; the 3.x line works. Later, once Flutter moves to Dart 3.11+, migrating to 4.x native assets will be a separate small migration. The XChaCha20-Poly1305 IETF + Argon2id algorithm decision does not change. Details: [docs/CRYPTO.md](docs/CRYPTO.md).
 
 ---
 
-## Önemli güvenlik notları (geliştiriciye)
+## Important security notes (for developers)
 
-- **Login parolası ≠ master parola.** Supabase oturumu kimlik için; master parola E2E anahtarı için. Ayrı tutulur.
-- **Secret key (`sb_secret_...`) asla client'a gömülmez** — yalnızca backend (Next.js / Edge Function).
-- **libsodium:** XChaCha20-Poly1305 için `crypto_aead_xchacha20poly1305_ietf_*` kullan; `crypto_secretbox` (XSalsa20) **kullanma**.
-- Tüm DB erişimi RLS'e tabidir; cross-user izolasyon test edildi.
+- **Login password ≠ master password.** The Supabase session is for identity; the master password is for the E2E key. They are kept separate.
+- **The secret key (`sb_secret_...`) is never embedded in the client** — backend only (Next.js / Edge Function).
+- **libsodium:** use `crypto_aead_xchacha20poly1305_ietf_*` for XChaCha20-Poly1305; do **not** use `crypto_secretbox` (XSalsa20).
+- All DB access is subject to RLS; cross-user isolation has been tested.

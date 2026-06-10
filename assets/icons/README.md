@@ -1,16 +1,17 @@
-# Servis logoları — simple-icons (CC0)
+# Service logos — simple-icons (CC0)
 
-Bu klasördeki SVG ikonları [simple-icons](https://github.com/simple-icons/simple-icons)
-projesinden alınmıştır.
+The SVG icons in this folder are taken from the [simple-icons](https://github.com/simple-icons/simple-icons)
+project.
 
-- **Lisans:** CC0 1.0 Universal (public domain) — kaynaktan teyit edildi
-  (`simple-icons/simple-icons` → `LICENSE.md` başlığı "CC0 1.0 Universal").
-- **Kullanım:** tek-renkli SVG'ler; uygulamada tema rengiyle (`currentColor`/tint)
-  boyanır. `IssuerAvatar` issuer adını slug'a normalize edip eşleşen SVG'yi gösterir;
-  eşleşmezse baş-harf + renkli daire fallback'ine düşer.
-- **Curated alt-küme:** Bundle boyutunu küçük tutmak için yalnız yaygın servisler
-  gömülüdür (bkz. `docs/Design.md §6, §7`). Eşleşmeyen tüm issuer'lar fallback kullanır.
-- **Offline + gizlilik:** runtime logo/favicon çekme YAPILMAZ; tüm ikonlar bundle'dan.
+- **License:** CC0 1.0 Universal (public domain) — confirmed from the source
+  (`simple-icons/simple-icons` → `LICENSE.md` header reads "CC0 1.0 Universal").
+- **Usage:** single-color SVGs; painted with the theme color (`currentColor`/tint)
+  in the app. `IssuerAvatar` normalizes the issuer name to a slug and shows the matching SVG;
+  if there is no match, it falls back to an initial + colored circle.
+- **Curated subset:** to keep the bundle size small, only common services are
+  embedded (see `docs/Design.md §6, §7`). All issuers without a match use the fallback.
+- **Offline + privacy:** no runtime logo/favicon fetching is performed; all icons come from the bundle.
 
-Yeni ikon eklemek için: `https://raw.githubusercontent.com/simple-icons/simple-icons/master/icons/<slug>.svg`
-indir, bu klasöre koy (slug = lowercase servis adı).
+To add a new icon: download
+`https://raw.githubusercontent.com/simple-icons/simple-icons/master/icons/<slug>.svg`,
+and place it in this folder (slug = lowercase service name).

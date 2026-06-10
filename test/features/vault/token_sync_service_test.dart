@@ -5,8 +5,7 @@
 /// Gerçek ağ GEREKMEZ.
 library;
 
-import 'dart:typed_data';
-
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:project_auth/core/crypto/encrypted_blob.dart';
@@ -283,5 +282,141 @@ void main() {
     final svc = build();
     await svc.pushChanged();
     expect(remote.pushCount, 0);
+  });
+
+  // ── Faz 3 Patch 4 (Adım F) — token_sync_enabled kill-switch ──────────────────
+  group('kill-switch (token_sync_enabled)', () {
+    late ValueNotifier<int> flagVersion;
+    late bool flagEnabled;
+    late bool livePref;
+
+    TokenSyncService buildGated() {
+      statuses = [];
+      mergedCount = 0;
+      return TokenSyncService(
+        remote: remote,
+        store: store,
+        lastSync: lastSync,
+        uid: 'u1',
+        mergeRemote: (rows, cursor) async {
+          final outcome = await store.importRemote(rows, pullCursorIso: cursor);
+          if (outcome.changed) mergedCount++;
+          return outcome;
+        },
+        onStatus: statuses.add,
+        isEnabled: () => flagEnabled,
+        flagListenable: flagVersion,
+        livePreferenceResolver: () async => livePref,
+      );
+    }
+
+    setUp(() {
+      flagVersion = ValueNotifier<int>(0);
+      flagEnabled = true;
+      livePref = false;
+    });
+
+    test('flag false → syncOnce no-op (pull yok)', () async {
+      flagEnabled = false;
+      remote.next = RemotePullResult(
+          rows: [_row('x', '2026-06-09T10:00:00Z')],
+          safeCursorIso: '2026-06-09T10:00:00.000Z');
+      final svc = buildGated();
+      await svc.syncOnce();
+      expect(remote.pullCount, 0, reason: 'kill-switch: pull çalışmaz');
+    });
+
+    test('flag false → start no-op (subscribe + pull YOK)', () async {
+      flagEnabled = false;
+      final svc = buildGated();
+      await svc.start(live: true);
+      expect(remote.subscribeCount, 0);
+      expect(remote.pullCount, 0);
+    });
+
+    test('flag false → Realtime event no-op (BYPASS YOK — review [P1]#1)', () async {
+      // Önce flag açık → abone ol, sonra flag'i kapat → event gelirse sync OLMAMALI.
+      flagEnabled = true;
+      remote.next = const RemotePullResult(rows: []);
+      store.importResult = TokenMergeOutcome.none;
+      final svc = buildGated();
+      await svc.start(live: true);
+      final pullsAfterStart = remote.pullCount;
+      flagEnabled = false; // kill-switch devreye girdi
+      remote.emitChange(); // Realtime tetikleyici
+      await Future<void>.delayed(Duration.zero);
+      expect(remote.pullCount, pullsAfterStart,
+          reason: 'flag false → _onRealtimeEvent syncOnce çağırmaz');
+    });
+
+    test('flag false → pushChanged + enableLive no-op', () async {
+      flagEnabled = false;
+      store.raw = [
+        RawTokenRecord(id: 'd', blob: _b(), updatedAtMs: 1, serverUpdatedAtIso: null),
+      ];
+      final svc = buildGated();
+      await svc.pushChanged();
+      svc.enableLive();
+      expect(remote.pushCount, 0);
+      expect(remote.subscribeCount, 0);
+    });
+
+    test('flag false→true notify + livePref AÇIK → enableLive (review R3[P2]#1)', () async {
+      flagEnabled = false;
+      livePref = true;
+      final svc = buildGated();
+      // Başlangıçta flag kapalı → abone yok.
+      svc.enableLive();
+      expect(remote.subscribeCount, 0);
+      // Flag açıldı + notify → listener livePref açık olduğu için enableLive.
+      flagEnabled = true;
+      flagVersion.value++;
+      await Future<void>.delayed(Duration.zero);
+      expect(remote.subscribeCount, 1, reason: 'flag→true + livePref → abone geri açılır');
+    });
+
+    test('flag false→true notify ama livePref KAPALI → enableLive ÇAĞRILMAZ', () async {
+      flagEnabled = false;
+      livePref = false;
+      buildGated(); // listener ctor'da bağlanır; servis referansı gerekmez
+      flagEnabled = true;
+      flagVersion.value++;
+      await Future<void>.delayed(Duration.zero);
+      expect(remote.subscribeCount, 0);
+    });
+
+    test('flag true→false notify → disableLive (orphan abonelik temizliği)', () async {
+      flagEnabled = true;
+      remote.next = const RemotePullResult(rows: []);
+      store.importResult = TokenMergeOutcome.none;
+      final svc = buildGated();
+      await svc.start(live: true);
+      expect(remote.subscribeCount, 1);
+      flagEnabled = false;
+      flagVersion.value++;
+      await Future<void>.delayed(Duration.zero);
+      expect(remote.unsubscribeCount, 1, reason: 'flag→false → disableLive');
+    });
+
+    test('dispose → flag listener kaldırılır (notify sonrası no-op)', () async {
+      flagEnabled = true;
+      livePref = true;
+      final svc = buildGated();
+      await svc.dispose();
+      flagVersion.value++; // dispose sonrası notify
+      await Future<void>.delayed(Duration.zero);
+      expect(remote.subscribeCount, 0, reason: 'dispose sonrası listener etkisiz');
+    });
+
+    test('flag açık → davranış Patch 3 ile birebir (regresyon yok)', () async {
+      flagEnabled = true;
+      remote.next = RemotePullResult(
+          rows: [_row('x', '2026-06-09T10:00:00Z')],
+          safeCursorIso: '2026-06-09T10:00:00.000Z');
+      final svc = buildGated();
+      await svc.syncOnce();
+      expect(remote.pullCount, 1);
+      expect(mergedCount, 1);
+    });
   });
 }

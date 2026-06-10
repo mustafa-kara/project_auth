@@ -12,7 +12,11 @@ import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
 import 'features/account/domain/account_vault_manager.dart';
 import 'features/account/domain/auth_repository.dart';
+import 'features/account/domain/announcements_repository.dart';
+import 'features/account/domain/device_registrar.dart';
+import 'features/account/domain/feature_flags_service.dart';
 import 'features/account/domain/key_attributes_repository.dart';
+import 'features/account/data/announcements_cache_store.dart';
 import 'features/account/data/attrs_dirty_store.dart';
 import 'features/account/data/pending_confirmation_store.dart';
 import 'features/account/presentation/bloc/session_cubit.dart';
@@ -26,6 +30,7 @@ import 'features/vault/data/last_sync_store.dart';
 import 'features/vault/data/live_sync_pref_store.dart';
 import 'features/vault/data/vault_migration.dart';
 import 'features/vault/data/view_mode_store.dart';
+import 'features/vault/domain/issuer_catalog_holder.dart';
 import 'features/vault/domain/remote_token_repository.dart';
 import 'features/vault/domain/token_sync_service.dart';
 import 'features/vault/presentation/bloc/vault_cubit.dart';
@@ -105,6 +110,15 @@ class _AuthenticatorAppState extends State<AuthenticatorApp>
     if (s.status != SessionStatus.signedIn || s.linkRequired) return;
     final uid = _session.currentUid;
     if (uid == null) return;
+
+    // Faz 3 Patch 4 — signedIn best-effort kancaları (uid değişmese de her signedIn'de):
+    //   • cihaz kaydı (device_id üret + register; idempotent upsert)
+    //   • flag/catalog/announcements cache ısıt (kill-switch + kanonikleştirme + duyuru)
+    // Hepsi unawaited + kendi try/catch'i (kullanıcıyı/izolasyonu bloklamaz).
+    unawaited(locator<DeviceRegistrar>().onSignedIn(uid));
+    unawaited(locator<FeatureFlagsService>().refresh());
+    unawaited(locator<IssuerCatalogHolder>().refresh());
+
     final prefix = AccountVaultManager.prefixFor(uid);
     if (prefix == _activePrefix) return;
 
@@ -166,6 +180,19 @@ class _AuthenticatorAppState extends State<AuthenticatorApp>
       viewModeStoreBuilder: () =>
           ViewModeStore(storage: storage, keyPrefix: prefix),
       liveSyncStoreBuilder: () => liveSyncStore,
+      // Faz 3 Patch 4 — Settings duyuru bölümü + flag-reaktif toggle için global provider'lar.
+      shellWrapper: (child) => MultiRepositoryProvider(
+        providers: [
+          RepositoryProvider<AnnouncementsRepository>.value(
+              value: locator<AnnouncementsRepository>()),
+          RepositoryProvider<AnnouncementsCacheStore>.value(
+              value: locator<AnnouncementsCacheStore>()),
+          // token_sync_enabled değişince Settings toggle'ı reaktif gizlensin/görünsün.
+          RepositoryProvider<FeatureFlagsService>.value(
+              value: locator<FeatureFlagsService>()),
+        ],
+        child: child,
+      ),
     );
   }
 
@@ -186,8 +213,13 @@ class _AuthenticatorAppState extends State<AuthenticatorApp>
       storage: storage,
       keyPrefix: prefix,
     );
+    // Faz 3 Patch 4 — token_sync_enabled kill-switch + issuer kanonikleştirme servisleri.
+    final flags = locator<FeatureFlagsService>();
+    final catalogHolder = locator<IssuerCatalogHolder>();
     if (uid == null) {
-      return VaultCubit(repo); // legacy/uid-siz → sync yok
+      // legacy/uid-siz → sync yok; ama issuer kanonikleştirme yine çalışabilir (katalog public).
+      return VaultCubit(repo,
+          issuerCatalogResolver: () => catalogHolder.current);
     }
     late VaultCubit cubit;
     final sync = TokenSyncService(
@@ -199,8 +231,22 @@ class _AuthenticatorAppState extends State<AuthenticatorApp>
       // yarışmaz (reviewer [P1]). Service importRemote'u DOĞRUDAN çağırmaz.
       mergeRemote: (rows, cursor) => cubit.applyRemoteMerge(rows, cursor),
       onStatus: (s) => cubit.updateSyncState(s),
+      // Adım F — kill-switch: gate TokenSyncService İÇİNDE (Realtime bypass kapalı);
+      // flag false'a dönünce self-subscribe disableLive; flag true + livePref → enableLive.
+      isEnabled: () => flags.isEnabled('token_sync_enabled', fallback: true),
+      flagListenable: flags.listenable,
+      livePreferenceResolver: liveSyncStore.read,
     );
-    cubit = VaultCubit(repo, sync: sync, rawStore: repo);
+    cubit = VaultCubit(
+      repo,
+      sync: sync,
+      rawStore: repo,
+      // Adım F — start öncesi flag bounded çözülür (cache-ready garantisi); flag false → start yok.
+      tokenSyncEnabled: () => flags.isEnabled('token_sync_enabled', fallback: true),
+      ensureTokenSyncReady: flags.ensureLoaded,
+      // Adım E — add-token issuer kanonikleştirme (güncel katalog; boş → no-op).
+      issuerCatalogResolver: () => catalogHolder.current,
+    );
     // Canlı tercih: load() start(live:)'dan ÖNCE bunu await eder (reviewer [P2] — race yok).
     cubit.liveSyncResolver = liveSyncStore.read;
     return cubit;
@@ -227,6 +273,13 @@ class _AuthenticatorAppState extends State<AuthenticatorApp>
       _lock.onAppBackgrounded(paused: true);
     } else if (state == AppLifecycleState.inactive) {
       _lock.onAppBackgrounded(paused: false);
+    } else if (state == AppLifecycleState.resumed) {
+      // Faz 3 Patch 4 — resume'da device last_seen heartbeat (best-effort; 0 satır →
+      // register-fallback). Yalnız signedIn iken (uid var). Vault kilidini etkilemez.
+      final uid = _session.currentUid;
+      if (uid != null && _session.state.status == SessionStatus.signedIn) {
+        unawaited(locator<DeviceRegistrar>().onResumed(uid));
+      }
     }
   }
 

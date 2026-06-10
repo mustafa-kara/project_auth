@@ -8,7 +8,8 @@
 /// kök widget tutar ve dispose eder ([AppRouterBundle]).
 library;
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
+import 'package:flutter/widgets.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
@@ -87,12 +88,18 @@ typedef ViewModeStoreBuilder = ViewModeStore Function();
 /// `LiveSyncPrefStore` builder'ı. main tarafından enjekte edilir.
 typedef LiveSyncStoreBuilder = LiveSyncPrefStore Function();
 
+/// Faz 3 Patch 4 — unlocked subtree'yi sarmalayan wrapper (Settings duyuru bölümü için
+/// AnnouncementsRepository/Cache provider'larını ekler). Router DI-agnostik kalır
+/// (provider listesi yerine düz `Widget Function(Widget)` → ek paket bağımlılığı yok).
+typedef ShellWrapper = Widget Function(Widget child);
+
 AppRouterBundle createAppRouter(
   VaultLockCubit lock, {
   required SessionCubit session,
   required VaultCubitBuilder vaultCubitBuilder,
   required ViewModeStoreBuilder viewModeStoreBuilder,
   required LiveSyncStoreBuilder liveSyncStoreBuilder,
+  ShellWrapper? shellWrapper,
 }) {
   // İKİ AYRI notifier (lock + session) → merge yalnız dinler, sahibi değil.
   // Bundle her ikisini de tutar + dispose eder (reviewer [P2]).
@@ -142,19 +149,22 @@ AppRouterBundle createAppRouter(
       ),
       // --- Unlocked subtree: VaultCubit + (per-uid) ViewModeStore yalnız burada ---
       ShellRoute(
-        builder: (context, state, child) =>
-            // Aktif uid namespace'li ViewModeStore (reviewer [P3]) → VaultPage
-            // global singleton yerine bunu okur (per-uid kart/liste tercihi).
-            RepositoryProvider<ViewModeStore>(
-          create: (_) => viewModeStoreBuilder(),
-          child: RepositoryProvider<LiveSyncPrefStore>(
-            create: (_) => liveSyncStoreBuilder(),
-            child: BlocProvider<VaultCubit>(
-              create: (_) => vaultCubitBuilder()..load(),
-              child: child,
+        builder: (context, state, child) {
+          // Aktif uid namespace'li ViewModeStore (reviewer [P3]) → VaultPage
+          // global singleton yerine bunu okur (per-uid kart/liste tercihi).
+          Widget tree = RepositoryProvider<ViewModeStore>(
+            create: (_) => viewModeStoreBuilder(),
+            child: RepositoryProvider<LiveSyncPrefStore>(
+              create: (_) => liveSyncStoreBuilder(),
+              child: BlocProvider<VaultCubit>(
+                create: (_) => vaultCubitBuilder()..load(),
+                child: child,
+              ),
             ),
-          ),
-        ),
+          );
+          // Faz 3 Patch 4 — Settings duyuru bölümü için global provider'ları sarmala (varsa).
+          return shellWrapper != null ? shellWrapper(tree) : tree;
+        },
         routes: [
           GoRoute(
             path: Routes.vault,

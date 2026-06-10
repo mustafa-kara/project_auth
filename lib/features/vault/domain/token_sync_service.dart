@@ -12,6 +12,8 @@ library;
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
+
 import '../../account/domain/sync_exceptions.dart';
 import '../data/last_sync_store.dart';
 import 'raw_token_record.dart';
@@ -69,17 +71,36 @@ class TokenSyncService {
     required String uid,
     required MergeRemote mergeRemote,
     required void Function(SyncState) onStatus,
+    bool Function()? isEnabled,
+    ValueListenable<int>? flagListenable,
+    Future<bool> Function()? livePreferenceResolver,
   })  : _remote = remote,
         _store = store,
         _lastSync = lastSync,
         _uid = uid,
         _mergeRemote = mergeRemote,
-        _onStatus = onStatus;
+        _onStatus = onStatus,
+        _isEnabled = isEnabled,
+        _flagListenable = flagListenable,
+        _livePreferenceResolver = livePreferenceResolver {
+    // Faz 3 Patch 4 (Adım F): flag değişince gate'i yeniden değerlendir (SELF-SUBSCRIBE —
+    // root'ta cubit ref'i GEREKMEZ; Realtime bypass'ı kapatır). VaultCubit gate'i YETMEZ
+    // çünkü _onRealtimeEvent doğrudan syncOnce çağırır.
+    _flagListenable?.addListener(_onFlagChanged);
+  }
 
   final RemoteTokenRepository _remote;
   final RawTokenStore _store;
   final LastSyncStore _lastSync;
   final String _uid;
+
+  /// token_sync_enabled kill-switch (Adım F). null → her zaman true (legacy/test).
+  final bool Function()? _isEnabled;
+  final ValueListenable<int>? _flagListenable;
+  final Future<bool> Function()? _livePreferenceResolver;
+
+  /// Gate: kill-switch açık mı (null isEnabled → daima açık).
+  bool get _enabled => _isEnabled?.call() ?? true;
 
   /// Remote satırları diske MERGE eden + (değişikse) VaultCubit state'ini reload eden
   /// callback. **VaultCubit'in mutasyon sequencer'ı ALTINDA çalışır** (reviewer [P1]:
@@ -96,7 +117,7 @@ class TokenSyncService {
 
   /// Unlock'ta çağrılır. [live] → Realtime aboneliği aç (subscribe ÖNCE, pull SONRA).
   Future<void> start({required bool live}) async {
-    if (_disposed) return;
+    if (_disposed || !_enabled) return; // kill-switch: token sync HİÇ başlamaz
     if (live) {
       _subscribe(); // ÖNCE abone (gelen olaylar _pendingEvent'e tamponlanır)
     }
@@ -111,7 +132,7 @@ class TokenSyncService {
   /// Tam bir sync turu: cursor oku → push (dirty) → pull → merge → cursor ilerlet.
   /// Best-effort: hata → `SyncPhase.error` (re-throw YOK).
   Future<void> syncOnce() async {
-    if (_disposed || _syncing) return;
+    if (_disposed || _syncing || !_enabled) return; // kill-switch (Realtime bypass dahil)
     _syncing = true;
     _emit(const SyncState(phase: SyncPhase.syncing));
     try {
@@ -160,7 +181,7 @@ class TokenSyncService {
 
   /// save sonrası (add/edit/increment): dirty kayıtları best-effort push. Boşsa no-op.
   Future<void> pushChanged() async {
-    if (_disposed) return;
+    if (_disposed || !_enabled) return; // kill-switch
     try {
       await _pushDirty();
     } catch (_) {
@@ -177,7 +198,7 @@ class TokenSyncService {
 
   /// Canlı senkronu oturum-içi aç (subtree tear-down YOK).
   void enableLive() {
-    if (_disposed || _channel != null) return;
+    if (_disposed || _channel != null || !_enabled) return; // kill-switch
     _subscribe();
   }
 
@@ -195,7 +216,7 @@ class TokenSyncService {
   /// Realtime olayı = yalnız TETİKLEYİCİ (payload OKUNMAZ — #1180). sync sürüyorsa
   /// işaretle (coalesce), değilse REST pull tetikle.
   void _onRealtimeEvent() {
-    if (_disposed) return;
+    if (_disposed || !_enabled) return; // kill-switch: Realtime tetikleyici no-op (bypass YOK)
     if (_syncing) {
       _pendingEvent = true;
       return;
@@ -208,9 +229,28 @@ class TokenSyncService {
     _onStatus(s);
   }
 
+  /// Flag değişti (FeatureFlagsService.refresh notify) — gate'i yeniden değerlendir.
+  /// **İKİ YÖN (review R3[P2]#1 — effective-state tutarlılığı):** flag→false → `disableLive`
+  /// (orphan abonelik temizliği); flag→true + kullanıcı `live` tercihi açık → `enableLive`
+  /// (toggle "açık" ⇔ abonelik aktif). `enableLive` idempotent (_channel!=null → no-op).
+  void _onFlagChanged() {
+    if (_disposed) return;
+    if (!_enabled) {
+      unawaited(disableLive());
+      return;
+    }
+    // Flag açıldı: kullanıcı tercihi açıksa aboneliği geri kur.
+    final resolver = _livePreferenceResolver;
+    if (resolver == null) return;
+    unawaited(resolver().then((live) {
+      if (!_disposed && _enabled && live) enableLive();
+    }).catchError((_) {}));
+  }
+
   /// VaultCubit.close → çağrılır. Aboneliği kapatır; sonrası tüm callback'ler no-op.
   Future<void> dispose() async {
     _disposed = true;
+    _flagListenable?.removeListener(_onFlagChanged); // self-subscribe temizliği (Adım F)
     final ch = _channel;
     _channel = null;
     await ch?.unsubscribe();

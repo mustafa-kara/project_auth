@@ -1,629 +1,658 @@
 # Changelog
 
-Proje ilerleme günlüğü. En yeni en üstte.
+Project progress log. Newest at the top.
 
-## 2026-06-09 (Faz 3 Patch 3 — şifreli token sync + key_attributes UPDATE)
+## 2026-06-10 (Phase 3 Patch 4 — devices registration + catalog/feature_flags/announcements + token_sync kill-switch)
 
-Şifreli TOTP token'ları sunucuyla senkronlanır — E2E garantisi KORUNARAK. Bir cihazda eklenen/silinen
-token diğer cihazda görünür; yeni cihaz tüm token'ları geri yükler. Ayrıca **changePassword artık
-sunucudaki `key_attributes` sarmalını GÜNCELLER** (Patch 2'deki guard'lı-insert sınırı KALKTI → yeni
-cihazda fresh-restore yeni parolayı kullanır). Sunucu şeması DEĞİŞMEDİ; yeni kripto rutini YOK. Beş tur
-plan review (Codex), her supabase-flutter API'si Context7'den teyit edilerek. host **293/293 → 347/347**.
+Three additional server capabilities OUTSIDE identity/sync — **WITHOUT TOUCHING the E2E surface** (NO new crypto; none of
+these tables carry any secret/masterKey). Three rounds of plan review (Codex), with supabase-flutter APIs confirmed against
+Context7. host **347/347 → 413/413**. The server schema is UNCHANGED.
 
-- **Sunucuya yalnız opak gider:** `ciphertext`/`nonce` (`OtpAccount` JSON'unun masterKey + XChaCha20-
-  Poly1305 ile şifreli hâli; AAD `token|1|<id>`) + `version` + `deleted`. **Açık TOTP secret, masterKey,
-  KEK, recovery key ASLA.** `updated_at`/`created_at` client'tan gönderilmez (server trigger ezer).
-- **Üç katman + orchestrator (masterKey'siz sync):** `RawTokenStore` (= `EncryptedVaultRepository`'nin
-  yeni yüzü; `exportRaw`/`importRemote`/`markDeleted` — decrypt YOK) + `RemoteTokenRepository`/
-  `SupabaseTokenRepository` (opak transport; `ByteaCodec` + `SyncError`) + `TokenSyncService` (cursor +
-  push/pull/merge + Realtime). `VaultRepository` (`load/save/purgeCorrupted`) çözülmüş kalır → 293 test bozulmaz.
-- **Arrival-order LWW (sunucu `updated_at` hakemi):** client epoch-ms ile ASLA kıyaslanmaz; her kayıt
-  son uzlaşılan sunucu cursor'unu (`sv`) tutar. Lokal-dirty (sv=null) için pull-cursor ile echo-vs-yeni
-  ayrımı. Merge id-bazlı + idempotent (çift pull zararsız).
-- **Soft-delete (tombstone):** silme = `deleted=true` (hard DELETE yok — sunucuda policy/grant yok).
-  `markDeleted` son bilinen blob'la tombstone üretir + atomik yazar; `load()` accounts'ta göstermez,
-  `exportRaw` push için döndürür. Tombstone save'ler arası korunur (token diriltilmez).
-- **Realtime = yalnız TETİKLEYİCİ (bytea #1180 çift-encode):** payload OKUNMAZ; değişiklik sinyali REST
-  `pullSince` tetikler. Sıra: abone-önce → catch-up pull → idempotent merge. Abonelik VaultCubit subtree
-  lifecycle'ına bağlı (unlock'ta start, lock/arka-plan/signOut'ta dispose).
-- **Bozuk-remote-satır KARANTİNASI:** başarılı yanıttaki tek malformed satır atlanır + sayılır (vault
-  DÜŞMEZ, overwrite YOK); cursor yalnız ilk-malformed'dan önceki son-valid'e kadar ilerler (`safeCursorIso`)
-  → gap atlanmaz, sunucu düzelince tekrar denenir. Ağ/RLS hatası (tüm istek) ≠ tek bozuk satır.
-- **changePassword sync (Adım K):** masterKey DEĞİŞMEZ → token re-encrypt YOK; yalnız `key_attributes`
-  satırı UPDATE edilir (LWW). Ağ hatası → `attrs_dirty_v1` marker SET kalır → sonraki unlock'ta dirty-replay
-  yeniden dener (gerçek retry; başarıda CLEAR). İki cihaz çakışırsa son-ulaşan kazanır (veri kaybı yok —
-  kaybeden lokal attrs ile çalışmaya devam eder; recovery sarmalı değişmez).
-- **Push best-effort (sessiz), pull self-healing reconciler.** Çakışma sessiz LWW (kullanıcıya bildirim yok).
-- **UI:** Settings'te "Canlı senkron" toggle (per-uid `live_sync_enabled_v1`, varsayılan kapalı; kapalıyken
-  bile açılışta catch-up sync). VaultPage AppBar'da sync göstergesi (`syncing`/`error`/`malformedCount`; a11y Semantics).
-- **`uid==null` (legacy/uid-siz) → tüm sync INERT; davranış + 293 test BİREBİR.**
-- **KASITLI sınırlar:** token sync yalnız unlocked; kilitli arka-plan raw-pull kapsam dışı. Diğer cihazların
-  push ile zorla re-wrap'i kapsam dışı (gerek yok; provisioned cihaz lokal attrs ile çalışır). Tombstone GC ileride.
-- **Manuel/integration checklist (cihazda):** gerçek Supabase'e bytea token INSERT/SELECT round-trip +
-  Realtime tetik → REST pull + yeni-cihaz token restore + soft-delete cross-device + LWW + changePassword
-  sonrası fresh-restore yeni-parola + bozuk-satır karantina.
-- **İmplementasyon-review düzeltmeleri (3 bulgu, kaynaktan teyit):**
-  - [P1] **Merge yazımı artık VaultCubit sequencer'ı ALTINDA:** `TokenSyncService` `importRemote`'u DOĞRUDAN
-    çağırmıyor; `mergeRemote` callback'i → `VaultCubit.applyRemoteMerge` (import+reload TEK kritik bölümde,
-    `_opChain`) → eşzamanlı kullanıcı add/delete/increment ile yarış yok (veri kaybı kapatıldı).
-  - [P2] **Push best-effort GERÇEKTEN:** `syncOnce`'ta push kendi `try/catch`'inde → push hatası pull'u
-    ENGELLEMEZ (başka cihaz değişiklikleri yine çekilir).
-  - [P2] **Canlı tercih race'i:** `_liveAtStart` setter yerine `liveSyncResolver` (async) → `load()` start'tan
-    ÖNCE `await` eder → persisted `live=true` unlock başlangıcında kesin uygulanır (abone olur).
-  - **2. tur (2 bulgu):** [P1] **cursor-merge-yapılmadan-ilerleme:** in-flight sync'te vault kapanırsa
-    `applyRemoteMerge` `null` döner (merge UYGULANMADI) → `syncOnce` cursor'u İLERLETMEZ (eski: yine yazıyordu →
-    remote satırlar diske yazılmadan cursor ilerler, sonraki pull atlardı = token sync veri kaybı). [P2]
-    **`purgeCorrupted` sequencer'a alındı** (purge disk yazımı sync import / mutasyon ile yarışmasın — tek yazma kuyruğu).
+- **`devices` registration (owner-only RLS):** on signedIn, a random `device_id` (uuid v4, GLOBAL secure storage —
+  NOT hardware-derived; privacy-friendly) + register (idempotent upsert, composite PK `user_id,device_id`).
+  on resume, a `last_seen` heartbeat; **0 rows → register-fallback** (recreates the resume row if the first register
+  was lost to a network error). `DeviceRepository`/`SupabaseDeviceRepository` + `DeviceRegistrar` + `StableDeviceIdStore`.
+  **TRADEOFF (documented):** multiple accounts on the same device → the backend can do cross-account correlation via the
+  same device_id (accepted; needed for multi-device list consistency — see docs/CRYPTO.md).
+- **Public read tables (READ-only; NO client write grant):** `catalog_services` (issuer catalog),
+  `feature_flags` (remote flags), `announcements`. All have a repo + global cache + offline fallback.
+  NO Realtime → fetch-on-signedIn + cache.
+- **catalog_services → issuer canonicalization (add-token):** AFTER QR/manual parsing, the issuer is aligned to the
+  catalog's canonical name (`IssuerAvatar.slugFor` shared → avatar/catalog stay consistent). **`logo_url` is IGNORED**
+  (the "NO runtime logo fetching — offline/privacy" decision is preserved; no network image is downloaded). Empty catalog/no match → no-op.
+- **`token_sync_enabled` kill-switch (FeatureFlagsService):** the server can remotely disable token push/pull/live.
+  **The gate is INSIDE `TokenSyncService`** (Realtime bypass closed — VaultCubit's gate does not cover `_onRealtimeEvent`);
+  when the flag flips to false the service self-subscribes `disableLive`, on true + livePref → `enableLive`. Before `start`, a bounded
+  `ensureLoaded` (prevents the fallback from accidentally starting sync on a cache-empty first launch). **fallback=true**
+  (no flag/offline → sync runs; only an explicit server `false` disables it). **It gates ONLY the token transport —
+  `key_attributes` restore/backfill/update ALWAYS runs** (critical for identity recovery).
+- **Announcements as a read-only section in Settings:** `audience` is a client-side filter (RLS does not filter); `all`/platform
+  match. feature_flags are not shown in the UI (internal consumption only).
+- **Global cache/device_id stores are NOT DELETED on vault reset** (uid-independent; PUBLIC data + the device id must
+  remain the same across re-login). All new dependencies are optional/nullable → the 347 existing tests + legacy paths are byte-identical.
+- **Remaining on-device (manual checklist):** devices owner-only round-trip + register-fallback; catalog/feature_flags/
+  announcements public SELECT; `token_sync_enabled` kill-switch (Realtime bypass + cache-empty first launch).
+
+## 2026-06-09 (Phase 3 Patch 3 — encrypted token sync + key_attributes UPDATE)
+
+Encrypted TOTP tokens are synchronized with the server — with the E2E guarantee PRESERVED. A token added/deleted on one
+device appears on the other; a new device restores all tokens. Also, **changePassword now UPDATES the server-side
+`key_attributes` envelope** (the guarded-insert limitation from Patch 2 is GONE → a fresh restore on a new device uses the
+new password). The server schema is UNCHANGED; there is NO new crypto routine. Five rounds of plan review (Codex), with every
+supabase-flutter API confirmed against Context7. host **293/293 → 347/347**.
+
+- **Only opaque data goes to the server:** `ciphertext`/`nonce` (the `OtpAccount` JSON encrypted with masterKey + XChaCha20-
+  Poly1305; AAD `token|1|<id>`) + `version` + `deleted`. **The plaintext TOTP secret, masterKey,
+  KEK, and recovery key NEVER do.** `updated_at`/`created_at` are not sent by the client (a server trigger overrides them).
+- **Three layers + orchestrator (masterKey-free sync):** `RawTokenStore` (= the new face of
+  `EncryptedVaultRepository`; `exportRaw`/`importRemote`/`markDeleted` — NO decrypt) + `RemoteTokenRepository`/
+  `SupabaseTokenRepository` (opaque transport; `ByteaCodec` + `SyncError`) + `TokenSyncService` (cursor +
+  push/pull/merge + Realtime). `VaultRepository` (`load/save/purgeCorrupted`) stays decrypted → the 293 tests do not break.
+- **Arrival-order LWW (the server `updated_at` is the arbiter):** the client epoch-ms is NEVER compared; each record
+  keeps the last reconciled server cursor (`sv`). For locally-dirty records (sv=null), the pull-cursor distinguishes echo-vs-new.
+  Merge is id-based + idempotent (a double pull is harmless).
+- **Soft-delete (tombstone):** deletion = `deleted=true` (no hard DELETE — there is no policy/grant on the server).
+  `markDeleted` produces a tombstone from the last known blob + writes it atomically; `load()` does not show it in accounts,
+  `exportRaw` returns it for push. Tombstones are preserved across saves (a token is not resurrected).
+- **Realtime = a TRIGGER only (bytea #1180 double-encode):** the payload is NOT READ; the change signal triggers a REST
+  `pullSince`. Order: subscribe-first → catch-up pull → idempotent merge. The subscription is tied to the VaultCubit subtree
+  lifecycle (start on unlock, dispose on lock/background/signOut).
+- **Malformed-remote-row QUARANTINE:** a single malformed row in a successful response is skipped + counted (the vault
+  does NOT GO DOWN, NO overwrite); the cursor advances only up to the last-valid before the first-malformed (`safeCursorIso`)
+  → no gap is skipped, and it is retried once the server is fixed. A network/RLS error (the whole request) ≠ a single bad row.
+- **changePassword sync (Step K):** the masterKey does NOT CHANGE → NO token re-encryption; only the `key_attributes`
+  row is UPDATEd (LWW). On a network error → the `attrs_dirty_v1` marker stays SET → on the next unlock dirty-replay
+  retries again (a real retry; CLEARed on success). If two devices conflict the last-arriving wins (no data loss —
+  the loser keeps working with its local attrs; the recovery envelope does not change).
+- **Push is best-effort (silent), pull is a self-healing reconciler.** Conflicts are silent LWW (no notification to the user).
+- **UI:** a "Live sync" toggle in Settings (per-uid `live_sync_enabled_v1`, off by default; even when off, a
+  catch-up sync runs at launch). A sync indicator in the VaultPage AppBar (`syncing`/`error`/`malformedCount`; a11y Semantics).
+- **`uid==null` (legacy/no-uid) → all sync is INERT; the behavior + the 293 tests are IDENTICAL.**
+- **DELIBERATE limits:** token sync only while unlocked; a locked background raw-pull is out of scope. Force re-wrapping
+  other devices via push is out of scope (not needed; a provisioned device works with local attrs). Tombstone GC is future work.
+- **Manual/integration checklist (on-device):** a real bytea token INSERT/SELECT round-trip against Supabase +
+  Realtime trigger → REST pull + new-device token restore + soft-delete cross-device + LWW + post-changePassword
+  fresh-restore with the new password + malformed-row quarantine.
+- **Implementation-review fixes (3 findings, confirmed from source):**
+  - [P1] **Merge writes are now UNDER the VaultCubit sequencer:** `TokenSyncService` does NOT call `importRemote`
+    DIRECTLY; the `mergeRemote` callback → `VaultCubit.applyRemoteMerge` (import+reload in a SINGLE critical section,
+    `_opChain`) → no race with concurrent user add/delete/increment (data loss closed).
+  - [P2] **Push is REALLY best-effort:** in `syncOnce`, push is in its own `try/catch` → a push failure does NOT
+    BLOCK the pull (other devices' changes are still pulled).
+  - [P2] **Live-preference race:** instead of a `_liveAtStart` setter, a `liveSyncResolver` (async) → `load()` `await`s it
+    BEFORE start → a persisted `live=true` is applied for certain at the start of unlock (it subscribes).
+  - **Round 2 (2 findings):** [P1] **advancing-without-merge:** if the vault closes during an in-flight sync,
+    `applyRemoteMerge` returns `null` (merge NOT APPLIED) → `syncOnce` does NOT ADVANCE the cursor (old behavior: it still wrote →
+    the cursor advanced before remote rows hit disk, and the next pull would skip them = token sync data loss). [P2]
+    **`purgeCorrupted` moved into the sequencer** (so the purge disk write does not race with the sync import / mutations — a single write queue).
   - host **340→347** (+7: push-fail-pull, applyRemoteMerge import+reload, sequencer-serialize, persisted-live-true/false,
-    merge-null→cursor-ilerlemez, applyRemoteMerge-closed→null).
+    merge-null→cursor-does-not-advance, applyRemoteMerge-closed→null).
 
-## 2026-06-08 (Faz 3 Patch 2 — key_attributes upload/restore)
+## 2026-06-08 (Phase 3 Patch 2 — key_attributes upload/restore)
 
-Kripto **metadatası** (`key_attributes`: KDF parametreleri + KEK/recovery ile zaten-şifreli master
-key) sunucuya yedeklenir ve **yeni cihazda geri yüklenir** — E2E garantisi KORUNARAK. Artık kullanıcı
-yeni cihazda Supabase'e girip master parolasıyla vault'u açabilir (token'lar henüz gelmez — Patch 3).
-**Token sync YOK.** Sunucu şeması DEĞİŞMEDİ. Üç tur plan review + iki tur implementasyon review (Codex),
-her API `.pub-cache`/Context7 kaynağından teyit edilerek. host **257/257 → 293/293**, APK debug build OK.
+The crypto **metadata** (`key_attributes`: KDF parameters + the master key already-encrypted with the KEK/recovery) is
+backed up to the server and **restored on a new device** — with the E2E guarantee PRESERVED. The user can now sign in to
+Supabase on a new device and open the vault with their master password (tokens do not arrive yet — Patch 3).
+**NO token sync.** The server schema is UNCHANGED. Three rounds of plan review + two rounds of implementation review (Codex),
+with every API confirmed from the `.pub-cache`/Context7 source. host **257/257 → 293/293**, APK debug build OK.
 
-- **Yalnız zaten-şifreli metadata gider:** `encrypted_master_key`/`recovery_encrypted_master_key` +
-  KDF `salt/ops/mem` + nonce'lar. **masterKey, KEK, recovery key, açık TOTP secret ASLA sunucuya gitmez.**
-  `bmk` (biyometri wrap) da gitmez (cihaz-yerel; sunucu şemasında kolon yok → yeni cihaz yeniden enroll).
-- **bytea interop tek noktada (`ByteaCodec`):** PostgreSQL `bytea` ↔ `Uint8List` (`\x`+hex). Lokal
-  `EncryptedBlob` nonce+ciphertext'i BİRLİKTE tutar; sunucu AYRI kolonlar → upload'ta blob İKİYE bölünür,
-  restore'da iki kolondan kurulur. bytea JSON-body INSERT formatı cihazda doğrulanacak açık risk → tek
-  dosyada izole (gerekirse oradan düzeltilir; şema değişmez).
-- **Restore (yeni cihaz):** `VaultLockCubit.bootstrap` lokal attrs yoksa sunucudan çeker. **Fetch
-  BAŞLAMADAN ÖNCE `restoring` state** → router `/splash` (spinner), **kullanıcı `/setup` GÖRMEZ** (fetch
-  bitmeden yeni vault kuramaz → çift-vault önlenir). remote VAR → lokale yaz + `locked` (master parola
-  sorulur); gerçek 0-row → `uninitialized` (setup); **ağ/RLS hatası → ayrı `restoreFailed` ekranı**
-  (`/auth/restore-failed`: tekrar dene + hesap değiştir; parola/recovery/biyometri YOK) — `uninitialized`'a
-  DÜŞMEZ (yanlış parola kurup sunucu vault'unu çakıştıramaz). `SyncError` ile gerçek 0-row KESİN ayrılır.
-- **Upload (backfill):** vault `unlocked` olunca (unlock/recover/commitSetup) `VaultLockCubit` içinde
-  best-effort guard'lı insert: sunucuda kayıt VARSA üzerine YAZMA (server-wins; changePassword çok-cihaz
-  senkronu KASITLI olarak Patch 3 `updated_at` LWW'ye ertelendi). Best-effort: kullanıcıyı bloklamaz, hata sessiz.
-- **Router guard (review [P1] location-kaybı fix):** `sessionGuard` signedIn dalında özel vault statüleri
-  (`restoring`/`restoreFailed`/`keyAttributesCorrupted`) `splash`/auth rewrite'ından ÖNCE GERÇEK `location`
-  ile ele alınır → hedefteyken `null` (redirect-loop yok). Yan fayda: mevcut `keyAttributesCorrupted`'ın
-  da aynı latent location-kaybı bug'ı kapandı.
-- **Regresyon yok:** `VaultLockCubit.remoteRepo`/`uid` NULLABLE → legacy/uid-siz vault ve Patch 1 testleri
-  eski davranışı birebir korur (restore/upload no-op). uid prefix'ten türetilir (`'<uid>/'`→`'<uid>'`; boş→null).
-- **Restore lokal-finalize hatası (review-sonrası [P2] fix):** remote fetch başarılı ama `attrsStore.write`
-  (Keychain/Keystore IO) fırlarsa, eskiden hata `bootstrap` future'ından kabarıp state `restoring`'te asılı
-  kalırdı (router `/splash`'te takılır, retry yok). `_restoreFromRemote` artık `SyncError` DIŞI beklenmeyen
-  hataları da `restoreFailed`'a çevirir (güvenli + retry edilebilir; `/setup`'a düşmez, unhandled future yok).
-- Yeni testler: `bytea_codec_test`, `supabase_key_attributes_repository_test` (mapping round-trip + bmk
-  gönderilmez), `vault_lock_cubit_test` (+restore 9 senaryo: fetch-pending→`restoring`, ağ→`restoreFailed`,
-  retry, upload-guard), `restore_failed_page_test` (parola/recovery YOK), `guard_test` (+restoring/restoreFailed
-  + location-kaybı regresyon). **293/293 host, analyze temiz, APK debug build OK.** Gerçek bytea ağ akışı = manuel checklist.
+- **Only already-encrypted metadata goes:** `encrypted_master_key`/`recovery_encrypted_master_key` +
+  KDF `salt/ops/mem` + nonces. **The masterKey, KEK, recovery key, and plaintext TOTP secret NEVER go to the server.**
+  `bmk` (the biometric wrap) does not go either (device-local; there is no column for it in the server schema → a new
+  device re-enrolls).
+- **bytea interop at a single point (`ByteaCodec`):** PostgreSQL `bytea` ↔ `Uint8List` (`\x`+hex). A local
+  `EncryptedBlob` keeps nonce+ciphertext TOGETHER; the server has SEPARATE columns → on upload the blob is SPLIT IN TWO,
+  on restore it is reconstructed from the two columns. The bytea JSON-body INSERT format is an explicit risk to be verified
+  on-device → isolated in a single file (fixed there if needed; the schema does not change).
+- **Restore (new device):** `VaultLockCubit.bootstrap` fetches from the server if there are no local attrs. **A
+  `restoring` state BEFORE the fetch STARTS** → router `/splash` (spinner), **the user does NOT SEE `/setup`** (cannot set
+  up a new vault before the fetch finishes → double-vault prevented). remote EXISTS → write locally + `locked` (the master
+  password is asked); a genuine 0-row → `uninitialized` (setup); **network/RLS error → a separate `restoreFailed` screen**
+  (`/auth/restore-failed`: retry + switch account; NO password/recovery/biometrics) — it does NOT FALL to `uninitialized`
+  (so you cannot set up a wrong password and clobber the server vault). `SyncError` cleanly separates a genuine 0-row.
+- **Upload (backfill):** when the vault becomes `unlocked` (unlock/recover/commitSetup), a best-effort guarded insert
+  inside `VaultLockCubit`: if a record EXISTS on the server do NOT OVERWRITE it (server-wins; the changePassword multi-device
+  sync was DELIBERATELY deferred to Patch 3's `updated_at` LWW). Best-effort: it does not block the user, errors are silent.
+- **Router guard (review [P1] location-loss fix):** in the `sessionGuard` signedIn branch, the special vault statuses
+  (`restoring`/`restoreFailed`/`keyAttributesCorrupted`) are handled with the REAL `location` BEFORE the `splash`/auth rewrite
+  → `null` while already at the target (no redirect loop). Side benefit: the same latent location-loss bug for the existing
+  `keyAttributesCorrupted` is also closed.
+- **No regression:** `VaultLockCubit.remoteRepo`/`uid` are NULLABLE → legacy/no-uid vaults and Patch 1 tests preserve the
+  old behavior identically (restore/upload no-op). uid is derived from the prefix (`'<uid>/'`→`'<uid>'`; empty→null).
+- **Restore local-finalize error (post-review [P2] fix):** if the remote fetch succeeds but `attrsStore.write`
+  (Keychain/Keystore IO) throws, the error used to bubble up from the `bootstrap` future and leave the state stuck at
+  `restoring` (router hangs at `/splash`, no retry). `_restoreFromRemote` now also converts unexpected errors OTHER than
+  `SyncError` to `restoreFailed` (safe + retryable; it does not fall to `/setup`, no unhandled future).
+- New tests: `bytea_codec_test`, `supabase_key_attributes_repository_test` (mapping round-trip + bmk
+  is not sent), `vault_lock_cubit_test` (+restore 9 scenarios: fetch-pending→`restoring`, network→`restoreFailed`,
+  retry, upload-guard), `restore_failed_page_test` (NO password/recovery), `guard_test` (+restoring/restoreFailed
+  + location-loss regression). **293/293 host, analyze clean, APK debug build OK.** The real bytea network flow = manual checklist.
 
-## 2026-06-08 (Faz 3 Patch 1 — Supabase kimlik / auth)
+## 2026-06-08 (Phase 3 Patch 1 — Supabase identity / auth)
 
-Uygulamaya **kimlik katmanı** eklendi (Supabase email/parola): kayıt/giriş/çıkış + e-posta onayı.
-Vault E2E akışı (master parola/unlock/biyometri) **iç mantığı korunarak** en dışına bir kimlik
-kapısı eklendi. **Sync YOK** (Patch 2–3). On iki tur dış review (Codex), her API `.pub-cache`/
-Context7 kaynağından teyit edilerek tasarlandı. host **220/220 → 257/257**, APK debug build OK.
+An **identity layer** was added to the app (Supabase email/password): registration/sign-in/sign-out + email confirmation.
+An identity gate was added at the outermost layer of the vault E2E flow (master password/unlock/biometrics), **preserving its
+internal logic**. **NO sync** (Patch 2–3). Designed across twelve rounds of external review (Codex), with every API confirmed
+from the `.pub-cache`/Context7 source. host **220/220 → 257/257**, APK debug build OK.
 
-- **İki bağımsız "kapı" (sıralı):** Supabase oturumu (kimlik) → vault kilidi (E2E). Birleşik guard
-  kimlik kapısını EN DIŞTA tutar; vault guard (masterKey gerektiren shell) yalnız `signedIn &&
-  !linkRequired` dalında. `unknown` boyunca `/splash` (vault shell `signedIn` öncesi render edilmez
-  → `masterKey` crash'i yok). Login parolası ≠ master parola; birbirini **türetmez**.
+- **Two independent "gates" (in sequence):** the Supabase session (identity) → the vault lock (E2E). The combined guard
+  keeps the identity gate OUTERMOST; the vault guard (the shell requiring masterKey) only in the `signedIn &&
+  !linkRequired` branch. `/splash` throughout `unknown` (the vault shell is not rendered before `signedIn`
+  → no `masterKey` crash). The login password ≠ the master password; they do not **derive** each other.
 - **`SessionCubit`** + `SupabaseAuthRepository`: `signUp`/`signInWithPassword`/`signOut`;
-  `onAuthStateChange` **`onError` ZORUNLU** (gotrue ağ hatasını stream error olarak verir → yoksa
-  app crash). `AuthException.code` → domain hatalarına map (`email_not_confirmed`/`invalid_credentials`/
-  `email_exists`/`weak_password`, kaynaktan teyitli).
-- **E-posta onayı ZORUNLU** (PKCE + deep-link `dev.mustafakara.projectauth://login-callback`):
+  `onAuthStateChange` **`onError` is MANDATORY** (gotrue surfaces a network error as a stream error → without it the
+  app crashes). `AuthException.code` → mapped to domain errors (`email_not_confirmed`/`invalid_credentials`/
+  `email_exists`/`weak_password`, confirmed from source).
+- **Email confirmation is MANDATORY** (PKCE + deep-link `dev.mustafakara.projectauth://login-callback`):
   Android intent-filter (VIEW+DEFAULT+BROWSABLE) + iOS `CFBundleURLTypes`. `emailConfirmPending`
-  PERSIST edilir (`auth_pending_email_v1`) — yeniden açılışta onay ekranına döner; "Farklı e-posta
-  kullan" pending'i temizleyip çıkışı sağlar (guard trap önlenir).
-- **signOut güvenliği:** lokal vault volatile temizliği (`VaultLockCubit.onAuthSignedOut`) network
-  signOut'tan ÖNCE — setup/unlock/biometric dahil HER aşamada masterKey/mnemonic silinir
-  (`lock()` `setupPending`'de no-op olduğu için ayrı genel metot; commit-in-flight kuralı `:400`'le
-  aynı). **`SignOutScope.global`** (kullanıcı kararı — sunucuda tüm cihaz refresh-token'ları revoke);
-  ağ hatasında BİLE `signedOut`'a ulaşılır (gotrue local token'ı önce siler — #683; offline garantisi).
-- **Onaysız e-posta ile GİRİŞ (review-sonrası [P2] fix):** `signIn` `AuthEmailNotConfirmed`'da pending
-  email'i PERSIST eder + `emailConfirmPending` emit → `/auth/confirm` ekranı email'i dolu görür, resend
-  çalışır (önceki halde email=null → resend no-op + kullanıcı sıkışırdı).
-- **Per-uid view mode (review-sonrası [P3] fix):** `VaultPage` artık global singleton yerine ShellRoute'un
-  sağladığı (aktif uid namespace'li) `ViewModeStore`'u `context.read` ile okur (standalone/test fallback
-  global). A kullanıcısının kart/liste tercihi B'ye yansımaz; namespaced reset view-mode'u da temizler.
-- **Root oturum dinleyicisi sahipliği (review-sonrası [P3] fix):** `main`'deki `SessionState` aboneliği
-  artık `StreamSubscription` field'ında tutulur + `dispose`'ta cancel + `onError` ile async hata yolu
-  korunur (zone'a sızma yok). Önceki halde anonim listener sahiplenilmiyordu (sızıntı + crash riski).
-- **uid namespace izolasyon önceliği (review-sonrası [P3] fix):** uid değişiminde `main._onSession`
-  ÖNCE bellekteki vault stack'i doğru uid namespace'ine geçirir, SONRA aktif uid'i persist eder
-  (best-effort). `setActive` (secure storage) fail etse bile kullanıcı doğru namespace'te kalır —
-  legacy `''` stack'inde sessizce KALMAZ (yanlış vault sızıntısı önlenir); persist sonraki açılışta yeniden denenir.
-- **Multi-vault per uid:** her Supabase uid için AYRI lokal vault namespace (`'<uid>/'` prefix;
-  store'lar `keyPrefix` alır, boş = Faz 2 byte-identical). `vault_active_uid_v1` (aktif uid) +
-  `legacy_link_decided/<uid>` (per-uid karar). İlk login'de uid-siz Faz 2 vault varsa **açık
-  account-linking onayı** (`/auth/link`): "ilişkilendir" (taşı + `bmk` TEMİZLE + `biometric.disable`
-  → yeniden enroll) / "yeni boş vault". Her iki seçim de kararı işaretler → `linkRequired` düşer
-  (guard döngüsü yok). `linkRequired` SENKRON `SessionState` alanı (guard async storage okumaz).
-- **Config:** `String.fromEnvironment` + dev fallback (PROJECT_INFO ile hizalı); `publishableKey`
-  (anon, RLS arkasında). `sb_secret_` asla client'ta. Sunucu şeması değişmedi (bytea; hex codec Patch 2+).
-- Yeni testler: `session_cubit_test` (+linkRequired hydrate köprüsü, signOut-throw, onError, cancel),
-  `sessionGuard` grubu, `onAuthSignedOut` grubu (commit-in-flight dahil), `multi_vault_namespace_test`,
-  `auth_pages_test`. **257/257 host, analyze temiz, APK debug build OK.**
+  is PERSISTED (`auth_pending_email_v1`) — on re-launch it returns to the confirmation screen; "Use a different email"
+  clears pending and signs out (a guard trap is avoided).
+- **signOut safety:** the local vault volatile cleanup (`VaultLockCubit.onAuthSignedOut`) runs BEFORE the network
+  signOut — at EVERY stage including setup/unlock/biometric, the masterKey/mnemonic is wiped
+  (a separate general method since `lock()` is a no-op in `setupPending`; the commit-in-flight rule is the same as `:400`).
+  **`SignOutScope.global`** (a user decision — revokes all the device's refresh-tokens on the server); `signedOut` is
+  reached EVEN on a network error (gotrue deletes the local token first — #683; an offline guarantee).
+- **SIGN-IN with an unconfirmed email (post-review [P2] fix):** on `AuthEmailNotConfirmed`, `signIn` PERSISTs the
+  pending email + emits `emailConfirmPending` → the `/auth/confirm` screen sees the email filled in, and resend
+  works (in the previous state email=null → resend was a no-op + the user was stuck).
+- **Per-uid view mode (post-review [P3] fix):** `VaultPage` now reads the `ViewModeStore` provided by the ShellRoute
+  (namespaced to the active uid) via `context.read` instead of a global singleton (standalone/test fallback to
+  global). User A's card/list preference does not leak to B; a namespaced reset also clears the view-mode.
+- **Root session-listener ownership (post-review [P3] fix):** the `SessionState` subscription in `main` is now
+  held in a `StreamSubscription` field + canceled in `dispose` + the async error path is preserved via `onError`
+  (no leak into the zone). Previously the anonymous listener was not owned (leak + crash risk).
+- **uid-namespace isolation priority (post-review [P3] fix):** on a uid change, `main._onSession`
+  FIRST moves the in-memory vault stack to the correct uid namespace, THEN persists the active uid
+  (best-effort). Even if `setActive` (secure storage) fails, the user stays in the correct namespace —
+  it does NOT SILENTLY STAY on the legacy `''` stack (wrong-vault leak prevented); the persist is retried on the next launch.
+- **Multi-vault per uid:** a SEPARATE local vault namespace for each Supabase uid (`'<uid>/'` prefix;
+  stores take a `keyPrefix`, empty = Phase 2 byte-identical). `vault_active_uid_v1` (active uid) +
+  `legacy_link_decided/<uid>` (a per-uid decision). On the first login, if a no-uid Phase 2 vault exists, an **explicit
+  account-linking confirmation** (`/auth/link`): "link" (migrate + CLEAR `bmk` + `biometric.disable`
+  → re-enroll) / "a new empty vault". Either choice marks the decision → `linkRequired` clears
+  (no guard loop). `linkRequired` is a SYNCHRONOUS `SessionState` field (the guard does not read async storage).
+- **Config:** `String.fromEnvironment` + a dev fallback (aligned with PROJECT_INFO); `publishableKey`
+  (anon, behind RLS). `sb_secret_` never in the client. The server schema is unchanged (bytea; hex codec in Patch 2+).
+- New tests: `session_cubit_test` (+linkRequired hydrate bridge, signOut-throw, onError, cancel),
+  the `sessionGuard` group, the `onAuthSignedOut` group (including commit-in-flight), `multi_vault_namespace_test`,
+  `auth_pages_test`. **257/257 host, analyze clean, APK debug build OK.**
 
-## 2026-06-08 (Faz 2 Patch 5 — biyometrik vault unlock)
+## 2026-06-08 (Phase 2 Patch 5 — biometric vault unlock)
 
-Biyometrik unlock kısayolu eklendi — **E2E parola modelini zayıflatmadan**. masterKey
-her zaman parola + recovery key ile de açılır; biyometri yalnız 3. bir wrap yolu açar.
-Beş tur dış review (Codex) + her API `.pub-cache` kaynağından teyit edilerek tasarlandı
-(körü körüne kabul yok). host **186/186 → 219/219**, integration +3.
+A biometric unlock shortcut was added — **without weakening the E2E password model**. The masterKey
+always opens with the password + recovery key as well; biometrics only opens a 3rd wrap path.
+Designed across five rounds of external review (Codex) + every API confirmed from the `.pub-cache` source
+(no blind acceptance). host **186/186 → 219/219**, integration +3.
 
-- **Güvenlik sınırı = OS keystore erişim kontrolü** (`local_auth` bool'u DEĞİL).
-  `biometricKey` (32-byte rastgele) masterKey'i `masterkey-biometric|1` AAD'siyle sarar →
-  `KeyAttributes.biometricEncryptedMasterKey` (opsiyonel `bmk` alanı; mevcut vault'lar
-  byte-identical, sürüm bump yok). Ham `biometricKey` `vault_biometric_key_v1`'de **ayrı
-  options'lı/namespace'li** secure storage'da biyometrik erişim kontrolüyle:
+- **The security boundary = OS keystore access control** (NOT the `local_auth` bool).
+  `biometricKey` (32-byte random) wraps the masterKey with the `masterkey-biometric|1` AAD →
+  `KeyAttributes.biometricEncryptedMasterKey` (an optional `bmk` field; existing vaults
+  are byte-identical, no version bump). The raw `biometricKey` lives in `vault_biometric_key_v1`, in **a
+  separate-options/namespaced** secure storage with biometric access control:
   - **iOS:** `useSecureEnclave: true` + `AccessControlFlag.biometryCurrentSet` →
-    biyometri seti değişince anahtar OTOMATİK geçersiz (parolayla aç + yeniden enroll;
-    token kaybı yok).
+    the key is AUTOMATICALLY invalidated when the biometric set changes (open with password + re-enroll;
+    no token loss).
   - **Android:** `AndroidOptions.biometric(enforceBiometrics: true,
-    strongBiometricOnly)` → Keystore'da yalnız güçlü biyometriye bağlı (PIN/pattern
-    reddedilir); `strongBiometricOnly` → `biometricPromptNegativeButton` zorunlu.
-- **Gerçek prompt = `storage.read()` OS geçidi** (TEK prompt). `local_auth` yalnız
-  availability kontrolü → **çift prompt yok** (reviewer 2.tur). `biometricKey` byte'ları
-  Dart'ta ASLA cache'lenmez; kullanımdan sonra `fillRange(0)`.
-- **State modeli:** `biometricEnrolled` (attrs.bmk) + `deviceBiometricAvailable` (cihaz
-  yeteneği, enrollment'tan bağımsız) AYRI tutulur — UnlockPage butonu ikisinin kesişimi,
-  Settings enable switch'i `deviceBiometricAvailable`'a bakar (yoksa yeni kullanıcı hiç
-  açamazdı — reviewer 3.tur deadlock). TÜM `locked`/`unlocked` emit'leri merkezi
-  `_locked()`/`_unlocked()` helper'larıyla bu alanları korur (reviewer 4.tur).
-- **Atomiklik:** `enableBiometric` OS-key-yaz → attrs-yaz sırası; attrs.write fail →
-  `biometric.disable()` ile orphan OS key temizle + state değişmez. `biometricUnlock`
-  `KeyMissing` → `bmk` PERSIST temizlenir (bootstrap döngüsü önleme); write fail →
-  UI'da kapalı göster (döngü yok). `resetVault` + `disableBiometric` açıkça
-  `BiometricService.disable()` çağırır (ayrı namespace → default `_deleteKeys` yetmez).
-- **Lifecycle:** biyometri sistem prompt'unun ürettiği `inactive` (`_biometricPromptInFlight`)
-  başarılı unlock'u abort ETMEZ; `paused` (gerçek arka plan) yine kesin abort. `main.dart`
-  `paused`/`inactive`'i ayrı iletir.
-- **Android API<28:** `device_info_plus` ile `sdkInt >= 28` gate (`getAvailableBiometrics`
-  SDK'yı gate etmez; `enforceBiometrics` <28'de native exception atardı — reviewer 4.tur).
+    strongBiometricOnly)` → bound in the Keystore to strong biometrics only (PIN/pattern
+    are rejected); `strongBiometricOnly` → `biometricPromptNegativeButton` is required.
+- **The real prompt = the `storage.read()` OS gate** (a SINGLE prompt). `local_auth` is only an
+  availability check → **no double prompt** (reviewer round 2). The `biometricKey` bytes are
+  NEVER cached in Dart; after use, `fillRange(0)`.
+- **State model:** `biometricEnrolled` (attrs.bmk) + `deviceBiometricAvailable` (device
+  capability, independent of enrollment) are kept SEPARATE — the UnlockPage button is the intersection of the two,
+  the Settings enable switch looks at `deviceBiometricAvailable` (without which a new user could never
+  enable it — reviewer round 3 deadlock). ALL `locked`/`unlocked` emits preserve these fields via the central
+  `_locked()`/`_unlocked()` helpers (reviewer round 4).
+- **Atomicity:** `enableBiometric` order is OS-key-write → attrs-write; if attrs.write fails →
+  clean up the orphan OS key with `biometric.disable()` + the state does not change. `biometricUnlock`
+  on `KeyMissing` → `bmk` is CLEARed from PERSIST (avoids a bootstrap loop); on write fail →
+  shown as off in the UI (no loop). `resetVault` + `disableBiometric` explicitly
+  call `BiometricService.disable()` (a separate namespace → the default `_deleteKeys` is not enough).
+- **Lifecycle:** the `inactive` produced by the biometric system prompt (`_biometricPromptInFlight`)
+  does NOT ABORT a successful unlock; `paused` (a real background) still aborts for certain. `main.dart`
+  delivers `paused`/`inactive` separately.
+- **Android API<28:** an `sdkInt >= 28` gate via `device_info_plus` (`getAvailableBiometrics`
+  does not gate the SDK; `enforceBiometrics` would throw a native exception on <28 — reviewer round 4).
 - **Native:** `MainActivity` → `FlutterFragmentActivity`, `AndroidManifest` `USE_BIOMETRIC`,
   `styles.xml`+`values-night/styles.xml` `Theme.AppCompat.DayNight.NoActionBar` (local_auth
-  Android 8 crash önleme), iOS `NSFaceIDUsageDescription`. `flutter build apk --debug` geçti.
-- **[P2 review düzeltmesi] Settings switch:** `enrolled && !deviceAvailable` (biyometri
-  seti değişti/lockout) durumunda switch tamamen pasifti → kullanıcı Settings'ten
-  KAPATAMIYORDU. Yorum doğru invariant'ı yazıyordu ama `onChanged: !deviceAvailable ? null`
-  kapatmayı da kilitliyordu. Fix: açma cihaz uygunsa, **kapatma availability'den bağımsız**
-  (`enrolled || deviceAvailable`). +1 test (enrolled+unavailable → kapatılabilir).
-- **Doğrulama:** `flutter analyze` temiz · host 220/220 · integration 12/12 · `flutter build
-  apk --debug` geçti · `BiometricServiceImpl` (gerçek OS/local_auth) cihaz ister → manuel
+  Android 8 crash prevention), iOS `NSFaceIDUsageDescription`. `flutter build apk --debug` passed.
+- **[P2 review fix] Settings switch:** in the `enrolled && !deviceAvailable` case (the biometric
+  set changed/lockout) the switch was fully disabled → the user COULD NOT TURN IT OFF from Settings.
+  The comment described the correct invariant, but `onChanged: !deviceAvailable ? null`
+  also locked turning it off. Fix: enable if the device is available, **disable independent of availability**
+  (`enrolled || deviceAvailable`). +1 test (enrolled+unavailable → can be turned off).
+- **Verification:** `flutter analyze` clean · host 220/220 · integration 12/12 · `flutter build
+  apk --debug` passed · `BiometricServiceImpl` (real OS/local_auth) requires a device → manual
   checklist [docs/CRYPTO.md §11].
 
-## 2026-06-07 (Faz 2 Patch 4 — commitSetup write-fail atomikliği, 3. tur)
+## 2026-06-07 (Phase 2 Patch 4 — commitSetup write-fail atomicity, round 3)
 
-- **[P2] `commitSetup()` `_attrsStore.write()` fail + background.** Önceki tur migration-fail
-  yolunu kapatmıştı ama `write()` ayrı bir async noktaydı: write fail ederse kod migration
-  catch'ine HİÇ girmeden `finally`ye düşüyor, `finally` yalnız `_commitInFlight=false`
-  yapıyordu → `_masterKey`/`_pendingAttrs`/`setupPending` canlı kalıyordu. Bu sırada app
-  background olmuşsa (commit in-flight olduğu için `onAppBackgrounded` `cancelSetup`
-  çağırmaz) masterKey arka planda bellekte kalırdı (ARCHITECTURE §2.3 ihlali). **Fix:**
-  `write()` ayrı `try/catch` ile sarıldı → write fail'de key dispose + pending temizle +
-  `uninitialized` (write fail = diske HİÇBİR ŞEY yazılmadı → vault kurulmadı → migration-fail'in
-  aksine doğru state `uninitialized`, `locked` değil) + rethrow. Artık commitSetup'ın her
-  async çıkışında (write-fail / migration-fail / background-abort / başarı) key garanti
-  ele alınıyor.
-- **[P3] Tam kesişim regresyon testi.** İlk write-fail testi yalnız cleanup'ı doğruluyordu
-  ama background çağrısı YOKTU; mevcut background testi ise write BİTTİKTEN sonra `_migrate`'te
-  bekletiyordu — yani "`write()` askıdayken background, SONRA write fail" tam kesişimi test
-  edilmemişti. `FakeSecureStorage`'a `writeGate` (Completer) eklendi: write `_attrsStore.write()`'ta
-  asılıyken `onAppBackgrounded()` tetiklenir, sonra write throw eder. Beklenen davranış
-  doğrulandı — write-fail cleanup (uninitialized + dispose) kazanır; `_commitInFlight=true`
-  olduğu için `onAppBackgrounded` `cancelSetup` çağırmaz, temizlik tek yoldan (write catch)
-  yapılır.
-- **Doğrulama:** `flutter analyze` temiz · host **186/186** (+1: commitSetup write-fail →
-  uninitialized + dispose; +1: write-askıda-background kesişim regresyonu) · integration
-  **34/34** · `git diff --check` temiz.
+- **[P2] `commitSetup()` `_attrsStore.write()` fail + background.** The previous round closed the migration-fail
+  path, but `write()` was a separate async point: if `write()` fails the code NEVER enters the migration
+  catch and falls to `finally`, and `finally` only sets `_commitInFlight=false`
+  → `_masterKey`/`_pendingAttrs`/`setupPending` stayed alive. If the app had backgrounded in the meantime
+  (since `onAppBackgrounded` does not call `cancelSetup` while commit is in-flight) the masterKey would stay
+  in memory in the background (ARCHITECTURE §2.3 violation). **Fix:**
+  `write()` was wrapped in its own `try/catch` → on write fail, dispose the key + clear pending +
+  `uninitialized` (write fail = NOTHING written to disk → vault not set up → unlike migration-fail the correct
+  state is `uninitialized`, not `locked`) + rethrow. Now at every async exit of commitSetup
+  (write-fail / migration-fail / background-abort / success) the key is guaranteed to be handled.
+- **[P3] Full-intersection regression test.** The first write-fail test only verified the cleanup
+  but had NO background call; the existing background test waited in `_migrate` AFTER write FINISHED —
+  i.e. the full "background while `write()` is in flight, THEN write fails" intersection had not been
+  tested. A `writeGate` (Completer) was added to `FakeSecureStorage`: while write is hanging in
+  `_attrsStore.write()`, `onAppBackgrounded()` is triggered, then write throws. The expected behavior was
+  verified — write-fail cleanup (uninitialized + dispose) wins; since `_commitInFlight=true`,
+  `onAppBackgrounded` does not call `cancelSetup`, and cleanup happens via a single path (the write catch).
+- **Verification:** `flutter analyze` clean · host **186/186** (+1: commitSetup write-fail →
+  uninitialized + dispose; +1: write-hanging-background intersection regression) · integration
+  **34/34** · `git diff --check` clean.
 
-## 2026-06-07 (Faz 2 Patch 4 — lifecycle lock kenar durumları, 2. tur)
+## 2026-06-07 (Phase 2 Patch 4 — lifecycle lock edge cases, round 2)
 
-Bir önceki lifecycle turunda kapatılmayan üç kenar durum (review, kaynaktan doğrulandı):
+Three edge cases not closed in the previous lifecycle round (review, confirmed from source):
 
-- **[P1] `beginSetup()` arka-plan yarışı.** `KeyManager.setup()` (Argon2id/KEK) sürerken
-  app background olursa `onAppBackgrounded` (state `uninitialized`) sadece
-  `_abortToBackground=true` yapıyordu; `beginSetup` bu bayrağı kontrol etmediği için
-  işlem bitince masterKey + mnemonic'i belleğe alıp `setupPending` emit ediyordu →
-  arka planda key/mnemonic canlı. **Fix:** `beginSetup` await sonrası bayrağı kontrol
-  eder → set ise üretilen key'i dispose + `uninitialized` (persist yok).
-- **[P1/P2] `locking` sırasında frame gelmeden background.** İnteraktif `lock()`
-  dispose'u post-frame'e atıyor; bu sırada background olursa `onAppBackgrounded`
-  `locking` case'inde `break` yapıyordu → frame gelmezse key bellekte kalırdı. **Fix:**
-  `locking` case'i artık SENKRON dispose + `locked`. Stale post-frame callback
-  status-guard'lı → no-op.
-- **[P2] `commitSetup()` migration-fail atomik değildi.** `attrs` yazıldıktan sonra
-  `_migrate` fail ederse fonksiyon rethrow ediyor ama `_masterKey`/`_pendingAttrs`/
-  `setupPending` kalıyordu; attrs diskteyken kullanıcı "iptal" → `cancelSetup` attrs'ı
-  silmiyor → tutarsız "uninitialized ama bootstrap locked". **Fix:** migration-fail
-  yolunda da key dispose + pending temizle + `locked` emit (vault GERÇEKTEN kurulu —
-  attrs diskte; migration idempotent/commit-marker'lı → sonraki unlock yeniden dener)
-  + rethrow (UI hatayı gösterir). Artık `setupPending`'e geri dönülmez → cancel tutarsızlığı yok.
-- **[P3] Doküman drift:** OTP_ENGINE.md hâlâ 180/180 diyordu → 184/184.
-- **Doğrulama:** `flutter analyze` temiz · host **184/184** (+3: beginSetup background-abort,
-  locking-frame-yok senkron dispose, commitSetup migration-fail atomik-locked) · integration
-  **34/34** · `git diff --check` temiz.
+- **[P1] `beginSetup()` background race.** If the app backgrounds while `KeyManager.setup()` (Argon2id/KEK)
+  is in progress, `onAppBackgrounded` (state `uninitialized`) only set
+  `_abortToBackground=true`; since `beginSetup` did not check this flag, it would take the masterKey + mnemonic
+  into memory when done and emit `setupPending` →
+  the key/mnemonic stayed alive in the background. **Fix:** `beginSetup` checks the flag after the await
+  → if set, dispose the generated key + `uninitialized` (no persist).
+- **[P1/P2] background during `locking` before the frame arrives.** Interactive `lock()`
+  defers the dispose to a post-frame; if the app backgrounds in the meantime, `onAppBackgrounded`
+  was doing a `break` in the `locking` case → if the frame never arrives the key stayed in memory. **Fix:**
+  the `locking` case now does a SYNCHRONOUS dispose + `locked`. The stale post-frame callback
+  is status-guarded → no-op.
+- **[P2] `commitSetup()` migration-fail was not atomic.** If `_migrate` fails after `attrs` is
+  written, the function rethrows but `_masterKey`/`_pendingAttrs`/
+  `setupPending` stayed; while attrs is on disk the user hits "cancel" → `cancelSetup` does not
+  delete attrs → an inconsistent "uninitialized but bootstrap locked". **Fix:** on the migration-fail
+  path too, dispose the key + clear pending + emit `locked` (the vault is REALLY set up —
+  attrs is on disk; migration is idempotent/commit-marked → the next unlock retries)
+  + rethrow (the UI shows the error). It no longer returns to `setupPending` → no cancel inconsistency.
+- **[P3] Doc drift:** OTP_ENGINE.md still said 180/180 → 184/184.
+- **Verification:** `flutter analyze` clean · host **184/184** (+3: beginSetup background-abort,
+  locking-no-frame synchronous dispose, commitSetup migration-fail atomic-locked) · integration
+  **34/34** · `git diff --check` clean.
 
-## 2026-06-07 (Faz 2 Patch 4 — lifecycle lock güvenlik açıkları + doküman/test hizalama)
+## 2026-06-07 (Phase 2 Patch 4 — lifecycle lock security holes + doc/test alignment)
 
-Review iki lifecycle güvenlik riski buldu (kaynaktan doğrulandı, ikisi de gerçek):
+The review found two lifecycle security risks (confirmed from source, both real):
 
-- **[P1] Arka plana geçerken devam eden async unlock/recover/commit sonradan
-  `unlocked` emit ediyordu.** Senaryo: kullanıcı "Aç" der, Argon2id/migration sürerken
-  app `paused`/`inactive` olur; `onAppBackgrounded()` state'i hâlâ `locked` gördüğü
-  için bir şey yapmaz; async işlem bitince app ARKA PLANDAYKEN `unlocked` olurdu (key
-  bellekte, vault açık). **Fix:** `_abortToBackground` guard'ı. `onAppBackgrounded`
-  `locked`/`uninitialized`/`keyAttributesCorrupted`/`setupPending` görürse bayrağı set
-  eder; `unlock`/`recoverWithNewPassword`/`commitSetup` `unlocked` emit etmeden ÖNCE
-  bayrağı kontrol eder → set ise key dispose + `locked` (vault açılmaz). `commitSetup`'ta
-  attrs zaten yazılmışsa doğru state `locked` (uninitialized değil).
-- **[P2] `lock()` master key dispose'unu `addPostFrameCallback`'e bağlıyordu; `paused`'ta
-  frame garanti olmadığından key bellekte kalabilirdi.** **Fix:** `lock({bool immediate})`.
-  `onAppBackgrounded` `lock(immediate: true)` ile key'i SENKRON dispose eder (güvenlik
-  önceliği — ARCHITECTURE §2.3 "arka plana geçince temizlenir"). İnteraktif "Kilitle"
-  butonu `immediate: false` → frame'li yumuşak teardown (use-after-free yok) korunur.
-- **[P3] Doküman/test hizalama:** PLAN.md/OTP_ENGINE.md eski test sayıları güncellendi
-  (host 181/181). `MnemonicGrid` artık `SelectableText` (Design.md §3.2 kontratı +
-  textScaler 2.0'da sarılır). Design.md `OtpCard` satırı gerçeğe çekildi (ayrı kopyala
-  ikon butonu YOK, tap-to-copy). Recovery grid için textScaler 2.0 overflow test kapısı
-  eklendi (Design.md §5).
-- **Doğrulama:** `flutter analyze` temiz · host **181/181** (+5: 3 P1 yarış testi —
-  unlock/recover/commit background-abort + 1 P2 senkron-dispose/interaktif-lock ayrımı +
-  1 recovery textScaler overflow) · `git diff --check` temiz.
+- **[P1] An async unlock/recover/commit continuing during background later emitted
+  `unlocked`.** Scenario: the user taps "Open", the app becomes `paused`/`inactive` while
+  Argon2id/migration is in progress; `onAppBackgrounded()` does nothing because it still sees the state
+  as `locked`; when the async op finishes the app would become `unlocked` WHILE IN THE BACKGROUND (the key
+  in memory, the vault open). **Fix:** an `_abortToBackground` guard. `onAppBackgrounded`
+  sets the flag if it sees `locked`/`uninitialized`/`keyAttributesCorrupted`/`setupPending`;
+  `unlock`/`recoverWithNewPassword`/`commitSetup` check the flag BEFORE emitting `unlocked`
+  → if set, dispose the key + `locked` (the vault does not open). In `commitSetup`, if attrs
+  was already written the correct state is `locked` (not uninitialized).
+- **[P2] `lock()` tied the master-key dispose to `addPostFrameCallback`; since a frame is not
+  guaranteed in `paused`, the key could stay in memory.** **Fix:** `lock({bool immediate})`.
+  `onAppBackgrounded` disposes the key SYNCHRONOUSLY via `lock(immediate: true)` (security
+  priority — ARCHITECTURE §2.3 "wiped on backgrounding"). The interactive "Lock"
+  button uses `immediate: false` → the framed soft teardown (no use-after-free) is preserved.
+- **[P3] Doc/test alignment:** the old test counts in PLAN.md/OTP_ENGINE.md were updated
+  (host 181/181). `MnemonicGrid` is now a `SelectableText` (Design.md §3.2 contract +
+  wraps at textScaler 2.0). The Design.md `OtpCard` line was pulled to reality (NO separate copy
+  icon button, tap-to-copy). A textScaler 2.0 overflow test gate was added for the recovery grid (Design.md §5).
+- **Verification:** `flutter analyze` clean · host **181/181** (+5: 3 P1 race tests —
+  unlock/recover/commit background-abort + 1 P2 synchronous-dispose/interactive-lock distinction +
+  1 recovery textScaler overflow) · `git diff --check` clean.
 
-## 2026-06-07 (Faz 2 Patch 4 — otomatik reinstall-reset GERİ ALINDI)
+## 2026-06-07 (Phase 2 Patch 4 — automatic reinstall-reset REVERTED)
 
-Önce iOS'ta "uygulamayı sildim, yine parola soruyor" için bir `FirstRunGuard`
-(SharedPreferences ilk-açılış bayrağı) eklenmişti; bayrak yoksa Keychain kalıntısı
-silinip temiz setup'a düşülüyordu. **Review P0 release blocker:** tek bir boolean bayrak
-"temiz reinstall" ile "bu yamadan ÖNCE kurulmuş mevcut kullanıcı"yı ayırt edemez — her
-ikisinde de bayrak yoktur ama Keychain'de gerçek bir vault vardır. Mevcut kullanıcı bu
-yamayı alıp ilk kez açtığında bayrak yok kabul edilir → `bootstrap` `VaultStorageKeys.all`
-siler → **mevcut kullanıcının vault'u kaybolur.**
+A `FirstRunGuard` (a SharedPreferences first-launch flag) had first been added for the iOS "I deleted the app,
+it still asks for a password" issue; if the flag was missing, the Keychain residue would be
+wiped and a clean setup performed. **Review P0 release blocker:** a single boolean flag
+cannot distinguish a "clean reinstall" from "an existing user installed BEFORE this patch" — in
+both there is no flag but there is a real vault in the Keychain. When an existing user takes this
+patch and opens it for the first time, the flag is treated as absent → `bootstrap` deletes
+`VaultStorageKeys.all` → **the existing user's vault is lost.**
 
-- **Karar (kullanıcı):** özellik tamamen geri alındı. `iOS Keychain`'in uygulama
-  silinince temizlenmemesi Apple'ın bilinçli kararıdır ve mevcut kullanıcıları riske
-  atmadan otomatik tespit edilemez. Veri kaybı riski sıfıra indirildi.
-- **Geri alınanlar:** `FirstRunGuard` + testi silindi; `VaultLockCubit`'ten
-  `isFreshInstall` kancası + bootstrap'taki wipe kaldırıldı; `main.dart` wiring'i
-  geri alındı; `shared_preferences ^2.5.5` bağımlılığı pubspec'ten çıkarıldı.
-- **Mevcut yol:** kullanıcı vault'u temizlemek isterse zaten var olan
-  **"Vault'u sıfırla"** (çift onaylı, `resetVault()` → 5 anahtar) akışını kullanır.
-- **Doğrulama:** `flutter analyze` temiz · host 176/176 (önceki +5 geri alındı).
+- **Decision (user):** the feature was fully reverted. The iOS Keychain not being cleared on
+  app deletion is Apple's deliberate decision and cannot be auto-detected without putting existing
+  users at risk. The data-loss risk was reduced to zero.
+- **Reverted:** `FirstRunGuard` + its test were deleted; the
+  `isFreshInstall` hook in `VaultLockCubit` + the wipe in bootstrap were removed; the `main.dart` wiring was
+  reverted; the `shared_preferences ^2.5.5` dependency was removed from the pubspec.
+- **Current path:** if the user wants to clear the vault, they use the existing
+  **"Reset vault"** (double-confirmed, `resetVault()` → 5 keys) flow.
+- **Verification:** `flutter analyze` clean · host 176/176 (the previous +5 reverted).
 
-## 2026-06-07 (Faz 2 Patch 4 — auth ekranları redesign + recovery UX)
+## 2026-06-07 (Phase 2 Patch 4 — auth screens redesign + recovery UX)
 
-Patch 4'ün ilk turunda auth ekranları "işlevsel/cilasız" bırakılmıştı (görsel
-redesign yalnız vault/OtpCard'a uygulanmıştı). Bu tur **tüm auth akışı Design.md
-diline çekildi** + kritik bir recovery UX sorunu giderildi. Görsel doğrulama:
-iOS simulator'da 6 ekran × dark/light render edilip screenshot ile teyit edildi.
+In the first round of Patch 4 the auth screens were left "functional/unpolished" (the visual
+redesign had been applied only to the vault/OtpCard). This round **the entire auth flow was pulled into the
+Design.md language** + a critical recovery UX issue was resolved. Visual verification:
+6 screens × dark/light were rendered on the iOS simulator and confirmed via screenshots.
 
-- **Recovery key gösterimi (UX kritik):** 24 kelime eskiden dikey `ListTile`
-  listesindeydi → kullanıcı tek ekranda hepsini göremiyor, yarısını yazıp
-  "yazdım" checkbox'ına basıp ilerleyebiliyordu. Yeni `MnemonicGrid`: **2 sütun ×
-  12 satır numaralı grid** (sol 1–12, sağ 13–24), GeistMono kelimeler → 24'ü tek
-  ekranda görünür. Kopyala butonu + "24 kelimeyi yedekledim" onayı (işaretlenmeden
-  Devam pasif). Doğrulama davranışı (3 kelime + 3 deneme limiti) DEĞİŞMEDİ — kullanıcı kararı.
-- **"Panoya kopyala" numaralı format:** eskiden `words.join(' ')` → sadece kelimeler,
-  sıra numarası yok (yapıştırınca kullanıcı hangi kelime kaçıncı bilemiyordu). Artık
-  `1. lizard\n2. goddess ...` (her satır numaralı). `RecoveryUnlockPage` giriş ayrıştırma
-  da sağlamlaştırıldı: numaralı yedek formatı yapıştırılırsa sıra öneki (`12.`/`12)`/`12-`)
-  ayıklanır → kullanıcı kopyaladığı key'i doğrudan geri yapıştırabilir; düz boşluklu giriş
-  de çalışır (regresyon testli).
-- **Paylaşılan auth UI katmanı** (`lib/core/ui/widgets/`): `AuthScaffold` (ikon +
-  başlık[headlineSmall] + açıklama[onSurfaceVariant] + kaydırılabilir gövde + sabit
-  alt CTA; safe-area + tutarlı `Gap` spacing + dynamic-type taşma yok), `AppTextField`
-  (görünür label + show/hide + inline hata + helper), `MnemonicGrid`, `auth_bits`
-  (AuthErrorText + BtnSpinner). `app_theme`'e `monoWord` (GeistMono recovery kelimesi).
-- **6 auth ekranı yeniden yazıldı:** setup_password, recovery_show, recovery_verify,
-  recovery_unlock, unlock, auth_integrity → hepsi `AuthScaffold`/`AppTextField`,
-  token'lar, Geist tipografi, tek birincil CTA (Design.md §3/§4). "cilasız sürüm"
-  yorumları kalktı.
-- **vault_page state-view'ları + scan_page:** `_EmptyView`/`_NoMatchView`/
-  `_IntegrityErrorView` + arama padding token'lara çekildi; `_ScanError` token +
-  textTheme (ham `Colors.grey`/sabit spacing kalktı; reticle overlay rengi bilinçle korundu).
-- **Doğrulama:** `flutter analyze` temiz · host 176/176 (regresyon yok; +3:
-  recovery_unlock numaralı-parse + düz-giriş, recovery_show numaralı-kopyala) · iOS
-  simulator görsel doğrulama (6 ekran, dark+light). `recovery_verify_page_test`
-  davranışı korundu (TextFormField → TextField render'ı `find.byType` ile eşleşir).
+- **Recovery key display (UX critical):** the 24 words used to be in a vertical `ListTile`
+  list → the user could not see all of them on one screen, could write down half, tap
+  the "I wrote it down" checkbox, and proceed. The new `MnemonicGrid`: **a 2-column ×
+  12-row numbered grid** (left 1–12, right 13–24), GeistMono words → all 24 visible on a single
+  screen. A copy button + an "I backed up the 24 words" confirmation (Continue disabled until
+  checked). The verification behavior (3 words + 3-attempt limit) is UNCHANGED — a user decision.
+- **"Copy to clipboard" numbered format:** previously `words.join(' ')` → just the words,
+  no sequence number (after pasting the user could not tell which word was which). Now
+  `1. lizard\n2. goddess ...` (each line numbered). `RecoveryUnlockPage` input parsing
+  was also hardened: if the numbered backup format is pasted, the sequence prefix (`12.`/`12)`/`12-`)
+  is stripped → the user can paste the copied key back directly; plain space-separated input
+  also works (regression-tested).
+- **Shared auth UI layer** (`lib/core/ui/widgets/`): `AuthScaffold` (icon +
+  title[headlineSmall] + description[onSurfaceVariant] + a scrollable body + a fixed
+  bottom CTA; safe-area + consistent `Gap` spacing + no dynamic-type overflow), `AppTextField`
+  (visible label + show/hide + inline error + helper), `MnemonicGrid`, `auth_bits`
+  (AuthErrorText + BtnSpinner). `monoWord` added to `app_theme` (the GeistMono recovery word).
+- **6 auth screens rewritten:** setup_password, recovery_show, recovery_verify,
+  recovery_unlock, unlock, auth_integrity → all use `AuthScaffold`/`AppTextField`,
+  tokens, Geist typography, a single primary CTA (Design.md §3/§4). The "unpolished version"
+  comments are gone.
+- **vault_page state-views + scan_page:** `_EmptyView`/`_NoMatchView`/
+  `_IntegrityErrorView` + the search padding were pulled to tokens; `_ScanError` token +
+  textTheme (the raw `Colors.grey`/fixed spacing is gone; the reticle overlay color was deliberately preserved).
+- **Verification:** `flutter analyze` clean · host 176/176 (no regression; +3:
+  recovery_unlock numbered-parse + plain-input, recovery_show numbered-copy) · iOS
+  simulator visual verification (6 screens, dark+light). The `recovery_verify_page_test`
+  behavior was preserved (the TextFormField → TextField render matches via `find.byType`).
 
-## 2026-06-07 (Faz 2 Patch 4) — Setup/Unlock UI + oturum kilidi + UI/UX redesign
+## 2026-06-07 (Phase 2 Patch 4) — Setup/Unlock UI + session lock + UI/UX redesign
 
-Vault artık gerçek bir kilit/oturum akışına sahip ve tüm arayüz tek tutarlı tasarım
-dilinde ("Precision/Technical"). Önce `docs/Design.md` ile sınırlar kilitlendi, sonra
-güvenlik çekirdeği → corruption UI → görsel redesign sırasıyla uygulandı (regresyon
-izolasyonu). **Host testleri 122 → 173/173.** Tüm bulgular kaynaktan doğrulandı.
+The vault now has a real lock/session flow and the entire interface is in one consistent design
+language ("Precision/Technical"). First the boundaries were locked down with `docs/Design.md`, then the
+security core → corruption UI → visual redesign were applied in that order (regression
+isolation). **Host tests 122 → 173/173.** All findings confirmed from source.
 
-- **`docs/Design.md`:** tasarım dili, token'lar, bileşen envanteri, erişilebilirlik
-  kontratı, asset lisansları (Geist OFL 1.1, simple-icons CC0 — kaynaktan teyit).
-- **Oturum çekirdeği:** `VaultLockCubit` durum makinesi (`uninitialized`/`setupPending`/
-  `locked`/`unlocked`/`locking`/`keyAttributesCorrupted`) + tek key-sahiplik modeli
-  (lock: `locking`→subtree teardown→`masterKey.dispose()`→`locked`; use-after-free yok).
-  `KeyAttributesStore` (malformed→`keyAttributesCorrupted`, sızıntı yok). Setup commit
-  **recovery doğrulanmadan persist YOK**; recover+yeni parola tek atomik çağrı.
-- **Router:** `createAppRouter`→`AppRouterBundle` + kendi `CubitRefreshNotifier` adapter'ı
-  (**go_router 17.3.0'da `GoRouterRefreshStream` YOK** — kaynaktan teyit; CHANGELOG:693).
-  refreshListenable dispose'u kök widget'ta (go_router dispose etmez). Guard tüm state'leri
-  kapsar; `ShellRoute` unlocked subtree'de `VaultCubit`'i sağlar (scan/add yalnız orada).
-- **Lifecycle lock:** `paused` VE `inactive` → unlocked kilitlenir, setupPending temizlenir.
-- **Corruption/integrity UI:** VaultPage `corruptedCount` banner'ı (Yine de devam et /
-  onaylı kaldır) + `VaultIntegrityException` integrity ekranı (boş-durum DEĞİL) +
-  `/auth-integrity` (Yeniden dene / Vault'u sıfırla) + `resetVault()` (5 anahtar siler;
-  plaintext+marker dahil → yeniden migrate edilmez).
-- **UI/UX redesign:** Geist + GeistMono **gömülü** (runtime fetch yok; Türkçe glif teyitli;
-  `google_fonts` KULLANILMAZ), güven-mavi palet + `CountdownColors` `ThemeExtension`,
-  `CountdownRing` (yeşil→amber→kırmızı + ortada saniye, <5sn pulse, reduced-motion'da kapalı),
-  `IssuerAvatar` (simple-icons CC0 curated 27 ikon + baş-harf fallback), `OtpCard` (kart/liste
-  varyant + tap-to-copy + Semantics), kart/liste toggle (`vault_view_mode_v1` secure_storage),
-  ScanPage köşe-rehberli reticle.
-- **Erişilebilirlik kapısı:** Semantics (kod + kalan süre), textScaler 2.0 taşma yok,
-  reduced-motion çökme yok — widget testleriyle.
-- **DI/main:** global `VaultCubit` kaldırıldı; kök `StatefulWidget` `VaultLockCubit` + router
-  bundle'ı tutar, lifecycle gözler, `bundle.refresh`'i dispose eder.
-- **Patch 4 sertleştirme (review turu — 6 bulgu, hepsi kaynaktan doğrulandı):**
-  - **(P1) masterKey migration-fail lifecycle:** `unlock`/`recoverWithNewPassword` artık
-    masterKey'i ancak migration BAŞARIYLA bittikten sonra sahipleniyor; migration fırlatırsa
-    key `finally`'de dispose edilir, `unlocked`'a geçilmez ("locked state'te canlı key"
-    invariant'ı korunur).
-  - **(P1) guard setup alt-rotaları:** `uninitialized` iken yalnız `/setup` (recovery-show/
-    verify alt rotaları engellenir) — mnemonic henüz yokken `/setup/verify`'a deep-link
-    `RangeError` üretiyordu. Alt-ağaç yalnız `setupPending`'de açık.
-  - **(P2) setup restart:** `beginSetup` önceki pending masterKey'i dispose ediyor (üzerine
-    yazıp sızdırmıyor).
-  - **(P2) recovery-verify deneme limiti:** yanlış kelimede artık inline hata + kalan deneme;
-    3 yanlıştan sonra `cancelSetup()` (pending key dispose). Sınırsız bellekte asılı kalmaz
-    ama tek yazım hatası setup'ı baştan yaptırmaz (kullanıcı kararı).
-  - **(P2) integrity ekranı reset:** toptan-bozuk `_IntegrityErrorView`'a çift-onaylı
-    "Vault'u sıfırla" son çaresi eklendi (AuthIntegrityPage ile aynı kalıp).
-  - **(P3) CountdownRing kritik eşiği:** `forFraction(5/30)` → `forRemaining(remaining, period)`
-    MUTLAK saniye; period≠30'da doğru (period=60'ta son 5sn kritik, 10sn değil; period=15'te
-    3sn kritik). Design.md ile hizalandı.
-- **Patch 4 sertleştirme (2. review turu — 3 bulgu, hepsi kaynaktan doğrulandı):**
-  - **(P1) load-bitmeden-mutasyon veri kaybı:** `VaultCubit` mutasyonları (add/remove/
-    increment/purge) artık ilk `load()` tamamlanana kadar **bekler** (`Completer` ile).
-    Önceki `_mutatedBeforeLoad` merge'i yalnız belleği düzeltiyordu; load bitmeden `save()`
-    edilirse diskteki henüz-okunmamış şifreli kayıtlar EZİLİYORDU (`_lastById`/`_corruptedRaw`
-    boşken yazma). `load()` ayrıca idempotent (tek ilk-yükleme).
-  - **(P2) lifecycle lock güvenli sıra:** `onAppBackgrounded` artık `unlocked`'ta doğrudan
-    `lock()`'a delege ediyor (locking → subtree teardown → post-frame `masterKey.dispose()`).
-    Eskiden hemen dispose ediyordu → repo async encrypt/decrypt yaparken disposed `SecureKey`'e
-    use-after-free riski. `setupPending` → `cancelSetup` (tüketici yok, hemen güvenli).
-  - **(P3) integrity reset testi:** toptan-bozuk integrity ekranındaki çift-onaylı
-    "Vault'u sıfırla" → `resetVault()` akışı widget testiyle kapatıldı (data-destructive).
-- **Patch 4 sertleştirme (3. review turu — 1 bulgu, kaynaktan doğrulandı):**
-  - **(P1) integrity state'te ekleme = onaysız overwrite:** Toptan bozulma (top-level
-    malformed/non-list veya tüm-kayıt decrypt-fail) `load()`'ı erken fırlatır → `state.error`
-    set, `accounts` boş, repo cache (`_corruptedRaw`/`_lastById`) BOŞ. Bu state'te `VaultPage`
-    integrity ekranını gösterirken **FAB hâlâ aktifti** → manuel/QR ekleme `VaultCubit.add` →
-    `save()` çalışır ve boş cache'le yalnız yeni token'ı yazıp **diskteki bozuk-ama-belki-
-    kurtarılabilir ham vault'u kullanıcının açık "Vault'u sıfırla" onayı OLMADAN ezerdi.**
-    Çift katman düzeltme: (a) **`VaultCubit` `_guardIntegrity()`** — `state.error != null` iken
-    add/remove/increment `StateError` fırlatır (UI `_runMutation`/`_addAndClose` yakalar →
-    SnackBar); (b) **VaultPage FAB** integrity state'inde gizli (`integrityBlocked`). +3 test.
-- **Doğrulama:** `flutter analyze` temiz, host 173/173, `flutter build apk --debug` +
-  `flutter build ios --debug --no-codesign` geçti. Asset delta ~912KB raw (curated; lean).
+- **`docs/Design.md`:** the design language, tokens, component inventory, accessibility
+  contract, asset licenses (Geist OFL 1.1, simple-icons CC0 — confirmed from source).
+- **Session core:** the `VaultLockCubit` state machine (`uninitialized`/`setupPending`/
+  `locked`/`unlocked`/`locking`/`keyAttributesCorrupted`) + a single key-ownership model
+  (lock: `locking`→subtree teardown→`masterKey.dispose()`→`locked`; no use-after-free).
+  `KeyAttributesStore` (malformed→`keyAttributesCorrupted`, no leak). Setup commit
+  **does NOT persist before recovery is verified**; recover+new password is a single atomic call.
+- **Router:** `createAppRouter`→`AppRouterBundle` + its own `CubitRefreshNotifier` adapter
+  (**there is NO `GoRouterRefreshStream` in go_router 17.3.0** — confirmed from source; CHANGELOG:693).
+  The refreshListenable is disposed at the root widget (go_router does not dispose it). The guard covers all states;
+  the `ShellRoute` provides `VaultCubit` in the unlocked subtree (scan/add only there).
+- **Lifecycle lock:** `paused` AND `inactive` → unlocked locks, setupPending is cleared.
+- **Corruption/integrity UI:** a VaultPage `corruptedCount` banner (Continue anyway /
+  confirmed remove) + a `VaultIntegrityException` integrity screen (NOT an empty-state) +
+  `/auth-integrity` (Retry / Reset vault) + `resetVault()` (deletes 5 keys;
+  including plaintext+marker → it is not re-migrated).
+- **UI/UX redesign:** Geist + GeistMono **embedded** (no runtime fetch; Turkish glyphs confirmed;
+  `google_fonts` is NOT USED), a trust-blue palette + a `CountdownColors` `ThemeExtension`,
+  `CountdownRing` (green→amber→red + seconds in the center, <5s pulse, off under reduced-motion),
+  `IssuerAvatar` (simple-icons CC0 curated 27 icons + initial fallback), `OtpCard` (card/list
+  variant + tap-to-copy + Semantics), a card/list toggle (`vault_view_mode_v1` secure_storage),
+  a ScanPage corner-guided reticle.
+- **Accessibility gate:** Semantics (code + remaining time), no overflow at textScaler 2.0,
+  no reduced-motion crash — via widget tests.
+- **DI/main:** the global `VaultCubit` was removed; the root `StatefulWidget` holds the `VaultLockCubit` + router
+  bundle, watches the lifecycle, and disposes `bundle.refresh`.
+- **Patch 4 hardening (review round — 6 findings, all confirmed from source):**
+  - **(P1) masterKey migration-fail lifecycle:** `unlock`/`recoverWithNewPassword` now
+    own the masterKey only after migration SUCCEEDS; if migration throws, the
+    key is disposed in `finally` and it does not transition to `unlocked` (the "live key in
+    locked state" invariant is preserved).
+  - **(P1) guard setup sub-routes:** while `uninitialized`, only `/setup` (the recovery-show/
+    verify sub-routes are blocked) — a deep-link to `/setup/verify` before the mnemonic exists
+    produced a `RangeError`. The subtree is open only in `setupPending`.
+  - **(P2) setup restart:** `beginSetup` disposes the previous pending masterKey (it does not overwrite
+    and leak it).
+  - **(P2) recovery-verify attempt limit:** on a wrong word, now an inline error + remaining attempts;
+    after 3 wrong ones, `cancelSetup()` (the pending key is disposed). It does not hang in memory
+    indefinitely, but a single typo does not force setup from scratch (a user decision).
+  - **(P2) integrity screen reset:** a double-confirmed "Reset vault" last resort was added to the
+    fully-corrupted `_IntegrityErrorView` (same pattern as AuthIntegrityPage).
+  - **(P3) CountdownRing critical threshold:** `forFraction(5/30)` → `forRemaining(remaining, period)`
+    ABSOLUTE seconds; correct when period≠30 (with period=60 the last 5s is critical, not 10s; with period=15
+    3s is critical). Aligned with Design.md.
+- **Patch 4 hardening (2nd review round — 3 findings, all confirmed from source):**
+  - **(P1) mutation-before-load-finishes data loss:** `VaultCubit` mutations (add/remove/
+    increment/purge) now **wait** until the first `load()` completes (via a `Completer`).
+    The previous `_mutatedBeforeLoad` merge only fixed memory; if `save()` was called before load
+    finished, the not-yet-read encrypted records on disk were OVERWRITTEN (writing while `_lastById`/`_corruptedRaw`
+    was empty). `load()` is also idempotent (a single first-load).
+  - **(P2) lifecycle lock safe order:** `onAppBackgrounded` now delegates directly to
+    `lock()` in `unlocked` (locking → subtree teardown → post-frame `masterKey.dispose()`).
+    Previously it disposed immediately → a use-after-free risk on a disposed `SecureKey` while the
+    repo was doing async encrypt/decrypt. `setupPending` → `cancelSetup` (no consumer, immediately safe).
+  - **(P3) integrity reset test:** the double-confirmed "Reset vault" → `resetVault()` flow on the
+    fully-corrupted integrity screen was closed with a widget test (data-destructive).
+- **Patch 4 hardening (3rd review round — 1 finding, confirmed from source):**
+  - **(P1) adding while in integrity state = unconfirmed overwrite:** full corruption (top-level
+    malformed/non-list or all-records decrypt-fail) makes `load()` throw early → `state.error`
+    is set, `accounts` is empty, the repo cache (`_corruptedRaw`/`_lastById`) is EMPTY. In this state, while `VaultPage`
+    shows the integrity screen, **the FAB was still active** → a manual/QR add → `VaultCubit.add` →
+    `save()` runs and, with the empty cache, writes only the new token and **would overwrite the
+    corrupted-but-maybe-recoverable raw vault on disk WITHOUT the user's explicit "Reset vault" confirmation.**
+    A two-layer fix: (a) **`VaultCubit` `_guardIntegrity()`** — while `state.error != null`,
+    add/remove/increment throw a `StateError` (the UI `_runMutation`/`_addAndClose` catch it →
+    SnackBar); (b) the **VaultPage FAB** is hidden in the integrity state (`integrityBlocked`). +3 tests.
+- **Verification:** `flutter analyze` clean, host 173/173, `flutter build apk --debug` +
+  `flutter build ios --debug --no-codesign` passed. Asset delta ~912KB raw (curated; lean).
 
-## 2026-06-07 (Faz 2 Patch 1–3) — E2E kripto katmanı + şifreli lokal vault
+## 2026-06-07 (Phase 2 Patch 1–3) — E2E crypto layer + encrypted local vault
 
-Faz 2'nin çekirdeği: vault artık offline çalışıyor **ama düz JSON değil, E2E şifreli**.
-Her patch çok-turlu dış review'dan geçti; **tüm bulgular kaynaktan (Context7/pub.dev/
-kurulu paket kaynağı) doğrulandı** (standing rule) — bazı makul-ama-yanlış iddialar elendi
-(sodium sürümü, `runIsolated` arity). UI/route/DI rewiring + biyometri Patch 4–6'da.
+The core of Phase 2: the vault now works offline **but not as plain JSON — E2E encrypted**.
+Each patch went through multi-round external review; **all findings confirmed from source (Context7/pub.dev/
+the installed package source)** (standing rule) — some plausible-but-wrong claims were dismissed
+(the sodium version, `runIsolated` arity). UI/route/DI rewiring + biometrics in Patch 4–6.
 
-- **Patch 1 — `core/crypto/`:** `CryptoService` (soyut) + `SodiumCryptoService` (SodiumSumo).
-  XChaCha20-Poly1305 IETF (AAD'li) + Argon2id (KEK, **ayrı isolate** — UI bloklamaz).
-  `EncryptedBlob`/`KeyHandle` (opaque, `SecureKey` sızmaz) + `crypto_exceptions`.
-  **Sürüm kararı:** `sodium 3.4.6 + sodium_libs 3.4.6+4` — sodium 4.x Dart 3.11+ ister,
-  proje Dart 3.10.7. Detay [docs/CRYPTO.md](docs/CRYPTO.md).
-- **Patch 2 — anahtar hiyerarşisi:** `KeyManager` (setup/unlock/recoverUnlock/changePassword,
-  hepsi Future, ara key'ler `finally`'de dispose/zero-fill). `KeyAttributes` value object.
-  **Kendi BIP39 impl'imiz** (kanonik paket bakımsız → güven sınırına sokulmadı): resmi 2048
-  kelime (MIT, SHA-256 teyitli), 256-bit, checksum doğrulamalı; resmi Trezor vektörleriyle test.
-  Domain parola politikası (`WeakPasswordException`, min 8).
-- **Patch 3 — şifreli vault + migration:** `EncryptedVaultRepository` (token-bazlı record
-  `{id,v,n,c,updatedAt,deleted}`, AAD `token|1|<id>`, **unchanged-blob koruması**,
-  **bozuk-kayıt koruması** — scalar/null dahil, **integrity exception** ile sessiz veri
-  kaybı yok). `VaultMigration` (Faz 1 plaintext → şifreli, commit-marker idempotency,
-  **id-bazlı upsert** — crash sonrası var olanı ezmez). `VaultRepository` arayüzü genişledi
-  (`load()→VaultLoadResult`, `purgeCorrupted()`). Raw-storage güvenlik testi:
-  secret/issuer/accountName ciphertext dışında **hiç** görünmüyor.
-- **Sıkı validasyon (review):** `EncryptedBlob`/`KeyAttributes` parse'ı bozuk/ileri-sürüm
-  metadata'yı sodium'a ulaşmadan reddeder (nonce=24B, ciphertext≥16B, salt=16B, KDF pozitif
-  tamsayı, version desteklenen; kesirli `num` sessiz truncate edilmez).
-- **Testler:** host **79 → 122** (EncryptedBlob/KeyAttributes JSON+validasyon, BIP39 +
-  resmi vektörler, vault corruptedCount). **Integration 34** (cihaz/sim — gerçek libsodium):
-  sodium service 8 + KeyManager 8 + encrypted vault/migration 18. `analyze` temiz, APK + iOS
-  build geçer. (libsodium testleri `integration_test/`te — `sodium_libs` plain `flutter test`
-  VM host'unda yüklenmez.)
+- **Patch 1 — `core/crypto/`:** `CryptoService` (abstract) + `SodiumCryptoService` (SodiumSumo).
+  XChaCha20-Poly1305 IETF (with AAD) + Argon2id (KEK, **a separate isolate** — does not block the UI).
+  `EncryptedBlob`/`KeyHandle` (opaque, `SecureKey` does not leak) + `crypto_exceptions`.
+  **Version decision:** `sodium 3.4.6 + sodium_libs 3.4.6+4` — sodium 4.x requires Dart 3.11+,
+  the project is on Dart 3.10.7. Details in [docs/CRYPTO.md](docs/CRYPTO.md).
+- **Patch 2 — key hierarchy:** `KeyManager` (setup/unlock/recoverUnlock/changePassword,
+  all Future, intermediate keys disposed/zero-filled in `finally`). The `KeyAttributes` value object.
+  **Our own BIP39 impl** (the canonical package is unmaintained → not brought into the trust boundary): the official 2048
+  words (MIT, SHA-256 confirmed), 256-bit, checksum-verified; tested with the official Trezor vectors.
+  A domain password policy (`WeakPasswordException`, min 8).
+- **Patch 3 — encrypted vault + migration:** `EncryptedVaultRepository` (a token-based record
+  `{id,v,n,c,updatedAt,deleted}`, AAD `token|1|<id>`, **unchanged-blob protection**,
+  **corrupted-record protection** — including scalar/null, **with an integrity exception** so no silent
+  data loss). `VaultMigration` (Phase 1 plaintext → encrypted, commit-marker idempotency,
+  **id-based upsert** — does not overwrite what exists after a crash). The `VaultRepository` interface expanded
+  (`load()→VaultLoadResult`, `purgeCorrupted()`). Raw-storage security test:
+  secret/issuer/accountName appears **nowhere** outside the ciphertext.
+- **Strict validation (review):** `EncryptedBlob`/`KeyAttributes` parsing rejects corrupted/forward-version
+  metadata before it reaches sodium (nonce=24B, ciphertext≥16B, salt=16B, KDF a positive
+  integer, a supported version; a fractional `num` is not silently truncated).
+- **Tests:** host **79 → 122** (EncryptedBlob/KeyAttributes JSON+validation, BIP39 +
+  official vectors, vault corruptedCount). **Integration 34** (device/sim — real libsodium):
+  sodium service 8 + KeyManager 8 + encrypted vault/migration 18. `analyze` clean, APK + iOS
+  build passes. (The libsodium tests are in `integration_test/` — `sodium_libs` is not loaded in the plain `flutter test`
+  VM host.)
 
-## 2026-06-07 (3. tur) — JSON tip-güvenliği + tüm mutasyonlarda hata yönetimi (review)
+## 2026-06-07 (round 3) — JSON type-safety + error handling on all mutations (review)
 
-Dış review 4 bulgu daha verdi (2 orta + 2 düşük); **hepsi kaynaktan doğrulandı, hepsi gerçekti** ve düzeltildi. (Önceki turun add/QR düzeltmeleri kapanmış teyit edildi; bu tur kalan kenar durumlar.)
+The external review gave 4 more findings (2 medium + 2 low); **all confirmed from source, all real** and fixed. (The previous round's add/QR fixes were confirmed closed; this round covers the remaining edge cases.)
 
-- **#1 (orta) — `fromJson` cast'leri `TypeError` üretebiliyordu:** `as String?`/`as num?`
-  cast'leri `type: 123` / `digits: "6"` gibi bozuk depo verisinde `FormatException` DEĞİL
-  `TypeError` atıyordu → `load()`'taki `on FormatException` yakalayamaz, tek bozuk kayıt tüm
-  yüklemeyi kırardı. **Düzeltme:** tip-toleranslı `_asString`/`_asInt` yardımcıları (yanlış tip →
-  `FormatException`; sayısal String → int esnek). `VaultRepository.load()` artık kayıt başına
-  genel `catch` (FormatException dışı da) + anahtar `_coerceStringKeys` ile güvenli.
-- **#2 (orta/düşük) — Silme/HOTP sayaç artırma kalıcılık hatasını UI yakalamıyordu:** `onDelete`/
-  `onIncrement` `VoidCallback` üzerinden fire-and-forget'ti (add/QR düzelmişti ama bu ikisi geride
-  kalmıştı). Save patlarsa kullanıcı başarılı sanır, restart'ta değişiklik geri dönerdi.
-  **Düzeltme:** `VaultPage._runMutation(Future, errorPrefix)` — mutasyonu `await` eder, save hatasında
-  SnackBar gösterir (bellek-içi state güncel ama yazma başarısızsa bilgilendirir).
-- **#3 (düşük) — QR save hatasında `mounted` guard eksikti:** `_onDetect` catch'i `_showError` →
-  `context` kullanıyordu; kullanıcı ayrılmışsa disposed context riski. **Düzeltme:** `_showError`
-  başına `if (!mounted) return` (add sheet'teki korumayla tutarlı).
-- **#4 (düşük) — Doküman drift:** `PLAN.md` CI satırı hâlâ "67/67" diyordu (dosyanın gerisi 75) →
-  güncellendi.
-- **Testler:** +4 (yanlış-tip type/digits reddi, sayısal-String toleransı, remove/increment save-hata
-  fırlatma) + load testine yanlış-tip kayıt senaryoları. **75 → 79, hepsi geçti; `analyze` temiz.**
+- **#1 (medium) — `fromJson` casts could produce a `TypeError`:** the `as String?`/`as num?`
+  casts threw a `TypeError`, NOT a `FormatException`, on corrupted stored data like `type: 123` /
+  `digits: "6"` → the `on FormatException` in `load()` cannot catch it, and a single bad record broke the entire
+  load. **Fix:** type-tolerant `_asString`/`_asInt` helpers (wrong type →
+  `FormatException`; a numeric String → flexibly to int). `VaultRepository.load()` is now safe
+  with a general per-record `catch` (beyond FormatException) + the key `_coerceStringKeys`.
+- **#2 (medium/low) — the UI did not catch delete/HOTP counter-increment persistence errors:** `onDelete`/
+  `onIncrement` were fire-and-forget via a `VoidCallback` (add/QR had been fixed but these two were
+  left behind). If save blew up the user thought it succeeded, and on restart the change reverted.
+  **Fix:** `VaultPage._runMutation(Future, errorPrefix)` — it `await`s the mutation and shows a
+  SnackBar on a save error (the in-memory state is current but it informs if the write failed).
+- **#3 (low) — the `mounted` guard was missing on a QR save error:** the `_onDetect` catch did `_showError` →
+  it used `context`; a disposed-context risk if the user had left. **Fix:** `if (!mounted) return`
+  at the top of `_showError` (consistent with the protection in the add sheet).
+- **#4 (low) — Doc drift:** the `PLAN.md` CI line still said "67/67" (the rest of the file is 75) →
+  updated.
+- **Tests:** +4 (wrong-type type/digits rejection, numeric-String tolerance, remove/increment save-error
+  throw) + wrong-type record scenarios in the load test. **75 → 79, all pass; `analyze` clean.**
 
-## 2026-06-07 (2. tur) — Kalıcılık dayanıklılığı + async hata yönetimi (review)
+## 2026-06-07 (round 2) — Persistence resilience + async error handling (review)
 
-Dış review 5 bulgu verdi (2 orta + 3 düşük); **hepsi kaynaktan doğrulandı, hepsi gerçekti** ve düzeltildi. APK + iOS build'i de geçti (review tarafından).
+The external review gave 5 findings (2 medium + 3 low); **all confirmed from source, all real** and fixed. The APK + iOS build also passed (by the review).
 
-- **#1 (orta) — JSON yükleme parser validasyonunu bypass ediyordu:** `OtpAccount.fromJson`
-  Base32/digits/period/counter kontrolü yapmıyordu → bozuk kayıt `OtpCard` render/timer'da
-  (`secretBytes`, `period=0` bölme) crash ederdi. **Düzeltme:** validasyon TEK noktaya çekildi —
-  `OtpAccount` ctor artık `validate()` çağırır (secret Base32, digits 6–8/Steam 5, period 1–600,
-  counter ≥0). Böylece parse, fromJson ve programatik kurulum aynı güvenlik kapısından geçer;
-  geçersiz `OtpAccount` hiçbir yoldan oluşamaz. Ayrıca `VaultRepository.load()` üst-düzey
-  `jsonDecode` hatasını da yakalar (eskiden tüm yükleme patlardı) → boş vault'a düşer.
-- **#2 (orta) — `add()` future'ı beklenmiyordu:** Manuel/QR ekleme `add()`'i fire-and-forget
-  çağırıyordu; `secure_storage` yazma hatası UI'da yakalanmıyordu (kullanıcı "eklendi" sanıp
-  restart'ta kaybedebilirdi). **Düzeltme:** `_AddSheet` ve `ScanPage._onDetect` artık `await`
-  eder; başarılıysa kapatır, hata olursa formu/taramayı açık bırakıp hatayı gösterir. Ekleme
-  sırasında butonlar disable + spinner.
-- **#3 (düşük/orta) — Açılış yarış durumu:** `load()` bitmeden kullanıcı ekleme yaparsa geç
-  tamamlanan `load()` mevcut state'i eski depo içeriğiyle ezebilirdi. **Düzeltme:** `VaultCubit`
-  yükleme-öncesi mutasyonu izler; geç `load()` ezmek yerine depo kaydı + kullanıcı eklemelerini
-  id-bazlı **birleştirir** ve yeniden persist eder.
-- **#4 (düşük) — Arama temizleme:** `clear` butonu yalnız `_query`'yi sıfırlıyordu; `TextField`
-  controller'ı olmadığından ekranda eski metin kalıyordu. **Düzeltme:** `TextEditingController`
-  eklendi, temizlemede hem state hem görünen metin sıfırlanır (dispose edilir).
-- **#5 (düşük) — Doküman drift:** `PLAN.md` "60/60", `docs/OTP_ENGINE.md` vault'u hâlâ
-  "in-memory / sonraki adım" anlatıyordu → güncel duruma (kalıcı vault, tek-nokta validasyon)
-  ve test sayısına çekildi.
-- **Testler:** +8 (4 JSON validasyon reddi + 3 load dayanıklılık (mocktail ile bozuk JSON/kayıt) +
-  save-hatası fırlatma + yarış-durumu merge). **67 → 75, hepsi geçti; `analyze` temiz.**
+- **#1 (medium) — JSON loading bypassed parser validation:** `OtpAccount.fromJson`
+  did no Base32/digits/period/counter check → a corrupted record would crash on `OtpCard` render/timer
+  (`secretBytes`, `period=0` division). **Fix:** validation was pulled to a SINGLE point —
+  the `OtpAccount` ctor now calls `validate()` (secret Base32, digits 6–8/Steam 5, period 1–600,
+  counter ≥0). So parse, fromJson, and programmatic construction all go through the same safety gate;
+  an invalid `OtpAccount` cannot be created via any path. Also, `VaultRepository.load()` now catches the
+  top-level `jsonDecode` error (previously the whole load blew up) → falls back to an empty vault.
+- **#2 (medium) — the `add()` future was not awaited:** manual/QR add was calling `add()` fire-and-forget;
+  a `secure_storage` write error was not caught in the UI (the user thought it was "added" and could
+  lose it on restart). **Fix:** `_AddSheet` and `ScanPage._onDetect` now `await`
+  it; on success they close, on error they leave the form/scan open and show the error. During the add,
+  the buttons are disabled + a spinner.
+- **#3 (low/medium) — Startup race condition:** if the user adds before `load()` finishes, a late
+  `load()` could overwrite the current state with the old stored content. **Fix:** `VaultCubit`
+  tracks the pre-load mutation; instead of overwriting, the late `load()` **merges** the stored record +
+  the user's additions id-based and re-persists.
+- **#4 (low) — Search clearing:** the `clear` button only reset `_query`; since there was no `TextField`
+  controller, the old text stayed on screen. **Fix:** a `TextEditingController`
+  was added, and on clear both the state and the visible text are reset (it is disposed).
+- **#5 (low) — Doc drift:** `PLAN.md` said "60/60", `docs/OTP_ENGINE.md` still described the vault
+  as "in-memory / next step" → pulled to the current state (a persistent vault, single-point validation)
+  and the test count.
+- **Tests:** +8 (4 JSON validation rejections + 3 load resilience (corrupted JSON/record via mocktail) +
+  save-error throw + race-condition merge). **67 → 75, all pass; `analyze` clean.**
 
-## 2026-06-07 — Faz 1 kalanı: kalıcılık + QR tarama + arama (+ doküman drift)
+## 2026-06-07 — Phase 1 remainder: persistence + QR scanning + search (+ doc drift)
 
-Faz 1 tamamlandı. Dış review'ın iki düşük öncelikli doküman drift'i (kaynaktan doğrulandı) düzeltildi, sonra Faz 1'in kalan üç maddesi uygulandı.
+Phase 1 is complete. The external review's two low-priority doc drifts (confirmed from source) were fixed, then the remaining three items of Phase 1 were implemented.
 
-- **Doküman drift #1 (düşük) — ARCHITECTURE.md RLS örneği:** §RLS politikaları satırı yalın
-  `user_id = auth.uid()` gösteriyordu; canlı/migration `(select auth.uid())` (init-plan
-  optimizasyonu) kullanıyor. Kopyalanırsa `auth_rls_initplan` uyarısı dönerdi → örnek
-  `(select auth.uid())`'e ve nedeni açıklayan nota güncellendi.
-- **Doküman drift #2 (düşük) — PROJECT_INFO.md migration özeti:** `initplan` migration'ı için
-  "+ audit FK index" yazıyordu; index aslında init migration'a taşındı, initplan'dan kaldırıldı
-  (migration dosyası bunu belgeliyor). Özet düzeltildi.
-- **Kalıcılık (secure_storage):** `OtpAccount.toJson/fromJson` (URI'den farklı — `id` + `counter`
-  gibi yerel/operasyonel alanları korur, bozuk alan → `FormatException`). `VaultRepository`
-  arayüzü + `SecureStorageVaultRepository` (tek JSON anahtarı; bozuk tek kayıt atlanır, tüm
-  vault düşmez). `VaultCubit` artık repository alır: açılışta `load()`, her mutasyonda persist;
-  no-op'larda gereksiz yazma yapmaz. `loaded` state'i ile ilk yüklemede spinner.
-- **QR tarama (`mobile_scanner` 7.2):** `ScanPage` gerçek tarayıcı — `DetectionSpeed.noDuplicates`,
-  yalnız `qrCode` formatı, ilk geçerli `otpauth://`'ta çift-ekleme guard'lı pop, geçersiz QR'da
-  SnackBar + taramaya devam, flaş/kamera-değiştir, izin-reddi için kullanıcı dostu `errorBuilder`.
-  Platform izinleri: iOS `NSCameraUsageDescription`, Android `CAMERA` + `uses-feature camera
-  required=false` (manuel giriş hâlâ mümkün).
-- **Vault arama:** `VaultPage` AppBar'da arama çubuğu — issuer/hesap/label üzerinde
-  case-insensitive filtre; eşleşme yoksa ayrı durum. Ekleme menüsü QR/manuel ayrımı.
-- **Testler:** 7 yeni (6 JSON round-trip/dayanıklılık + 1 VaultCubit load); 5 VaultCubit testi
-  async repository imzasına uyarlandı (FakeRepo ile persist doğrulaması). **60 → 67, hepsi geçti;
-  `analyze` temiz.** API'ler Context7 ile teyit edildi (mobile_scanner v7 `errorBuilder`/
+- **Doc drift #1 (low) — ARCHITECTURE.md RLS example:** the §RLS policies line showed a bare
+  `user_id = auth.uid()`; the live/migration uses `(select auth.uid())` (the init-plan
+  optimization). If copied it would return an `auth_rls_initplan` warning → the example was updated
+  to `(select auth.uid())` with a note explaining why.
+- **Doc drift #2 (low) — PROJECT_INFO.md migration summary:** it said "+ audit FK index" for the
+  `initplan` migration; the index was actually moved into the init migration and removed from initplan
+  (the migration file documents this). The summary was corrected.
+- **Persistence (secure_storage):** `OtpAccount.toJson/fromJson` (different from the URI — it preserves
+  local/operational fields like `id` + `counter`; a corrupted field → `FormatException`). The `VaultRepository`
+  interface + `SecureStorageVaultRepository` (a single JSON key; a single corrupted record is skipped, the entire
+  vault does not go down). `VaultCubit` now takes a repository: `load()` at launch, persist on each mutation;
+  no unnecessary writes on no-ops. A spinner on the first load via the `loaded` state.
+- **QR scanning (`mobile_scanner` 7.2):** `ScanPage` is a real scanner — `DetectionSpeed.noDuplicates`,
+  the `qrCode` format only, a double-add-guarded pop on the first valid `otpauth://`, a SnackBar on an invalid QR
+  + continue scanning, flash/camera-switch, a user-friendly `errorBuilder` for permission denial.
+  Platform permissions: iOS `NSCameraUsageDescription`, Android `CAMERA` + `uses-feature camera
+  required=false` (manual entry still possible).
+- **Vault search:** a search bar in the `VaultPage` AppBar — a case-insensitive filter over
+  issuer/account/label; a separate state when there is no match. The add menu distinguishes QR/manual.
+- **Tests:** 7 new (6 JSON round-trip/resilience + 1 VaultCubit load); 5 VaultCubit tests
+  were adapted to the async repository signature (persist verification with FakeRepo). **60 → 67, all pass;
+  `analyze` clean.** The APIs were confirmed with Context7 (mobile_scanner v7 `errorBuilder`/
   `MobileScannerErrorCode`, flutter_secure_storage v10 default RSA-OAEP+AES-GCM).
 
-## 2026-06-06 (5. tur) — Vault state sağlamlığı + token id + parse sıkılaştırma (review #5)
+## 2026-06-06 (round 5) — Vault state robustness + token id + parse hardening (review #5)
 
-Dış review 5 bulgu verdi; **hepsi kaynak koddan doğrulandı, hepsi gerçekti** ve düzeltildi.
+The external review gave 5 findings; **all confirmed from the source code, all real** and fixed.
 
-- **#1 (orta) — OtpCard state reuse'da TOTP timer durabilir:** `VaultPage` kartlara stabil
-  `Key` vermiyordu; `OtpCard.didUpdateWidget` tip değişiminde (TOTP↔HOTP) timer'ı
-  başlatmıyor/iptal etmiyordu. **Düzeltme:** kartlara `ValueKey(account.id)` + `_syncTimer()`
-  (idempotent: zaman-bazlıysa timer başlat, HOTP'te iptal) hem `initState` hem `didUpdateWidget`'te.
-- **#2 (orta) — Token'da stabil id yok (ARCHITECTURE §7.5 ile drift):** `OtpAccount`'a uuid v4
-  `id` eklendi (verilmezse üretimde atanır). `VaultCubit` artık index yerine **id-bazlı**
-  (`removeById`/`incrementCounter(id)`) — liste reorder/eşzamanlı değişimde yanlış öğeye
-  dokunmaz. Faz 3 backfill idempotent upsert'ünün temeli. `copyWith` id'yi korur; `props`'a dahil.
-- **#3 (orta) — Bilinmeyen `algorithm` sessizce SHA1'e düşüyordu:** `OtpAlgorithm.fromName`
-  artık **verilmiş ama desteklenmeyen** algoritmayı (`SHA3`, `md5`, typo) `FormatException`
-  ile reddeder; eksik/boş hâlâ SHA1 default. `digits`/`period` ile aynı "verilmişse doğrula" prensibi.
-- **#4 (düşük) — ARCHITECTURE.md `sodium_libs` drift'i:** §1 tablosu + paket notu `sodium`
-  paketine güncellendi (README/PLAN ile hizalı; `sodium_libs` discontinued uyarısı eklendi).
-- **#5 (düşük) — Route diagnostic log kalıcı açıktı:** `debugLogDiagnostics: kDebugMode`
-  (yalnız debug build; profile/release sessiz).
-- **#6 (orta, takip turu) — HOTP'te `counter` eksikse sessizce 0 kabul ediliyordu:** Repro
-  testiyle 0'a düştüğü kanıtlandı. Key URI Format'a göre HOTP'te `counter` **zorunlu** →
-  `_parseBounded`'a `required` parametresi eklendi; HOTP'te eksik counter `FormatException`.
-  TOTP/Steam'de counter kullanılmadığından eksiklik serbest (0). 3 yeni test.
-- **Testler:** 12 yeni test (4 algorithm/id + 5 VaultCubit + 3 HOTP counter zorunluluğu).
-  **Toplam 48 → 60, hepsi geçti; `analyze` temiz.** `uuid 4.5.3` eklendi.
+- **#1 (medium) — the TOTP timer could stall on OtpCard state reuse:** `VaultPage` was not giving the cards a stable
+  `Key`; `OtpCard.didUpdateWidget` did not start/cancel the timer on a type change (TOTP↔HOTP).
+  **Fix:** `ValueKey(account.id)` on the cards + `_syncTimer()`
+  (idempotent: start the timer if time-based, cancel for HOTP) in both `initState` and `didUpdateWidget`.
+- **#2 (medium) — no stable id on a token (drift from ARCHITECTURE §7.5):** a uuid v4
+  `id` was added to `OtpAccount` (assigned at construction if not provided). `VaultCubit` is now **id-based**
+  instead of index-based (`removeById`/`incrementCounter(id)`) — it does not touch the wrong item on a
+  list reorder/concurrent change. The basis for the idempotent upsert of the Phase 3 backfill. `copyWith` preserves the id; included in `props`.
+- **#3 (medium) — an unknown `algorithm` silently fell to SHA1:** `OtpAlgorithm.fromName`
+  now rejects a **provided but unsupported** algorithm (`SHA3`, `md5`, a typo) with a `FormatException`;
+  missing/empty still defaults to SHA1. The same "validate if provided" principle as `digits`/`period`.
+- **#4 (low) — ARCHITECTURE.md `sodium_libs` drift:** the §1 table + the package note were updated to the `sodium`
+  package (aligned with README/PLAN; a `sodium_libs` discontinued warning was added).
+- **#5 (low) — the route diagnostic log was permanently on:** `debugLogDiagnostics: kDebugMode`
+  (debug build only; profile/release silent).
+- **#6 (medium, follow-up round) — a missing `counter` in HOTP was silently treated as 0:** proved
+  it fell to 0 with a repro test. Per the Key URI Format, `counter` is **mandatory** in HOTP →
+  a `required` parameter was added to `_parseBounded`; a missing counter in HOTP is a `FormatException`.
+  Since counter is not used in TOTP/Steam, its absence is allowed (0). 3 new tests.
+- **Tests:** 12 new tests (4 algorithm/id + 5 VaultCubit + 3 HOTP counter requirement).
+  **Total 48 → 60, all pass; `analyze` clean.** `uuid 4.5.3` added.
 
-## 2026-06-06 (4. tur) — Doküman drift + seed config (review #4)
-- Test sayısı drift'i: README/PLAN/OTP_ENGINE'de kalan `38/38`·`39/39` → güncel **48/48** yapıldı.
-- `config.toml` `[db.seed]` `enabled=false` (var olmayan `./seed.sql` "no files matched" WARN
-  üretiyordu; seed kullanmıyoruz). Lokal `supabase start` ile WARN'ın gittiği doğrulandı.
+## 2026-06-06 (round 4) — Doc drift + seed config (review #4)
+- Test count drift: the remaining `38/38`·`39/39` in README/PLAN/OTP_ENGINE → made the current **48/48**.
+- `config.toml` `[db.seed]` `enabled=false` (the non-existent `./seed.sql` produced a "no files matched" WARN;
+  we do not use seed). Confirmed the WARN is gone with a local `supabase start`.
 
-## 2026-06-06 (3. tur) — OTP input validasyonu + uçtan uca hook doğrulaması
+## 2026-06-06 (round 3) — OTP input validation + end-to-end hook verification
 
-Dış review 2 bulgu daha verdi; ikisi de **reprodüksiyon testiyle ispatlanıp** düzeltildi.
+The external review gave 2 more findings; both were **proven with a reproduction test** and fixed.
 
-- **#1 (orta) — Malformed otpauth:// UI crash riski:** Repro testi yazıldı ve crash KANITLANDI:
-  geçersiz Base32 secret parse'ı geçiyordu ama `secretBytes` (kart render) `FormatException`
-  fırlatıyordu; `period=0` `secondsRemaining`'de sıfıra bölüyordu. **Düzeltme:** validasyon
-  `OtpAuthUri.parse` anına çekildi — secret Base32 decode doğrulanır, `digits` (6–8/Steam 5),
-  `period` (1–600), `counter` (≥0) aralık kontrolünden geçer; geçersiz → `FormatException`.
-  9 yeni test eklendi. **Test toplamı 39 → 48, hepsi geçti; `analyze` temiz.**
-- **#2 (düşük) — Local config'de hook kapalı:** `config.toml`'da `[auth.hook.custom_access_token]`
-  etkinleştirildi (`pg-functions://postgres/public/custom_access_token_hook`). Lokal stack
-  (GoTrue) ile **gerçek login akışı uçtan uca test edildi**: signup → admin ekle → signin →
-  JWT'de `app_metadata.admin=true`; normal kullanıcıda `false` (negatif kontrol). Bu, önceki
-  "fonksiyonu doğrudan çağırma" testinden daha güçlü — tam auth pipeline'ı doğrular.
+- **#1 (medium) — Malformed otpauth:// UI crash risk:** a repro test was written and the crash was PROVEN:
+  the invalid Base32 secret passed parsing but `secretBytes` (card render) threw a `FormatException`;
+  `period=0` divided by zero in `secondsRemaining`. **Fix:** validation was pulled to the
+  moment of `OtpAuthUri.parse` — the secret Base32 decode is verified, `digits` (6–8/Steam 5),
+  `period` (1–600), `counter` (≥0) pass a range check; invalid → `FormatException`.
+  9 new tests added. **Test total 39 → 48, all pass; `analyze` clean.**
+- **#2 (low) — the hook was off in the local config:** `[auth.hook.custom_access_token]`
+  was enabled in `config.toml` (`pg-functions://postgres/public/custom_access_token_hook`). The real login flow
+  was **tested end-to-end with the local stack** (GoTrue): signup → add admin → signin →
+  `app_metadata.admin=true` in the JWT; `false` for a normal user (negative control). This is stronger than the
+  previous "call the function directly" test — it verifies the full auth pipeline.
 
-## 2026-06-06 (2. tur) — Dış review #2 düzeltmeleri + fresh-deploy doğrulaması
+## 2026-06-06 (round 2) — External review #2 fixes + fresh-deploy verification
 
-Dış review 4 bulgu daha verdi; hepsi **lokal Supabase CLI ile gerçek Postgres'te** ele alındı
-(Supabase MCP bu oturumda bağlı değildi → `supabase start` ile lokal stack kuruldu).
+The external review gave 4 more findings; all were handled **on real Postgres with the local Supabase CLI**
+(the Supabase MCP was not connected in this session → a local stack was set up with `supabase start`).
 
-- **#1 (yüksek) — Fresh deploy fail:** `idx_audit_logs_actor` index'i hem `init` hem `initplan`
-  migration'ında oluşturuluyordu → temiz projede 2. migration "already exists" verirdi.
-  `initplan` dosyasından duplicate `create index` KALDIRILDI. **Fresh deploy lokalde sıfırdan
-  uygulandı, üç migration da hatasız geçti.**
-- **#2 (orta) — `supabase_admin` default ACL:** `postgres` owner default'u 0003 ile daraldı ama
-  `supabase_admin` owner default'u hâlâ geniş. Lokalde test edildi: migration `supabase_admin`'in
-  default privilege'ını DEĞİŞTİREMİYOR ("permission denied" — Supabase kısıtı). Çözüm kod değil
-  disiplin → 0003'e kalıcı uyarı eklendi: tablolar yalnız `postgres` (migration) ile oluşturulmalı.
-- **#3 (orta) — Flutter init API:** Kurulu paket kaynağından kesin doğrulandı
-  (`supabase_flutter 2.14.1/lib/src/supabase.dart`): `publishableKey` GERÇEK parametre, `anonKey`
-  artık `@Deprecated`. `publishableKey:` hem doğru hem gelecek-uyumlu. PROJECT_INFO güncellendi.
-- **#4 (düşük) — Test drift + idempotentlik:** Migration isimleri güncellendi (TEST_REPORT +
-  test betiği). Token insert'lerine sabit `id` eklendi; betik 2 kez çalıştırılarak idempotentlik
-  fiilen kanıtlandı (2. koşuda da count=1).
-- Eklenenler: `supabase/config.toml` (CLI init), `supabase/.gitignore` (`.branches/.temp`).
+- **#1 (high) — Fresh deploy fail:** the `idx_audit_logs_actor` index was created in both the `init` and `initplan`
+  migrations → on a clean project the 2nd migration would say "already exists".
+  The duplicate `create index` was REMOVED from the `initplan` file. **A fresh deploy was applied from scratch
+  locally, and all three migrations passed without error.**
+- **#2 (medium) — `supabase_admin` default ACL:** the `postgres` owner default was narrowed with 0003, but
+  the `supabase_admin` owner default is still broad. Tested locally: a migration CANNOT CHANGE the
+  default privilege of `supabase_admin` ("permission denied" — a Supabase restriction). The solution is not code
+  but discipline → a permanent warning was added to 0003: tables must be created only with `postgres` (migration).
+- **#3 (medium) — Flutter init API:** confirmed exactly from the installed package source
+  (`supabase_flutter 2.14.1/lib/src/supabase.dart`): `publishableKey` is a REAL parameter, `anonKey`
+  is now `@Deprecated`. `publishableKey:` is both correct and forward-compatible. PROJECT_INFO updated.
+- **#4 (low) — Test drift + idempotency:** the migration names were updated (TEST_REPORT +
+  the test script). A fixed `id` was added to the token inserts; running the script twice
+  actually proved idempotency (count=1 on the 2nd run too).
+- Added: `supabase/config.toml` (CLI init), `supabase/.gitignore` (`.branches/.temp`).
 
-## 2026-06-06 — Flutter Faz 0/1 çekirdeği + DB sertleştirme
+## 2026-06-06 — Flutter Phase 0/1 core + DB hardening
 
-### Flutter — Faz 0 (temel kurulum)
-- Flutter projesi oluşturuldu (3.38.6, org `dev.mustafakara`, iOS+Android).
-- Feature-first + katmanlı klasör yapısı: `lib/core/{otp,di,router,theme,error,config,storage}`,
+### Flutter — Phase 0 (base setup)
+- Flutter project created (3.38.6, org `dev.mustafakara`, iOS+Android).
+- Feature-first + layered folder structure: `lib/core/{otp,di,router,theme,error,config,storage}`,
   `lib/features/{vault,scan}/...`.
-- Bağımlılıklar eklendi ve sürüm çakışmaları çözüldü:
+- Dependencies added and version conflicts resolved:
   `flutter_bloc 9.1`, `go_router 17.3`, `get_it 9.2`, `injectable 2.5`, `freezed 3.2`,
   `supabase_flutter 2.14`, `sodium_libs 3.4`, `flutter_secure_storage 10.3`,
   `mobile_scanner 7.2`, `local_auth 3.0`, `crypto`, `equatable`.
-- DI composition root (`configureDependencies`, get_it manuel), go_router rotaları,
-  Material 3 açık/koyu tema, `main.dart` (BlocProvider + MaterialApp.router).
+- A DI composition root (`configureDependencies`, get_it manual), go_router routes,
+  Material 3 light/dark theme, `main.dart` (BlocProvider + MaterialApp.router).
 
-### Flutter — Faz 1 (OTP çekirdeği)
+### Flutter — Phase 1 (OTP core)
 - `core/otp/`: Base32 (RFC 4648), HOTP (RFC 4226), TOTP (RFC 6238), Steam Guard,
-  `OtpAccount` modeli, `otpauth://` parse/serialize.
-- **38 RFC test vektörü yazıldı ve çalıştırıldı — hepsi geçti** (HOTP Appendix D,
+  the `OtpAccount` model, `otpauth://` parse/serialize.
+- **38 RFC test vectors written and run — all passed** (HOTP Appendix D,
   TOTP Appendix B SHA1/256/512, Base32, Steam, URI round-trip).
-- Vault UI: `VaultCubit` (in-memory), `VaultPage`, geri sayımlı/kopyalanabilir `OtpCard`,
-  manuel `otpauth://` ekleme. `ScanPage` placeholder (QR sırada).
-- Doğrulama: `flutter analyze` temiz · `flutter test` **39/39** geçti.
+- Vault UI: `VaultCubit` (in-memory), `VaultPage`, a countdown/copyable `OtpCard`,
+  manual `otpauth://` add. `ScanPage` placeholder (QR next).
+- Verification: `flutter analyze` clean · `flutter test` **39/39** passed.
 
-### Bilinen sürüm tuzakları (pubspec'te yönetiliyor)
-- 🔐 Kripto (Faz 2): `sodium ^3.4.6` + `sodium_libs ^3.4.6+4`. sodium 4.x Dart 3.11+ ister; proje Dart 3.10.7 → 4.x çözülemez (3.x bilinçli karar, pre-built binary, native-assets flag gerekmez). `sodium_libs` "discontinued" etiketli ama 3.x hattı çalışıyor (integration testleriyle kanıtlı). Detay docs/CRYPTO.md.
-- `injectable` 2.x'e sabit (generator henüz 3.x desteklemiyor).
-- `json_annotation` ^4.9.0'a sabit (4.12 henüz `json_serializable` ile uyumsuz).
+### Known version pitfalls (managed in the pubspec)
+- 🔐 Crypto (Phase 2): `sodium ^3.4.6` + `sodium_libs ^3.4.6+4`. sodium 4.x requires Dart 3.11+; the project is on Dart 3.10.7 → 4.x cannot be resolved (3.x is a deliberate decision, pre-built binary, no native-assets flag needed). `sodium_libs` is tagged "discontinued" but the 3.x line works (proven by integration tests). Details in docs/CRYPTO.md.
+- `injectable` pinned to 2.x (the generator does not support 3.x yet).
+- `json_annotation` pinned to ^4.9.0 (4.12 is not yet compatible with `json_serializable`).
 
-### Supabase backend — dış review sonrası düzeltmeler
-- **`0003_least_privilege_revoke` migration'ı** (canlıya uygulandı): `pg_default_acl`
-  kaynaklı fazlalık `anon`/`authenticated` table privilege'ları revoke edildi
-  (RLS + table-grant iki katman). Revoke sonrası security advisor yine **0 uyarı**.
-- **Migration history hizalandı:** yerel tek squashed `0001` → canlıyla birebir 3
-  timestamp'li dosya + `supabase/migrations/README.md`.
-- **Doküman drift'leri düzeltildi:** `unused_index` 3→1 (gerçek advisor çıktısı),
-  `db push` uyarısı (mevcut canlı projeye tekrar push etme), migration listeleri.
-- Reddedilen 2 review bulgusu (doğrulanarak): `publishableKey` parametresi gerçek ve
-  compile'da takılmaz (Context7 Dart upgrade-guide); test idempotency teorik/düşük.
+### Supabase backend — post-external-review fixes
+- **The `0003_least_privilege_revoke` migration** (applied live): the excess `anon`/`authenticated` table
+  privileges from `pg_default_acl` were revoked
+  (RLS + table-grant, two layers). After the revoke the security advisor still shows **0 warnings**.
+- **Migration history aligned:** the local single squashed `0001` → 3 timestamped files matching live
+  + `supabase/migrations/README.md`.
+- **Doc drifts fixed:** `unused_index` 3→1 (the real advisor output),
+  a `db push` warning (re-pushing to the existing live project), the migration lists.
+- 2 rejected review findings (after verification): the `publishableKey` parameter is real and
+  does not fail at compile time (Context7 Dart upgrade-guide); the test idempotency is theoretical/low.
 
-## Öncesi — Mimari & Backend (özet)
-- Çok turlu review + doğrulamayla olgunlaşan tam mimari (ARCHITECTURE.md).
-- Supabase `authenticator-dev` projesi: 8 tablo + RLS + Custom Access Token Hook +
-  private admin aggregate. Uçtan uca güvenlik testi 8/8 geçti (TEST_REPORT.md).
+## Earlier — Architecture & Backend (summary)
+- A full architecture matured through multi-round review + verification (ARCHITECTURE.md).
+- The Supabase `authenticator-dev` project: 8 tables + RLS + a Custom Access Token Hook +
+  a private admin aggregate. The end-to-end security test passed 8/8 (TEST_REPORT.md).

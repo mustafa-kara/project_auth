@@ -72,9 +72,12 @@ class _FakeRawStore implements RawTokenStore {
 class _FakeRemote implements RemoteTokenRepository {
   int pushCount = 0;
   int subscribeCount = 0;
+  int pullCount = 0;
   @override
-  Future<RemotePullResult> pullSince(String uid, String? sinceIso) async =>
-      const RemotePullResult(rows: []);
+  Future<RemotePullResult> pullSince(String uid, String? sinceIso) async {
+    pullCount++;
+    return const RemotePullResult(rows: []);
+  }
   @override
   Future<void> pushUpsert(String uid, List<RawTokenRecord> records) async => pushCount++;
   @override
@@ -247,5 +250,72 @@ void main() {
     await cubit.load();
     await Future<void>.delayed(Duration.zero);
     expect(remote.subscribeCount, 0);
+  });
+
+  // ── Faz 3 Patch 4 (Adım F) — VaultCubit kill-switch (start-gating) ───────────
+  group('token_sync_enabled kill-switch (VaultCubit)', () {
+    VaultCubit buildWithFlag({
+      required bool flagEnabled,
+      bool ensureCalledFirst = true,
+    }) {
+      repo = _FakeRepo([]);
+      rawStore = _FakeRawStore();
+      remote = _FakeRemote();
+      var ensured = false;
+      late VaultCubit c;
+      final s = TokenSyncService(
+        remote: remote,
+        store: rawStore,
+        lastSync: LastSyncStore(storage: FakeSecureStorage()),
+        uid: 'u1',
+        mergeRemote: (rows, cursor) => c.applyRemoteMerge(rows, cursor),
+        onStatus: (st) => c.updateSyncState(st),
+        isEnabled: () => flagEnabled,
+      );
+      c = VaultCubit(
+        repo,
+        rawStore: rawStore,
+        sync: s,
+        tokenSyncEnabled: () => flagEnabled,
+        ensureTokenSyncReady: () async {
+          ensured = true;
+          // ensureLoaded start'tan ÖNCE çağrılmalı (cache-ready garantisi).
+          expect(remote.pullCount, 0, reason: 'ensure start öncesi');
+        },
+      );
+      c.liveSyncResolver = () async => true;
+      addTearDown(() {
+        if (ensureCalledFirst) expect(ensured, isTrue, reason: 'ensureLoaded çağrıldı');
+      });
+      return c;
+    }
+
+    test('flag false → start ÇAĞRILMAZ (pull/subscribe yok — review [P2]#2)', () async {
+      cubit = buildWithFlag(flagEnabled: false);
+      await cubit.load();
+      await Future<void>.delayed(Duration.zero);
+      expect(remote.pullCount, 0, reason: 'kill-switch: catch-up pull yok');
+      expect(remote.subscribeCount, 0);
+      expect(cubit.syncEnabled, isFalse, reason: 'toggle gizli');
+    });
+
+    test('flag true → start çalışır (Patch 3 davranışı)', () async {
+      cubit = buildWithFlag(flagEnabled: true);
+      await cubit.load();
+      await Future<void>.delayed(Duration.zero);
+      expect(remote.pullCount, greaterThanOrEqualTo(1));
+      expect(cubit.syncEnabled, isTrue);
+    });
+
+    test('flag false → syncNow/enableLiveSync no-op', () async {
+      cubit = buildWithFlag(flagEnabled: false, ensureCalledFirst: false);
+      await cubit.load();
+      await Future<void>.delayed(Duration.zero);
+      final pulls = remote.pullCount;
+      await cubit.syncNow();
+      cubit.enableLiveSync();
+      expect(remote.pullCount, pulls);
+      expect(remote.subscribeCount, 0);
+    });
   });
 }

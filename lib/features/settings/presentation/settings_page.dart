@@ -13,6 +13,9 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../account/data/announcements_cache_store.dart';
+import '../../account/domain/announcements_repository.dart';
+import '../../account/domain/feature_flags_service.dart';
 import '../../auth/domain/biometric_exceptions.dart';
 import '../../auth/presentation/bloc/vault_lock_cubit.dart';
 import '../../vault/data/live_sync_pref_store.dart';
@@ -32,10 +35,40 @@ class _SettingsPageState extends State<SettingsPage> {
   bool? _liveSync;
   bool _liveBusy = false;
 
+  /// Görünür duyurular (Faz 3 Patch 4 — cache→ağ; audience filtreli). null = yüklenmedi/yok.
+  List<Announcement>? _announcements;
+
   @override
   void initState() {
     super.initState();
     _loadLiveSyncPref();
+    _loadAnnouncements();
+  }
+
+  /// Duyuruları yükle: ÖNCE cache (anında), SONRA ağ refresh (best-effort). Servis yoksa
+  /// (RepositoryProvider yok) bölüm gizli kalır (Patch 3 defensif kalıbı).
+  Future<void> _loadAnnouncements() async {
+    AnnouncementsRepository? repo;
+    AnnouncementsCacheStore? cache;
+    try {
+      repo = context.read<AnnouncementsRepository>();
+      cache = context.read<AnnouncementsCacheStore>();
+    } catch (_) {
+      return; // servis yok → bölüm gizli
+    }
+    // 1) Cache (offline/anında).
+    final cached = await cache.read();
+    if (cached != null && mounted) {
+      setState(() => _announcements = visibleAnnouncements(cached));
+    }
+    // 2) Ağ refresh (best-effort).
+    try {
+      final fresh = await repo.fetchAll();
+      await cache.write(fresh);
+      if (mounted) setState(() => _announcements = visibleAnnouncements(fresh));
+    } catch (_) {
+      // ağ hatası → cache'teki kalır (sessiz).
+    }
   }
 
   Future<void> _loadLiveSyncPref() async {
@@ -161,15 +194,58 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
               ),
             _buildLiveSyncTile(context),
+            ..._buildAnnouncements(context),
           ],
         ),
       ),
     );
   }
 
+  /// Faz 3 Patch 4 — duyurular salt-okunur bölüm. Boş/servis yoksa hiçbir şey göstermez.
+  /// feature_flags UI'da GÖSTERİLMEZ (yalnız dahili — kullanıcı kararı 2).
+  List<Widget> _buildAnnouncements(BuildContext context) {
+    final items = _announcements;
+    if (items == null || items.isEmpty) return const [];
+    final theme = Theme.of(context);
+    return [
+      const Divider(height: 1),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+        child: Text('Duyurular', style: theme.textTheme.titleSmall),
+      ),
+      for (final a in items)
+        ListTile(
+          leading: const Icon(Icons.campaign_outlined),
+          title: Text(a.title),
+          subtitle: Text(a.body), // uzun metin wrap (truncation yerine)
+          isThreeLine: a.body.length > 60,
+        ),
+    ];
+  }
+
   /// Faz 3 Patch 3 — canlı senkron (Realtime) toggle'ı. Yalnız sync destekleniyorsa
-  /// (uid'li vault + pref yüklendi) gösterilir. Kapalıyken bile açılışta catch-up sync olur.
+  /// (uid'li vault + pref yüklendi + `token_sync_enabled` flag açık) gösterilir.
+  ///
+  /// **Faz 3 Patch 4 (review [P2]) — flag-REAKTİF:** `FeatureFlagsService.listenable`'a
+  /// abone `ListenableBuilder` → server `token_sync_enabled`'ı değiştirince toggle anında
+  /// gizlenir/görünür (TokenSyncService aboneliği zaten kapatır; UI artık tutarlı:
+  /// toggle görünür ⇔ sync etkin). Servis yoksa (legacy/test) eski tek-okuma davranışı.
   Widget _buildLiveSyncTile(BuildContext context) {
+    FeatureFlagsService? flags;
+    try {
+      flags = context.read<FeatureFlagsService>();
+    } catch (_) {
+      flags = null;
+    }
+    if (flags == null) return _liveSyncTileBody(context);
+    // Flag değişince yeniden çiz → vault.syncEnabled (flag snapshot'ına bağlı) taze okunur.
+    return ListenableBuilder(
+      listenable: flags.listenable,
+      builder: (context, _) => _liveSyncTileBody(context),
+    );
+  }
+
+  Widget _liveSyncTileBody(BuildContext context) {
     // VaultCubit yoksa (örn. yalnız VaultLockCubit'li ekranlar) toggle gizli.
     VaultCubit? vault;
     try {
@@ -178,6 +254,7 @@ class _SettingsPageState extends State<SettingsPage> {
       vault = null;
     }
     final live = _liveSync;
+    // vault.syncEnabled = _sync != null && token_sync_enabled flag açık (taze okunur).
     if (vault == null || !vault.syncEnabled || live == null) {
       return const SizedBox.shrink();
     }

@@ -9,20 +9,35 @@ import 'package:get_it/get_it.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../features/account/data/active_account_store.dart';
+import '../../features/account/data/announcements_cache_store.dart';
+import '../../features/account/data/feature_flags_cache_store.dart';
 import '../../features/account/data/legacy_link_store.dart';
 import '../../features/account/data/pending_confirmation_store.dart';
+import '../../features/account/data/stable_device_id_store.dart';
+import '../../features/account/data/supabase_announcements_repository.dart';
 import '../../features/account/data/supabase_auth_repository.dart';
+import '../../features/account/data/supabase_device_repository.dart';
+import '../../features/account/data/supabase_feature_flags_repository.dart';
 import '../../features/account/data/supabase_key_attributes_repository.dart';
 import '../../features/account/domain/account_vault_manager.dart';
+import '../../features/account/domain/announcements_repository.dart';
 import '../../features/account/domain/auth_repository.dart';
+import '../../features/account/domain/device_registrar.dart';
+import '../../features/account/domain/device_repository.dart';
+import '../../features/account/domain/feature_flags_repository.dart';
+import '../../features/account/domain/feature_flags_service.dart';
 import '../../features/account/domain/key_attributes_repository.dart';
 import '../../features/auth/data/biometric_service_impl.dart';
 import '../../features/auth/data/key_attributes_store.dart';
 import '../../features/auth/domain/biometric_service.dart';
 import '../../features/auth/domain/key_manager.dart';
+import '../../features/vault/data/catalog_cache_store.dart';
+import '../../features/vault/data/supabase_catalog_repository.dart';
 import '../../features/vault/data/supabase_token_repository.dart';
 import '../../features/vault/data/vault_migration.dart';
 import '../../features/vault/data/view_mode_store.dart';
+import '../../features/vault/domain/catalog_repository.dart';
+import '../../features/vault/domain/issuer_catalog_holder.dart';
 import '../../features/vault/domain/remote_token_repository.dart';
 import '../crypto/crypto_service.dart';
 import '../crypto/sodium_crypto_service.dart';
@@ -90,4 +105,38 @@ Future<void> configureDependencies() async {
         legacyStore: locator<LegacyLinkStore>(),
         biometric: locator<BiometricService>(),
       ));
+
+  // Faz 3 Patch 4: devices kaydı (owner-only). device_id GLOBAL (uid-bağımsız).
+  locator.registerLazySingleton<DeviceRepository>(
+      () => SupabaseDeviceRepository(locator<SupabaseClient>()));
+  locator.registerLazySingleton<StableDeviceIdStore>(
+      () => StableDeviceIdStore(storage: locator<FlutterSecureStorage>()));
+  locator.registerLazySingleton<DeviceRegistrar>(() => DeviceRegistrar(
+        repo: locator<DeviceRepository>(),
+        idStore: locator<StableDeviceIdStore>(),
+      ));
+
+  // Faz 3 Patch 4: public read tablolar (catalog/feature_flags/announcements) — salt-okur.
+  locator.registerLazySingleton<CatalogRepository>(
+      () => SupabaseCatalogRepository(locator<SupabaseClient>()));
+  locator.registerLazySingleton<CatalogCacheStore>(
+      () => CatalogCacheStore(storage: locator<FlutterSecureStorage>()));
+  locator.registerLazySingleton<IssuerCatalogHolder>(() => IssuerCatalogHolder(
+        repo: locator<CatalogRepository>(),
+        cache: locator<CatalogCacheStore>(),
+      ));
+
+  locator.registerLazySingleton<FeatureFlagsRepository>(
+      () => SupabaseFeatureFlagsRepository(locator<SupabaseClient>()));
+  locator.registerLazySingleton<FeatureFlagsCacheStore>(
+      () => FeatureFlagsCacheStore(storage: locator<FlutterSecureStorage>()));
+  locator.registerLazySingleton<FeatureFlagsService>(() => FeatureFlagsService(
+        repo: locator<FeatureFlagsRepository>(),
+        cache: locator<FeatureFlagsCacheStore>(),
+      ));
+
+  locator.registerLazySingleton<AnnouncementsRepository>(
+      () => SupabaseAnnouncementsRepository(locator<SupabaseClient>()));
+  locator.registerLazySingleton<AnnouncementsCacheStore>(
+      () => AnnouncementsCacheStore(storage: locator<FlutterSecureStorage>()));
 }

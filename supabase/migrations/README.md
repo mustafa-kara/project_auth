@@ -1,28 +1,28 @@
 # Migrations
 
-Supabase CLI migration geçmişi. Dosya adları canlı projedeki (`authenticator-dev`)
-`supabase_migrations.schema_migrations` kayıtlarıyla **birebir** hizalıdır.
+Supabase CLI migration history. The file names are aligned **exactly** with the
+`supabase_migrations.schema_migrations` records in the live project (`authenticator-dev`).
 
-| Dosya | Ne yapar |
+| File | What it does |
 |---|---|
-| `20260606152227_init_authenticator.sql` | İlk şema: 8 tablo + RLS + admin hook + trigger + Realtime + private aggregate |
-| `20260606152553_rls_initplan_optimization.sql` | `auth.uid()` → `(select auth.uid())` (linter: auth_rls_initplan). FK index init'e taşındı (bkz. NOT). |
-| `20260606162359_least_privilege_revoke.sql` | Fazlalık `anon`/`authenticated` table privilege'larını revoke (derinlemesine savunma) |
+| `20260606152227_init_authenticator.sql` | Initial schema: 8 tables + RLS + admin hook + trigger + Realtime + private aggregate |
+| `20260606152553_rls_initplan_optimization.sql` | `auth.uid()` → `(select auth.uid())` (linter: auth_rls_initplan). FK index moved into init (see NOTE). |
+| `20260606162359_least_privilege_revoke.sql` | Revoke redundant `anon`/`authenticated` table privileges (defense in depth) |
 
-## Uygulama
+## Applying
 
-- **Mevcut canlı projeye (`authenticator-dev`): hepsi ZATEN UYGULANMIŞ.** Tekrar push ETME.
-- **Yeni/temiz bir projeye:** `supabase link` + `supabase db push` üç migration'ı sırayla uygular.
+- **To the existing live project (`authenticator-dev`): all of them are ALREADY APPLIED.** Do NOT push again.
+- **To a new/clean project:** `supabase link` + `supabase db push` applies the three migrations in order.
 
-## Fresh-deploy DOĞRULANDI (2026-06-06)
-Zincir, lokal Supabase CLI (`supabase start`) ile **sıfırdan bir Postgres'te** uygulandı —
-üç migration da hatasız geçti (`Applying ... ✓`). Ardından güvenlik test betiği
-([../tests/security_rls_tests.sql](../tests/security_rls_tests.sql)) bu fresh DB'de çalıştırıldı:
-tüm testler geçti, privilege matrisi beklenen modelde. İki kez çalıştırıldı → idempotent.
+## Fresh-deploy VERIFIED (2026-06-06)
+The chain was applied **from scratch on a clean Postgres** using the local Supabase CLI (`supabase start`) —
+all three migrations passed without errors (`Applying ... ✓`). The security test script
+([../tests/security_rls_tests.sql](../tests/security_rls_tests.sql)) was then run against this fresh DB:
+all tests passed, and the privilege matrix matched the expected model. Run twice → idempotent.
 
-## NOT
-- `init` dosyası okunabilirlik için zengin yorumludur; DDL etkisi canlı kayıtla aynıdır.
-- **FK covering index `idx_audit_logs_actor` artık `init` migration'ında** (§6) oluşturulur.
-  Canlı projede bu index başlangıçta `initplan` adımında uygulanmıştı; yerel zincirde init'e
-  taşındı. Bu yüzden `initplan` dosyasındaki `create index` satırı KALDIRILDI — aksi halde
-  fresh deploy'da "relation idx_audit_logs_actor already exists" hatası verirdi.
+## NOTE
+- The `init` file is richly commented for readability; its DDL effect is the same as the live records.
+- **The FK covering index `idx_audit_logs_actor` is now created in the `init` migration** (§6).
+  In the live project this index was originally applied in the `initplan` step; in the local chain it was
+  moved into init. For this reason the `create index` line in the `initplan` file was REMOVED — otherwise
+  a fresh deploy would raise a "relation idx_audit_logs_actor already exists" error.
