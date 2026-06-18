@@ -69,7 +69,7 @@ void main() {
   testWidgets('servis yok → duyuru bölümü GİZLİ', (tester) async {
     await tester.pumpWidget(_wrap(const SettingsPage()));
     await tester.pumpAndSettle();
-    expect(find.text('Duyurular'), findsNothing);
+    expect(find.text('YENİLİKLER'), findsNothing);
   });
 
   testWidgets('audience eşleşen duyurular listelenir; eşleşmeyen gizli', (tester) async {
@@ -79,7 +79,7 @@ void main() {
     ]);
     await tester.pumpWidget(_wrap(const SettingsPage(), repo: repo, cache: _NoCache()));
     await tester.pumpAndSettle();
-    expect(find.text('Duyurular'), findsOneWidget);
+    expect(find.text('YENİLİKLER'), findsOneWidget);
     expect(find.text('Herkese'), findsOneWidget);
     expect(find.text('Sadece web'), findsNothing);
   });
@@ -88,13 +88,13 @@ void main() {
     final repo = _FakeAnnRepo(const []);
     await tester.pumpWidget(_wrap(const SettingsPage(), repo: repo, cache: _NoCache()));
     await tester.pumpAndSettle();
-    expect(find.text('Duyurular'), findsNothing);
+    expect(find.text('YENİLİKLER'), findsNothing);
   });
 
   testWidgets('ağ hatası + cache yok → bölüm gizli (sessiz)', (tester) async {
     final repo = _FakeAnnRepo(const [], throwError: true);
     await tester.pumpWidget(_wrap(const SettingsPage(), repo: repo, cache: _NoCache()));
     await tester.pumpAndSettle();
-    expect(find.text('Duyurular'), findsNothing);
+    expect(find.text('YENİLİKLER'), findsNothing);
   });
 }

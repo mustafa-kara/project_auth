@@ -13,6 +13,8 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../../core/ui/tokens.dart';
+import '../../../core/ui/widgets/status_badge.dart';
 import '../../account/data/announcements_cache_store.dart';
 import '../../account/domain/announcements_repository.dart';
 import '../../account/domain/feature_flags_service.dart';
@@ -184,19 +186,51 @@ class _SettingsPageState extends State<SettingsPage> {
                       ? (v) => _toggleBiometric(v)
                       : null,
             ),
-            if (enrolled)
+            // enrolled ama cihaz uygun değil → "kullanılamıyor" rozeti (warning,
+            // ikon+metin; color-not-only — settings.md §4/§10). Anahtar yine
+            // kapatılabilir (lockout değil).
+            if (enrolled && !deviceAvailable)
               const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 16),
-                child: Text(
-                  'Biyometri yalnız bir kısayoldur; cihaz biyometri ayarların '
-                  'değişirse otomatik geçersiz olur ve tekrar açman gerekir.',
-                  style: TextStyle(fontSize: 12),
+                padding: EdgeInsets.fromLTRB(Gap.lg, 0, Gap.lg, Gap.sm),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: StatusBadge(
+                    kind: StatusKind.warning,
+                    icon: Icons.error_outline,
+                    label: 'Şu an kullanılamıyor',
+                  ),
                 ),
               ),
+            // İki-katman güvenlik notu (info ikon + ikincil metin — design.md §11).
+            if (enrolled) _twoLayerNote(context),
             _buildLiveSyncTile(context),
             ..._buildAnnouncements(context),
           ],
         ),
+      ),
+    );
+  }
+
+  /// İki-katman güvenlik notu (settings.md §4) — info ikon + ikincil metin.
+  Widget _twoLayerNote(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(Gap.lg, 0, Gap.lg, Gap.sm),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.info_outline,
+              size: 18, color: theme.colorScheme.onSurfaceVariant),
+          const SizedBox(width: Gap.sm),
+          Expanded(
+            child: Text(
+              'Biyometri yalnız bir kısayoldur. Parolan ve kurtarma anahtarın '
+              'her zaman çalışır.',
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -210,13 +244,27 @@ class _SettingsPageState extends State<SettingsPage> {
     return [
       const Divider(height: 1),
       Padding(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-        child: Text('Duyurular', style: theme.textTheme.titleSmall),
+        padding: const EdgeInsets.fromLTRB(Gap.lg, Gap.lg, Gap.lg, Gap.sm),
+        child: Text(
+          'YENİLİKLER',
+          style: theme.textTheme.labelLarge
+              ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+        ),
       ),
       for (final a in items)
         ListTile(
           leading: const Icon(Icons.campaign_outlined),
-          title: Text(a.title),
+          title: Row(
+            children: [
+              Flexible(child: Text(a.title)),
+              const SizedBox(width: Gap.sm),
+              const StatusBadge(
+                kind: StatusKind.primary,
+                icon: Icons.fiber_new_outlined,
+                label: 'yeni',
+              ),
+            ],
+          ),
           subtitle: Text(a.body), // uzun metin wrap (truncation yerine)
           isThreeLine: a.body.length > 60,
         ),

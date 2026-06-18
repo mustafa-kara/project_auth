@@ -106,11 +106,14 @@ void main() {
     await cubit.close();
   });
 
-  testWidgets('idle + malformedCount>0 → uyarı rozeti', (tester) async {
+  testWidgets('idle + malformedCount>0 → uyarı rozeti (ikon + sayı)',
+      (tester) async {
     final cubit = _StateCubit()
       ..setSync(const SyncState(phase: SyncPhase.idle, malformedCount: 2));
     await _pump(tester, cubit);
-    expect(find.byIcon(Icons.warning_amber), findsOneWidget);
+    // StatusBadge (warning): sync_problem ikonu + malformed sayısı (color-not-only).
+    expect(find.byIcon(Icons.sync_problem), findsOneWidget);
+    expect(find.text('2'), findsOneWidget);
     await cubit.close();
   });
 }

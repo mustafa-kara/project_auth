@@ -103,6 +103,7 @@ flutter:
     - family: Geist
       fonts:
         - asset: assets/fonts/Geist-Regular.ttf
+          weight: 400
         - asset: assets/fonts/Geist-Medium.ttf
           weight: 500
         - asset: assets/fonts/Geist-SemiBold.ttf
@@ -112,5 +113,6 @@ flutter:
     - family: GeistMono
       fonts:
         - asset: assets/fonts/GeistMono-Regular.ttf
+          weight: 400
         - asset: assets/fonts/GeistMono-Medium.ttf
           weight: 500
