@@ -4,8 +4,7 @@ A serverless, pure-Dart OTP engine. No network/IO; all functions are determinist
 unit-testable. It is the heart of Phase 1; **in Phase 2 (E2E crypto) this model's plaintext
 data was encrypted with `masterKey`**, and **in Patch 4 the vault was placed behind a lock/session
 flow (setup → unlock/recovery, `VaultLockCubit`)** — tokens are decrypted only after unlock, with the
-in-memory masterKey. Details: [CRYPTO.md](CRYPTO.md),
-[Design.md](Design.md).
+in-memory masterKey. Details: [CRYPTO.md](CRYPTO.md) (the design system is kept local).
 
 ## Files
 

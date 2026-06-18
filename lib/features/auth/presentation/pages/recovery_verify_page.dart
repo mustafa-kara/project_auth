@@ -9,6 +9,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../../../core/platform/secure_screen.dart';
 import '../../../../core/ui/tokens.dart';
 import '../../../../core/ui/widgets/app_text_field.dart';
 import '../../../../core/ui/widgets/auth_bits.dart';
@@ -38,7 +39,15 @@ class _RecoveryVerifyPageState extends State<RecoveryVerifyPage> {
   int _attempts = 0;
 
   @override
+  void initState() {
+    super.initState();
+    // Recovery kelimeleri giriliyor → ekran görüntüsü/recents koruması.
+    SecureScreen.enable();
+  }
+
+  @override
   void dispose() {
+    SecureScreen.disable();
     for (final c in _controllers.values) {
       c
         ..clear()

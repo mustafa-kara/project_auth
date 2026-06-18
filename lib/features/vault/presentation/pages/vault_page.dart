@@ -10,6 +10,12 @@ import '../../../../core/otp/otp_account.dart';
 import '../../../../core/otp/otpauth_uri.dart';
 import '../../../../core/router/app_router.dart';
 import '../../../../core/ui/tokens.dart';
+import '../../../../core/ui/widgets/app_banner.dart';
+import '../../../../core/ui/widgets/auth_bits.dart';
+import '../../../../core/ui/widgets/empty_state.dart';
+import '../../../../core/ui/widgets/skeleton_loader.dart';
+import '../../../../core/ui/widgets/staggered_entrance.dart';
+import '../../../../core/ui/widgets/status_badge.dart';
 import '../../../auth/presentation/bloc/vault_lock_cubit.dart';
 import '../../data/view_mode_store.dart';
 import '../../domain/token_sync_service.dart';
@@ -133,6 +139,7 @@ class _VaultPageState extends State<VaultPage> {
                     ? null
                     : IconButton(
                         icon: const Icon(Icons.clear),
+                        tooltip: 'Aramayı temizle',
                         // Hem state'i hem görünen metni temizle (controller yoksa
                         // input eski metni gösterirdi ama liste filtresiz olurdu).
                         onPressed: () {
@@ -140,8 +147,6 @@ class _VaultPageState extends State<VaultPage> {
                           setState(() => _query = '');
                         },
                       ),
-                border: const OutlineInputBorder(),
-                filled: true,
               ),
             ),
           ),
@@ -150,7 +155,12 @@ class _VaultPageState extends State<VaultPage> {
       body: BlocBuilder<VaultCubit, VaultState>(
         builder: (context, state) {
           if (!state.loaded) {
-            return const Center(child: CircularProgressIndicator());
+            // Loading iskeleti: success layout'unun hairline kopyası (CLS yok),
+            // mevcut görünüm yoğunluğuyla (Design.md §14.12).
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: Gap.lg),
+              child: OtpListSkeleton(compact: _viewMode == VaultViewMode.list),
+            );
           }
           // Bütünlük hatası (top-level bozulma / tüm kayıtlar decrypt fail) →
           // "boş vault" gibi gösterme; açık bütünlük ekranı (review #5).
@@ -158,39 +168,77 @@ class _VaultPageState extends State<VaultPage> {
             return _IntegrityErrorView(error: state.error!);
           }
           if (state.accounts.isEmpty) {
-            return const _EmptyView();
+            return EmptyState(
+              icon: Icons.lock_outline,
+              title: 'Henüz kod yok',
+              description:
+                  'QR kod tarayarak veya otpauth:// bağlantısını manuel ekleyerek başlayın.',
+              actionLabel: 'Kod ekle',
+              onAction: () => _showAddMenu(context),
+              primaryAction: true,
+            );
           }
           final visible = _filter(state.accounts);
-          // Kısmi bozulma uyarı banner'ı — sağlam token'lar yine de gösterilir.
+          // Kısmi bozulma uyarı banner'ı (AppBanner, warning) — sağlam token'lar
+          // yine de gösterilir (Design.md §11 dürüst hata, §14.10).
           final banner = (state.corruptedCount > 0 && !_corruptionDismissed)
-              ? _CorruptionBanner(
-                  count: state.corruptedCount,
-                  onDismiss: () => setState(() => _corruptionDismissed = true),
-                  onPurge: () => _confirmPurge(context),
+              ? Padding(
+                  padding: const EdgeInsets.fromLTRB(Gap.lg, Gap.sm, Gap.lg, 0),
+                  child: AppBanner(
+                    kind: StatusKind.warning,
+                    icon: Icons.warning_amber,
+                    message:
+                        '${state.corruptedCount} kayıt çözülemedi. Sağlam kodların aşağıda.',
+                    actions: [
+                      BannerAction(
+                        'Yine de devam et',
+                        () => setState(() => _corruptionDismissed = true),
+                      ),
+                      BannerAction(
+                        'Bozuk kayıtları kaldır',
+                        () => _confirmPurge(context),
+                        destructive: true,
+                      ),
+                    ],
+                  ),
                 )
               : null;
           final compact = _viewMode == VaultViewMode.list;
           final list = visible.isEmpty
-              ? const _NoMatchView()
+              ? EmptyState(
+                  icon: Icons.search_off,
+                  title: 'Aramayla eşleşen kod yok',
+                  description: '"$_query" için sonuç bulunamadı.',
+                  actionLabel: 'Aramayı temizle',
+                  onAction: () {
+                    _searchController.clear();
+                    setState(() => _query = '');
+                  },
+                )
               : ListView.builder(
-                  padding: EdgeInsets.only(
-                      top: Gap.sm, bottom: 88), // FAB için alt boşluk
+                  padding: const EdgeInsets.fromLTRB(
+                      Gap.lg, Gap.sm, Gap.lg, 88), // FAB için alt boşluk
                   itemCount: visible.length,
                   itemBuilder: (context, i) {
                     final acc = visible[i];
-                    return OtpCard(
-                      // Stabil id key: silme/reorder/filtre sonrası Flutter, State'i
-                      // yanlış hesaba reuse edemez (aksi halde TOTP timer'ı durabilir).
+                    // İlk girişte stagger fade+slide (Design.md §7, vault.md §6);
+                    // reduced-motion'da kapalı. Stabil id key: silme/reorder/filtre
+                    // sonrası Flutter State'i yanlış hesaba reuse edemez (aksi halde
+                    // TOTP timer'ı durabilir).
+                    return StaggeredEntrance(
                       key: ValueKey(acc.id),
-                      account: acc,
-                      compact: compact,
-                      onIncrement: () => _runMutation(
-                        context.read<VaultCubit>().incrementCounter(acc.id),
-                        'Sayaç kaydedilemedi',
-                      ),
-                      onDelete: () => _runMutation(
-                        context.read<VaultCubit>().removeById(acc.id),
-                        'Silme kaydedilemedi',
+                      index: i,
+                      child: OtpCard(
+                        account: acc,
+                        compact: compact,
+                        onIncrement: () => _runMutation(
+                          context.read<VaultCubit>().incrementCounter(acc.id),
+                          'Sayaç kaydedilemedi',
+                        ),
+                        onDelete: () => _runMutation(
+                          context.read<VaultCubit>().removeById(acc.id),
+                          'Silme kaydedilemedi',
+                        ),
                       ),
                     );
                   },
@@ -312,43 +360,28 @@ class _SyncIndicator extends StatelessWidget {
         );
       case SyncPhase.idle:
         if (syncState.malformedCount > 0) {
-          return IconButton(
-            icon: Icon(Icons.warning_amber, color: scheme.tertiary),
-            tooltip:
-                '${syncState.malformedCount} kayıt sunucuda okunamadı (atlandı)',
-            onPressed: () => context.read<VaultCubit>().syncNow(),
+          // Sunucuda okunamayan kayıt sayısı — color-not-only rozet (ikon+sayı).
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: Gap.sm),
+            child: Center(
+              child: Tooltip(
+                message:
+                    '${syncState.malformedCount} kayıt sunucuda okunamadı (atlandı)',
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(Radii.sm),
+                  onTap: () => context.read<VaultCubit>().syncNow(),
+                  child: StatusBadge(
+                    kind: StatusKind.warning,
+                    icon: Icons.sync_problem,
+                    label: '${syncState.malformedCount}',
+                  ),
+                ),
+              ),
+            ),
           );
         }
         return const SizedBox.shrink();
     }
-  }
-}
-
-/// Kısmi bozulma uyarısı — sağlam token'lar gösterilir; kullanıcıya açık seçenek.
-class _CorruptionBanner extends StatelessWidget {
-  final int count;
-  final VoidCallback onDismiss;
-  final VoidCallback onPurge;
-  const _CorruptionBanner({
-    required this.count,
-    required this.onDismiss,
-    required this.onPurge,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return MaterialBanner(
-      backgroundColor: scheme.errorContainer,
-      content: Text('$count kayıt çözülemedi. Sağlam kodların aşağıda.',
-          style: TextStyle(color: scheme.onErrorContainer)),
-      leading: Icon(Icons.warning_amber, color: scheme.onErrorContainer),
-      actions: [
-        TextButton(onPressed: onDismiss, child: const Text('Yine de devam et')),
-        TextButton(
-            onPressed: onPurge, child: const Text('Bozuk kayıtları kaldır')),
-      ],
-    );
   }
 }
 
@@ -425,48 +458,6 @@ class _IntegrityErrorView extends StatelessWidget {
   }
 }
 
-class _EmptyView extends StatelessWidget {
-  const _EmptyView();
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(Gap.xl),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.lock_clock, size: 56, color: scheme.primary),
-            const SizedBox(height: Gap.lg),
-            Text('Henüz kod yok', style: theme.textTheme.titleLarge),
-            const SizedBox(height: Gap.sm),
-            Text('QR tarayarak veya otpauth:// ekleyerek başla',
-                style: theme.textTheme.bodyMedium
-                    ?.copyWith(color: scheme.onSurfaceVariant),
-                textAlign: TextAlign.center),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _NoMatchView extends StatelessWidget {
-  const _NoMatchView();
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Center(
-      child: Text('Aramayla eşleşen kod yok',
-          style: theme.textTheme.bodyMedium
-              ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
-    );
-  }
-}
-
 /// Manuel `otpauth://` yapıştırma ekleme formu.
 class _AddSheet extends StatefulWidget {
   final VaultCubit cubit;
@@ -527,37 +518,36 @@ class _AddSheetState extends State<_AddSheet> {
   Widget build(BuildContext context) {
     return Padding(
       padding: EdgeInsets.only(
-        left: 16,
-        right: 16,
-        top: 16,
-        bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+        left: Gap.lg,
+        right: Gap.lg,
+        top: Gap.sm,
+        bottom: MediaQuery.of(context).viewInsets.bottom + Gap.lg,
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text('Kod ekle', style: Theme.of(context).textTheme.titleLarge),
-          const SizedBox(height: 12),
+          Text('Kod ekle', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: Gap.md),
           TextField(
             controller: _controller,
+            // TOTP secret'i otpauth:// içinde gizli sayılır → klavye öğrenme
+            // sözlüğüne / öneri çubuğuna sızmasın (parola/recovery alanlarıyla
+            // hizalı). visiblePassword: maskelemez ama autocorrect'i kapatır.
+            autocorrect: false,
+            enableSuggestions: false,
+            keyboardType: TextInputType.visiblePassword,
             decoration: InputDecoration(
               labelText: 'otpauth:// bağlantısı',
               hintText: 'otpauth://totp/...',
-              border: const OutlineInputBorder(),
               errorText: _error,
             ),
             maxLines: 2,
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: Gap.md),
           FilledButton(
             onPressed: _saving ? null : _submit,
-            child: _saving
-                ? const SizedBox(
-                    height: 18,
-                    width: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Text('Ekle'),
+            child: _saving ? const BtnSpinner() : const Text('Ekle'),
           ),
           TextButton(
             onPressed: _saving ? null : _addDemo,

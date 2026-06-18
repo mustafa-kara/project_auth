@@ -83,3 +83,10 @@ coverage/
 supabase/.branches/
 supabase/.temp/
 supabase/.env
+
+# UI/UX tasarım dökümanları — yalnız yerel (GitHub'a gönderilmez).
+# Tasarım sistemi + ekran spec'leri; uygulama koduna girdi, repoya değil.
+docs/design.md
+docs/README.md
+docs/screens/
+docs/Design.md

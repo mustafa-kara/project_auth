@@ -4,7 +4,7 @@
 > AAD scheme, BIP39 recovery, password/normalization decision, validation bounds,
 > encrypted vault store + migration; **Patch 4: setup/unlock/recovery UI + session
 > lock (`VaultLockCubit`, lifecycle lock) + `KeyAttributesStore` + reset + UI
-> redesign** (design side: [Design.md](Design.md)); **Patch 5: biometric unlock
+> redesign** (the design system is kept local); **Patch 5: biometric unlock
 > shortcut (3rd wrap + OS-keystore access control)** — see §11.
 
 ## 1. Package decision — `sodium 3.4.6` + `sodium_libs 3.4.6+4`

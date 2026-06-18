@@ -8,6 +8,8 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
+import '../tokens.dart';
+
 class IssuerAvatar extends StatelessWidget {
   /// Issuer (servis) adı — null/boş ise accountName baş harfi kullanılır.
   final String? issuer;
@@ -81,18 +83,14 @@ class _InitialAvatar extends StatelessWidget {
   final double size;
   const _InitialAvatar({required this.label, required this.size});
 
-  // Deterministik palet — issuer string hash → indeks (tutarlı renk).
-  static const _palette = [
-    Color(0xFF2563EB), Color(0xFF7C3AED), Color(0xFFDB2777), Color(0xFF059669),
-    Color(0xFFD97706), Color(0xFF0891B2), Color(0xFFDC2626), Color(0xFF4F46E5),
-  ];
-
-  Color get _color {
+  /// Deterministik renk — issuer string hash → palet indeksi (tutarlı renk).
+  /// Palet tema-bağımlı (`AppSurfaces`, Design.md §14.3); hash sabittir.
+  Color _colorFrom(List<Color> palette) {
     var h = 0;
     for (final c in label.codeUnits) {
       h = (h * 31 + c) & 0x7fffffff;
     }
-    return _palette[h % _palette.length];
+    return palette[h % palette.length];
   }
 
   String get _initial {
@@ -102,7 +100,8 @@ class _InitialAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = _color;
+    final surfaces = AppSurfaces.of(context);
+    final color = _colorFrom(surfaces.avatarPalette);
     return Container(
       width: size,
       height: size,

@@ -11,6 +11,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../../core/otp/otp_account.dart';
 import '../../../core/otp/otpauth_uri.dart';
 import '../../../core/ui/tokens.dart';
+import '../../../core/ui/widgets/empty_state.dart';
 import '../../vault/presentation/bloc/vault_cubit.dart';
 
 class ScanPage extends StatefulWidget {
@@ -104,7 +105,8 @@ class _ScanPageState extends State<ScanPage> {
   }
 }
 
-/// Kamera izni reddi / başlatma hatası için kullanıcı dostu durum.
+/// Kamera izni reddi / başlatma hatası için kullanıcı dostu durum (EmptyState,
+/// Design.md §14.11 — ekrana özgü metin).
 class _ScanError extends StatelessWidget {
   final MobileScannerException error;
   const _ScanError({required this.error});
@@ -113,27 +115,12 @@ class _ScanError extends StatelessWidget {
   Widget build(BuildContext context) {
     final isPermission =
         error.errorCode == MobileScannerErrorCode.permissionDenied;
-    final theme = Theme.of(context);
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(Gap.xl),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.no_photography,
-                size: 56, color: theme.colorScheme.onSurfaceVariant),
-            const SizedBox(height: Gap.lg),
-            Text(
-              isPermission
-                  ? 'Kamera izni verilmedi. QR taramak için ayarlardan kamera '
-                      'iznini etkinleştir.'
-                  : 'Kamera başlatılamadı: ${error.errorCode.name}',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium,
-            ),
-          ],
-        ),
-      ),
+    return EmptyState(
+      icon: Icons.no_photography_outlined,
+      title: isPermission ? 'Kamera izni gerekli' : 'Kamera başlatılamadı',
+      description: isPermission
+          ? 'QR taramak için cihaz ayarlarından kamera iznini etkinleştirin.'
+          : 'Kamera açılamadı (${error.errorCode.name}). Lütfen tekrar deneyin.',
     );
   }
 }
@@ -142,24 +129,30 @@ class _ScanError extends StatelessWidget {
 class _ScanReticle extends StatelessWidget {
   const _ScanReticle();
 
+  /// Nişangah çerçeve kenarı.
+  static const _frameSize = 240.0;
+
   @override
   Widget build(BuildContext context) {
-    final accent = Theme.of(context).colorScheme.primary;
+    final scheme = Theme.of(context).colorScheme;
     return IgnorePointer(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           SizedBox(
-            width: 240,
-            height: 240,
-            child: CustomPaint(painter: _CornerPainter(accent)),
+            width: _frameSize,
+            height: _frameSize,
+            child: CustomPaint(painter: _CornerPainter(scheme.primary)),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: Gap.xl),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            padding: const EdgeInsets.symmetric(
+                horizontal: Gap.lg, vertical: Gap.sm),
             decoration: BoxDecoration(
-              color: Colors.black54,
-              borderRadius: BorderRadius.circular(8),
+              // Kamera üstünde okunabilirlik: scrim karartma (Design.md §4 scrim
+              // kuralı — scan ekranı tek izinli yüksek-kontrast istisnası §1.2).
+              color: scheme.scrim.withValues(alpha: 0.58),
+              borderRadius: BorderRadius.circular(Radii.sm),
             ),
             child: const Text(
               'QR kodu çerçeveye hizala',
@@ -177,12 +170,16 @@ class _CornerPainter extends CustomPainter {
   final Color color;
   _CornerPainter(this.color);
 
+  /// Köşe L-rehberinin kol uzunluğu / kalınlığı.
+  static const _cornerLen = 32.0;
+  static const _cornerStroke = 4.0;
+
   @override
   void paint(Canvas canvas, Size size) {
-    const len = 32.0;
+    const len = _cornerLen;
     final paint = Paint()
       ..color = color
-      ..strokeWidth = 4
+      ..strokeWidth = _cornerStroke
       ..strokeCap = StrokeCap.round
       ..style = PaintingStyle.stroke;
     final w = size.width, h = size.height;

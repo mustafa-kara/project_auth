@@ -45,8 +45,32 @@ typedef BiometricEnrollResult = ({
 
 class KeyManager {
   /// Domain seviyesi minimum parola uzunluğu (UI validator'a ek güvenlik sınırı).
-  /// Trim sonrası bu uzunluğun altı → [WeakPasswordException].
-  static const int minPasswordLength = 8;
+  /// Bu uzunluğun altı → [WeakPasswordException]. E2E tehdit modeli: DB/storage
+  /// sızıntısında Argon2id yavaşlatır ama zayıf parola offline brute-force'u
+  /// kolaylaştırır → 12 karakter taban.
+  static const int minPasswordLength = 12;
+
+  /// Minimum karakter sınıfı çeşitliliği (büyük/küçük/rakam/sembol arasından).
+  /// < bu kadar farklı sınıf → [WeakPasswordException].
+  static const int minPasswordClasses = 3;
+
+  /// Bir parolanın içerdiği karakter sınıfı sayısı (0–4):
+  /// büyük harf · küçük harf · rakam · sembol. **Tek doğruluk noktası** —
+  /// hem domain politikası hem UI güç göstergesi bunu kullanır. Politika
+  /// kontrolü `trim`'lenmez; sınıf sayımı parolanın birebir kendisinden yapılır.
+  static int passwordClassCount(String password) {
+    var classes = 0;
+    if (password.contains(RegExp(r'[A-Z]'))) classes++;
+    if (password.contains(RegExp(r'[a-z]'))) classes++;
+    if (password.contains(RegExp(r'[0-9]'))) classes++;
+    if (password.contains(RegExp(r'[^A-Za-z0-9]'))) classes++;
+    return classes;
+  }
+
+  /// Politikaya uyuyor mu (UI validator'ın domain'e gitmeden hızlı kullanımı için).
+  static bool meetsPolicy(String password) =>
+      password.length >= minPasswordLength &&
+      passwordClassCount(password) >= minPasswordClasses;
 
   final CryptoService _crypto;
 
@@ -64,6 +88,11 @@ class KeyManager {
     if (password.length < minPasswordLength) {
       throw WeakPasswordException(
           'Parola en az $minPasswordLength karakter olmalı');
+    }
+    if (passwordClassCount(password) < minPasswordClasses) {
+      throw WeakPasswordException(
+          'Parola büyük harf, küçük harf, rakam ve sembolden en az '
+          '$minPasswordClasses farklı tür içermeli');
     }
   }
 

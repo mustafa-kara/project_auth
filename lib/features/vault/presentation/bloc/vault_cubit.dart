@@ -348,7 +348,11 @@ class VaultCubit extends Cubit<VaultState> {
     _sync?.pushChanged().ignore();
   }
 
-  /// State'i günceller ve depoya yazar. Yazma hatası state'i geri almaz.
+  /// State'i günceller ve depoya yazar. **Optimistic** (offline-first): UI önce
+  /// güncellenir (kullanıcı görünür kaybı yaşamasın), ardından kalıcılaştırılır.
+  /// Yazma hatası state'i geri ALMAZ ama **sessizce yutulmaz** — çağırana
+  /// (mutasyon metodu → UI) yukarı fırlar, UI SnackBar gösterir. Bu davranış
+  /// vault_cubit_test ile sabitlenmiştir.
   Future<void> _emitAndPersist(List<OtpAccount> accounts) async {
     emit(state.copyWith(loaded: true, accounts: accounts));
     await _repository.save(accounts);

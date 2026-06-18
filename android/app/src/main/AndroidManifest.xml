@@ -8,10 +8,16 @@
     <!-- Biyometrik vault kilidi (Patch 5, local_auth_android README zorunlu). -->
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
 
+    <!-- Supabase (Auth/REST/Realtime) erişimi. debug/profile manifest'lerinde zaten
+         var; release build'in ağa çıkabilmesi için ANA manifest'te de ZORUNLU. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <application
         android:label="project_auth"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:fullBackupContent="false">
         <activity
             android:name=".MainActivity"
             android:exported="true"

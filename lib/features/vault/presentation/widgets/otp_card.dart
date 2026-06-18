@@ -201,14 +201,15 @@ class _OtpCardState extends State<OtpCard> {
       ),
     );
 
-    if (widget.compact) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: Gap.md),
-        child: tappable,
-      );
-    }
+    // Her iki varyant da `surface` kart + hairline border (Design.md §14.1);
+    // fark yoğunlukta (avatar/kod/padding), kart kimliğinde değil.
     return Padding(
-      padding: const EdgeInsets.fromLTRB(Gap.md, Gap.sm, Gap.md, 0),
+      padding: EdgeInsets.fromLTRB(
+        Gap.md,
+        widget.compact ? Gap.xs : Gap.sm,
+        Gap.md,
+        0,
+      ),
       child: Card(child: tappable),
     );
   }

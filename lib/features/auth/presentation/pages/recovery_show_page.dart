@@ -7,11 +7,14 @@
 /// alabilsin) + güvenlik uyarısı.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../core/platform/secure_screen.dart';
 import '../../../../core/ui/tokens.dart';
 import '../../../../core/ui/widgets/auth_scaffold.dart';
 import '../../../../core/ui/widgets/mnemonic_grid.dart';
@@ -27,6 +30,28 @@ class RecoveryShowPage extends StatefulWidget {
 class _RecoveryShowPageState extends State<RecoveryShowPage> {
   bool _acknowledged = false;
 
+  /// Recovery key master-key recovery sağladığı için panoda kalıcı bırakılmaz:
+  /// kopyalamadan ~[_clearAfter] sonra koşullu temizlenir. Pano hâlâ bizim
+  /// yazdığımız değeri tutuyorsa silinir; kullanıcı arada başka bir şey
+  /// kopyaladıysa DOKUNULMAZ (onun verisini ezmeyiz).
+  static const Duration _clearAfter = Duration(seconds: 60);
+  Timer? _clearTimer;
+  String? _copiedValue;
+
+  @override
+  void initState() {
+    super.initState();
+    // 24 kelime ekranda → ekran görüntüsü/recents koruması (hassas ekran).
+    SecureScreen.enable();
+  }
+
+  @override
+  void dispose() {
+    _clearTimer?.cancel();
+    SecureScreen.disable();
+    super.dispose();
+  }
+
   Future<void> _copy(List<String> words) async {
     // Numaralı kopyala: "1. lizard\n2. goddess\n..." → yapıştırınca sıra korunur
     // (kullanıcı hangi kelime kaçıncı görür; düz "kelime kelime" sırayı gizler).
@@ -34,11 +59,26 @@ class _RecoveryShowPageState extends State<RecoveryShowPage> {
       for (var i = 0; i < words.length; i++) '${i + 1}. ${words[i]}',
     ].join('\n');
     await Clipboard.setData(ClipboardData(text: numbered));
+    _copiedValue = numbered;
+    _clearTimer?.cancel();
+    _clearTimer = Timer(_clearAfter, _clearClipboardIfUnchanged);
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
-      ..showSnackBar(
-          const SnackBar(content: Text('Recovery key panoya kopyalandı')));
+      ..showSnackBar(const SnackBar(
+          content: Text('Recovery key panoya kopyalandı — '
+              'güvenlik için panoyu 60 sn sonra temizleyeceğiz')));
+  }
+
+  /// Pano hâlâ bizim kopyaladığımız değeri tutuyorsa temizle.
+  Future<void> _clearClipboardIfUnchanged() async {
+    final copied = _copiedValue;
+    if (copied == null) return;
+    final current = await Clipboard.getData(Clipboard.kTextPlain);
+    if (current?.text == copied) {
+      await Clipboard.setData(const ClipboardData(text: ''));
+    }
+    _copiedValue = null;
   }
 
   @override
