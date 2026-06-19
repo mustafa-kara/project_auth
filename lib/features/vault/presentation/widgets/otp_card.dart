@@ -45,6 +45,16 @@ class _OtpCardState extends State<OtpCard> {
   String _code = '';
   int _remaining = 0;
 
+  /// The OTP code is sensitive → not left in the clipboard indefinitely: cleared
+  /// conditionally ~[_clearAfter] after a copy. If the clipboard still holds the
+  /// code we wrote, it is removed; if the user copied something else in the
+  /// meantime it is LEFT UNTOUCHED (we don't overwrite their data). Short window:
+  /// OTP rotates with its period and the user pastes immediately.
+  /// (Same pattern as recovery_show_page — there 60s; OTP is shorter-lived.)
+  static const Duration _clearAfter = Duration(seconds: 30);
+  Timer? _clearTimer;
+  String? _copiedValue;
+
   bool get _isTimeBased => widget.account.type != OtpType.hotp;
 
   @override
@@ -114,11 +124,29 @@ class _OtpCardState extends State<OtpCard> {
   }
 
   Future<void> _copy() async {
-    await Clipboard.setData(ClipboardData(text: _code));
+    final code = _code;
+    await Clipboard.setData(ClipboardData(text: code));
+    _copiedValue = code;
+    _clearTimer?.cancel();
+    _clearTimer = Timer(_clearAfter, _clearClipboardIfUnchanged);
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
       ..showSnackBar(const SnackBar(content: Text('Kod kopyalandı')));
+  }
+
+  /// Clear the clipboard only if it still holds the code we copied (leave it alone
+  /// if the user copied something else in the meantime). Runs from the timer even
+  /// if the widget has been disposed — it touches only instance fields + Clipboard
+  /// (no context/setState), so it is safe after dispose.
+  Future<void> _clearClipboardIfUnchanged() async {
+    final copied = _copiedValue;
+    if (copied == null) return;
+    final current = await Clipboard.getData(Clipboard.kTextPlain);
+    if (current?.text == copied) {
+      await Clipboard.setData(const ClipboardData(text: ''));
+    }
+    _copiedValue = null;
   }
 
   /// Erişilebilirlik etiketi: kod + (zamana bağlıysa) kalan süre.
@@ -131,6 +159,9 @@ class _OtpCardState extends State<OtpCard> {
   @override
   void dispose() {
     _timer?.cancel();
+    // NOTE: _clearTimer is intentionally NOT cancelled here — the conditional
+    // clipboard wipe must still fire after the card is disposed (e.g. scrolled
+    // out of view). Its callback is disposed-safe (no context/setState).
     super.dispose();
   }
 

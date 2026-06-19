@@ -80,6 +80,32 @@ class SupabaseTokenRepository implements RemoteTokenRepository {
   }
 
   @override
+  Future<void> tombstoneAllRemote(String uid) async {
+    try {
+      // Soft-delete every row (the schema has no hard DELETE grant — soft-delete
+      // is the sync model). updated_at is omitted so the trigger bumps it → other
+      // devices pull the tombstones via LWW. RLS scopes to user_id = auth.uid();
+      // the explicit eq is a defensive filter.
+      await _client.from(_table).update({'deleted': true}).eq('user_id', uid);
+    } catch (e) {
+      throw _mapError(e);
+    }
+  }
+
+  @override
+  Future<void> tombstoneAllRemoteBefore(String uid, String beforeIso) async {
+    try {
+      await _client
+          .from(_table)
+          .update({'deleted': true})
+          .eq('user_id', uid)
+          .lt('updated_at', beforeIso);
+    } catch (e) {
+      throw _mapError(e);
+    }
+  }
+
+  @override
   RealtimeChannelHandle subscribe(String uid, void Function() onChange) {
     // Kullanıcıya özel kanal; yalnız kendi satır olayları (RLS + filter).
     final channel = _client

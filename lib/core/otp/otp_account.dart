@@ -146,10 +146,19 @@ class OtpAccount extends Equatable {
     throw FormatException('OtpAccount.fromJson: "$name" String olmalı (verilen ${v.runtimeType})');
   }
 
-  /// null → null; num → int; sayısal String → int; aksi → [FormatException].
+  /// null → null; int → itself; integer-valued double (e.g. 3.0) → int;
+  /// numeric String → int; fractional num (e.g. 6.9) or any other type →
+  /// [FormatException]. Fractional values are NOT silently truncated — this
+  /// matches the strict policy used for KeyAttributes (see CRYPTO.md §8): a
+  /// malformed `digits: 6.9` / `counter: 1.5` is rejected, not coerced to 6/1.
   static int? _asInt(Object? v, String name) {
     if (v == null) return null;
-    if (v is num) return v.toInt();
+    if (v is int) return v;
+    if (v is double) {
+      if (v == v.truncateToDouble()) return v.toInt(); // integer-valued double
+      throw FormatException(
+          'OtpAccount.fromJson: "$name" tam sayı olmalı (kesirli: $v)');
+    }
     if (v is String) {
       final parsed = int.tryParse(v);
       if (parsed != null) return parsed;

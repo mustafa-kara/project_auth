@@ -90,3 +90,6 @@ docs/design.md
 docs/README.md
 docs/screens/
 docs/Design.md
+
+# FVM: yerel SDK kopyası ignore'lanır; .fvmrc (pin'lenen sürüm) COMMIT edilir.
+.fvm/

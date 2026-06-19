@@ -158,6 +158,42 @@ void main() {
       });
       expect(a.digits, 8);
     });
+
+    // Security review finding 4: fractional numeric fields must be REJECTED, not
+    // silently truncated (consistency with KeyAttributes strict policy, CRYPTO.md §8).
+    test('fractional "digits" (6.9) → FormatException (not truncated to 6)', () {
+      expect(
+        () => OtpAccount.fromJson({
+          'secret': 'JBSWY3DPEHPK3PXP',
+          'type': 'totp',
+          'accountName': 'x',
+          'digits': 6.9,
+        }),
+        throwsFormatException,
+      );
+    });
+
+    test('fractional "counter" (1.5) → FormatException (not truncated to 1)', () {
+      expect(
+        () => OtpAccount.fromJson({
+          'secret': 'JBSWY3DPEHPK3PXP',
+          'type': 'hotp',
+          'accountName': 'x',
+          'counter': 1.5,
+        }),
+        throwsFormatException,
+      );
+    });
+
+    test('integer-valued double "digits" (8.0) accepted (JSON round-trip safe)', () {
+      final a = OtpAccount.fromJson({
+        'secret': 'JBSWY3DPEHPK3PXP',
+        'type': 'totp',
+        'accountName': 'x',
+        'digits': 8.0,
+      });
+      expect(a.digits, 8);
+    });
   });
 
   group('SecureStorageVaultRepository.load dayanıklılık', () {

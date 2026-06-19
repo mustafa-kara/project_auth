@@ -25,13 +25,16 @@ void main() {
       (tester) async {
     final words = List.generate(24, (i) => 'word$i');
 
-    // Clipboard.setData'yı yakala (gerçek pano erişimi yok test ortamında).
+    // Capture clipboard writes (no real clipboard in the test env). Also model
+    // Clipboard.getData so the conditional auto-clear can read back its value.
     String? copied;
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
       SystemChannels.platform,
       (call) async {
         if (call.method == 'Clipboard.setData') {
           copied = (call.arguments as Map)['text'] as String?;
+        } else if (call.method == 'Clipboard.getData') {
+          return <String, dynamic>{'text': copied};
         }
         return null;
       },
@@ -68,6 +71,13 @@ void main() {
     // İlk ve son satır numaralı (düz join değil).
     expect(copied, startsWith('1. word0'));
     expect(copied, endsWith('24. word23'));
+
+    // Security review finding 2: the clear timer is intentionally NOT cancelled
+    // on dispose, so it must still fire after the window even if the user leaves.
+    // Advance past the 60s window → the recovery key is wiped from the clipboard
+    // (and no Timer remains pending at teardown).
+    await tester.pump(const Duration(seconds: 61));
+    expect(copied, '', reason: 'recovery key wiped from clipboard after window');
   });
 
   testWidgets(

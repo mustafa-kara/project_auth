@@ -3,6 +3,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get_it/get_it.dart';
 import 'package:project_auth/core/di/locator.dart';
@@ -73,5 +74,64 @@ void main() {
     expect(tester.takeException(), isNull);
     // Sayaç metni (kalan saniye) görünür — color-not-only sinyali korunur.
     expect(find.byType(OtpCard), findsOneWidget);
+  });
+
+  // --- Clipboard hygiene (security review finding 2): copying an OTP must not
+  // leave it in the clipboard indefinitely. Tap copies the code; after the
+  // window it is wiped only if the clipboard still holds our value. ---
+  group('OTP copy clipboard hygiene', () {
+    late String? clipboard;
+    setUp(() {
+      clipboard = null;
+      TestWidgetsFlutterBinding.ensureInitialized()
+          .defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        if (call.method == 'Clipboard.setData') {
+          clipboard = (call.arguments as Map)['text'] as String?;
+        } else if (call.method == 'Clipboard.getData') {
+          return <String, dynamic>{'text': clipboard};
+        }
+        return null;
+      });
+    });
+    tearDown(() {
+      TestWidgetsFlutterBinding.ensureInitialized()
+          .defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, null);
+    });
+
+    testWidgets('tap copies the code, then clears it after the window',
+        (tester) async {
+      await tester.pumpWidget(_host(OtpCard(account: _acc())));
+      await tester.pump();
+
+      await tester.tap(find.byType(OtpCard));
+      await tester.pump();
+      expect(clipboard, isNotNull);
+      expect(clipboard, isNotEmpty, reason: 'code copied to clipboard');
+      final copied = clipboard;
+
+      // Advance past the clear window (30s) — clipboard still holds our value
+      // (nothing else copied) → it must be wiped.
+      await tester.pump(const Duration(seconds: 31));
+      expect(clipboard, '', reason: 'unchanged clipboard wiped after window');
+      expect(copied, isNot(''));
+    });
+
+    testWidgets('does NOT wipe if the user copied something else meanwhile',
+        (tester) async {
+      await tester.pumpWidget(_host(OtpCard(account: _acc())));
+      await tester.pump();
+
+      await tester.tap(find.byType(OtpCard));
+      await tester.pump();
+      expect(clipboard, isNotEmpty);
+
+      // User copies their own content before the window elapses.
+      clipboard = 'user-copied-something';
+      await tester.pump(const Duration(seconds: 31));
+      expect(clipboard, 'user-copied-something',
+          reason: 'we never overwrite the user\'s own clipboard data');
+    });
   });
 }

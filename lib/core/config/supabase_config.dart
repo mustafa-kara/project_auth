@@ -12,18 +12,28 @@
 /// ```
 library;
 
+import 'package:flutter/foundation.dart' show kReleaseMode;
+
 abstract final class SupabaseConfig {
-  /// Supabase REST/Realtime/Auth API URL'i.
+  // The dev `authenticator-dev` fallbacks are convenience for debug/profile only.
+  // In RELEASE builds the fallback is EMPTY so a forgotten `--dart-define` fails
+  // loudly (Supabase.initialize throws on an empty URL) instead of silently
+  // routing real users' auth/data traffic to the dev project.
+  static const String _devUrl = 'https://vfyqokvgtdxxurroqbtj.supabase.co';
+  static const String _devPublishableKey =
+      'sb_publishable_rxrL2mVbh1XgojMexy1cMw_Og8wE3xI';
+
+  /// Supabase REST/Realtime/Auth API URL.
   static const String url = String.fromEnvironment(
     'SUPABASE_URL',
-    defaultValue: 'https://vfyqokvgtdxxurroqbtj.supabase.co',
+    defaultValue: kReleaseMode ? '' : _devUrl,
   );
 
-  /// Publishable (anon/public) anahtar. Düşük yetkili; RLS koruması var.
-  /// Eski `anonKey` 2.14.1'de `@Deprecated` → `publishableKey` kullanılır.
+  /// Publishable (anon/public) key. Low-privilege; protected by RLS.
+  /// The legacy `anonKey` is `@Deprecated` in 2.14.1 → use `publishableKey`.
   static const String publishableKey = String.fromEnvironment(
     'SUPABASE_PUBLISHABLE_KEY',
-    defaultValue: 'sb_publishable_rxrL2mVbh1XgojMexy1cMw_Og8wE3xI',
+    defaultValue: kReleaseMode ? '' : _devPublishableKey,
   );
 
   /// E-posta onayı (PKCE) deep-link callback'i. Native intent-filter / URL scheme

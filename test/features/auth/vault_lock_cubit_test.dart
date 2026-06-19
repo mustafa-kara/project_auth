@@ -16,6 +16,7 @@ import 'package:project_auth/core/crypto/encrypted_blob.dart';
 import 'package:project_auth/core/crypto/key_attributes.dart';
 import 'package:project_auth/core/crypto/key_handle.dart';
 import 'package:project_auth/features/account/data/attrs_dirty_store.dart';
+import 'package:project_auth/features/account/data/reset_pending_store.dart';
 import 'package:project_auth/features/account/domain/key_attributes_repository.dart';
 import 'package:project_auth/features/account/domain/sync_exceptions.dart';
 import 'package:project_auth/features/auth/data/key_attributes_store.dart';
@@ -24,6 +25,8 @@ import 'package:project_auth/features/auth/domain/biometric_service.dart';
 import 'package:project_auth/features/auth/domain/key_manager.dart';
 import 'package:project_auth/features/auth/presentation/bloc/vault_lock_cubit.dart';
 import 'package:project_auth/features/auth/presentation/bloc/vault_lock_state.dart';
+import 'package:project_auth/features/vault/domain/raw_token_record.dart';
+import 'package:project_auth/features/vault/domain/remote_token_repository.dart';
 
 // --- Fakes ---
 
@@ -232,8 +235,10 @@ VaultLockCubit _build(
   Future<void>? migrateGate,
   BiometricService? biometric,
   KeyAttributesRepository? remoteRepo,
+  RemoteTokenRepository? remoteTokenRepo,
   String? uid,
   AttrsDirtyStore? attrsDirtyStore,
+  ResetPendingStore? resetPendingStore,
 }) {
   final mig = migrated ?? <String>[];
   return VaultLockCubit(
@@ -251,9 +256,42 @@ VaultLockCubit _build(
       deletedSink?.addAll(keys);
     },
     remoteRepo: remoteRepo,
+    remoteTokenRepo: remoteTokenRepo,
     uid: uid,
     attrsDirtyStore: attrsDirtyStore,
+    resetPendingStore: resetPendingStore,
   );
+}
+
+/// Fake server token store — tracks resetVault's tombstone + retry (finding 1).
+class FakeRemoteTokenRepository implements RemoteTokenRepository {
+  int tombstoneCount = 0;
+  SyncError? tombstoneError;
+  int tombstoneBeforeCount = 0;
+  String? lastTombstoneBefore;
+  SyncError? tombstoneBeforeError;
+
+  @override
+  Future<void> tombstoneAllRemote(String uid) async {
+    if (tombstoneError != null) throw tombstoneError!;
+    tombstoneCount++;
+  }
+
+  @override
+  Future<void> tombstoneAllRemoteBefore(String uid, String beforeIso) async {
+    if (tombstoneBeforeError != null) throw tombstoneBeforeError!;
+    tombstoneBeforeCount++;
+    lastTombstoneBefore = beforeIso;
+  }
+
+  @override
+  Future<RemotePullResult> pullSince(String uid, String? sinceIso) async =>
+      const RemotePullResult(rows: []);
+  @override
+  Future<void> pushUpsert(String uid, List<RawTokenRecord> records) async {}
+  @override
+  RealtimeChannelHandle subscribe(String uid, void Function() onChange) =>
+      throw UnimplementedError();
 }
 
 /// Faz 3 Patch 2 — sahte sunucu key_attributes deposu.
@@ -306,6 +344,7 @@ class FakeKeyAttributesRepository implements KeyAttributesRepository {
     updateCount++;
     updated = attrs;
   }
+
 }
 
 void main() {
@@ -684,6 +723,89 @@ void main() {
       expect(bio.disableCount, 1);
       // Kırılgan length==N yerine biometric key dahil mi (reviewer 5.tur notu).
       expect(VaultStorageKeys.all, contains(VaultStorageKeys.biometricKey));
+    });
+
+    test('signed-in reset tombstones the server token rows', () async {
+      final tokenRepo = FakeRemoteTokenRepository();
+      final cubit = _build(FakeKeyManager(), store,
+          remoteRepo: FakeKeyAttributesRepository(),
+          remoteTokenRepo: tokenRepo,
+          uid: 'u1');
+      await cubit.resetVault();
+      expect(cubit.state.status, VaultLockStatus.uninitialized);
+      expect(tokenRepo.tombstoneCount, 1);
+    });
+
+    test('offline tombstone → local reset completes + retry marker SET',
+        () async {
+      for (final k in VaultStorageKeys.all) {
+        storage.data[k] = 'x';
+      }
+      final deleted = <String>[];
+      final tokenRepo = FakeRemoteTokenRepository()
+        ..tombstoneError = const SyncNetworkError();
+      final resetStore = ResetPendingStore(storage: storage);
+      final cubit = _build(FakeKeyManager(), store,
+          deletedSink: deleted,
+          remoteTokenRepo: tokenRepo,
+          resetPendingStore: resetStore,
+          uid: 'u1');
+      await cubit.resetVault();
+      // Local reset is guaranteed even when the server can't be reached...
+      expect(cubit.state.status, VaultLockStatus.uninitialized);
+      expect(deleted.toSet(), VaultStorageKeys.all.toSet());
+      // ...and a retry is owed (marker holds the reset instant).
+      expect(await resetStore.pendingSince(), isNotNull);
+    });
+
+    test('successful tombstone clears any prior retry marker', () async {
+      final resetStore = ResetPendingStore(storage: storage);
+      await resetStore.setPending('2026-01-01T00:00:00.000Z');
+      final cubit = _build(FakeKeyManager(), store,
+          remoteTokenRepo: FakeRemoteTokenRepository(),
+          resetPendingStore: resetStore,
+          uid: 'u1');
+      await cubit.resetVault();
+      expect(await resetStore.pendingSince(), isNull);
+    });
+
+    test('legacy (uid == null) reset does not touch remote', () async {
+      final tokenRepo = FakeRemoteTokenRepository();
+      final cubit = _build(FakeKeyManager(), store,
+          remoteTokenRepo: tokenRepo); // uid null
+      await cubit.resetVault();
+      expect(tokenRepo.tombstoneCount, 0);
+    });
+
+    test('pending reset retried on next unlock — tombstones only pre-reset rows',
+        () async {
+      await store.write(_fakeAttrs());
+      final resetStore = ResetPendingStore(storage: storage);
+      await resetStore.setPending('2026-06-18T12:00:00.000Z');
+      final tokenRepo = FakeRemoteTokenRepository();
+      final cubit = _build(FakeKeyManager(), store,
+          remoteTokenRepo: tokenRepo,
+          resetPendingStore: resetStore,
+          uid: 'u1');
+      await cubit.bootstrap();
+      await cubit.unlock('parola123');
+      await Future<void>.delayed(Duration.zero); // unawaited replay
+      expect(tokenRepo.tombstoneBeforeCount, 1);
+      expect(tokenRepo.lastTombstoneBefore, '2026-06-18T12:00:00.000Z');
+      expect(await resetStore.pendingSince(), isNull); // cleared on success
+    });
+
+    test('no pending marker → unlock does not call remote tombstone', () async {
+      await store.write(_fakeAttrs());
+      final tokenRepo = FakeRemoteTokenRepository();
+      final cubit = _build(FakeKeyManager(), store,
+          remoteTokenRepo: tokenRepo,
+          resetPendingStore: ResetPendingStore(storage: storage),
+          uid: 'u1');
+      await cubit.bootstrap();
+      await cubit.unlock('parola123');
+      await Future<void>.delayed(Duration.zero);
+      expect(tokenRepo.tombstoneBeforeCount, 0);
     });
   });
 
