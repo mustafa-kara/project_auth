@@ -6,6 +6,7 @@
 /// file_picker ve DI gerekmez.
 library;
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -47,26 +48,47 @@ class _FakeLock extends Cubit<VaultLockState> implements VaultLockCubit {
   _FakeLock() : super(const VaultLockState.unlocked());
   int begins = 0;
   int ends = 0;
+
+  /// Gerçek cubit gibi: begin ile açılır, end ile kapanır (dispose testi bunu okur).
+  bool _active = false;
+
   @override
-  void beginSystemFileFlow({Duration budget = const Duration(minutes: 2)}) =>
-      begins++;
+  bool get systemFileFlowActive => _active;
+
   @override
-  void endSystemFileFlow() => ends++;
+  void beginSystemFileFlow({Duration budget = const Duration(minutes: 2)}) {
+    begins++;
+    _active = true;
+  }
+
+  @override
+  void endSystemFileFlow() {
+    ends++;
+    _active = false;
+  }
+
   @override
   noSuchMethod(Invocation i) {}
 }
 
 class _FakeDocuments implements DocumentPort {
-  _FakeDocuments({this.document, this.pickError});
+  _FakeDocuments({this.document, this.pickError, this.gate});
 
   /// null → kullanıcı iptal etti.
   final PickedDocument? document;
   final Object? pickError;
+
+  /// Doluysa `pickJson` bu completer tamamlanana kadar ASILI kalır — sistem
+  /// seçicisi hâlâ ekrandayken sayfanın sökülmesini simüle eder.
+  final Completer<PickedDocument?>? gate;
+
   int pickCount = 0;
 
   @override
   Future<PickedDocument?> pickJson({required int maxBytes}) async {
     pickCount++;
+    final open = gate;
+    if (open != null) return open.future;
     if (pickError != null) throw pickError!;
     return document;
   }
@@ -404,6 +426,59 @@ void main() {
 
     expect(find.text('Yedek dosyası seç'), findsOneWidget);
     expect(lock.ends, 1);
+  });
+
+  testWidgets('picker AÇIKKEN sayfa sökülürse muafiyet dispose\'ta kapanır',
+      (tester) async {
+    final gate = Completer<PickedDocument?>();
+    final docs = _FakeDocuments(gate: gate);
+    await _pumpPage(
+      tester,
+      service: _FakeImportService(result: const ImportPreview(
+          source: ImportSource.aegis, toAdd: [])),
+      documents: docs,
+      lock: lock,
+    );
+
+    await tester.tap(find.text('Dosya seç'));
+    await tester.pump(); // seçici açıldı, sonuç HENÜZ yok
+    expect(lock.begins, 1);
+    expect(lock.ends, 0);
+    expect(lock.systemFileFlowActive, isTrue);
+
+    // Router redirect / geri hareketi / kilit → sayfa unmount olur ve
+    // `_pickFile`'ın `finally`'si HENÜZ çalışmamıştır.
+    await tester.pumpWidget(const MaterialApp(home: SizedBox.shrink()));
+    await tester.pump();
+
+    expect(lock.ends, 1, reason: 'dispose muafiyeti kapatmalı');
+    expect(lock.systemFileFlowActive, isFalse);
+
+    gate.complete(null); // asılı future'ı temizle
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('önizlemede secret EKRANA ÇIKMAZ', (tester) async {
+    final preview = ImportPreview(
+      source: ImportSource.aegis,
+      toAdd: [_acc('a'), _acc('b')],
+      skipped: const [
+        SkippedEntry(reason: SkipReason.invalidSecret, label: 'Bozuk (x)'),
+      ],
+    );
+    await _pumpPage(
+      tester,
+      service: _FakeImportService(result: preview),
+      documents: _FakeDocuments(document: _doc()),
+      lock: lock,
+    );
+
+    await tester.tap(find.text('Dosya seç'));
+    await tester.pumpAndSettle();
+
+    // `_acc` hepsini bu secret'la kurar; önizleme yalnız issuer/hesap gösterir.
+    expect(find.textContaining('JBSWY3DP'), findsNothing);
+    expect(find.textContaining('2 token içe aktarılacak'), findsOneWidget);
   });
 
   testWidgets('UTF-8 olmayan dosya → "okunamadı" hatası', (tester) async {

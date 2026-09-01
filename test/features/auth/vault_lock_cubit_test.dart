@@ -1115,6 +1115,35 @@ void main() {
       expect(km.issued.single.disposed, isTrue);
     });
 
+    test('begin → bütçe aşımı → end KİLİTLER (resume beklenmez)', () async {
+      final km = FakeKeyManager();
+      final cubit = await unlockedCubit(km);
+
+      cubit.beginSystemFileFlow(budget: const Duration(minutes: 2));
+      clock = clock.add(const Duration(minutes: 3)); // picker 3 dk açık kaldı
+      cubit.endSystemFileFlow(); // picker sonucu `resumed`'dan ÖNCE gelebilir
+
+      expect(cubit.state.status, VaultLockStatus.locked,
+          reason: 'bütçe aşımı end anında uygulanır — main.dart resume kontrolü '
+              'yarışı kaybedebilir');
+      expect(km.issued.single.disposed, isTrue);
+      expect(cubit.systemFileFlowActive, isFalse);
+      expect(cubit.systemFileFlowExpired, isFalse, reason: 'bayrak temizlendi');
+    });
+
+    test('begin → bütçe İÇİNDE end kilitlemez (normal import/export)', () async {
+      final km = FakeKeyManager();
+      final cubit = await unlockedCubit(km);
+
+      cubit.beginSystemFileFlow(budget: const Duration(minutes: 2));
+      clock = clock.add(const Duration(minutes: 1)); // bütçe içinde
+      cubit.endSystemFileFlow();
+
+      expect(cubit.state.status, VaultLockStatus.unlocked);
+      expect(km.issued.single.disposed, isFalse);
+      expect(cubit.systemFileFlowActive, isFalse);
+    });
+
     test('akış YOKKEN systemFileFlowExpired false (resume no-op)', () async {
       final km = FakeKeyManager();
       final cubit = await unlockedCubit(km);

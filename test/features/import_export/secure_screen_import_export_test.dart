@@ -27,6 +27,11 @@ import 'package:project_auth/features/vault/presentation/bloc/vault_cubit.dart';
 
 class _FakeLock extends Cubit<VaultLockState> implements VaultLockCubit {
   _FakeLock() : super(const VaultLockState.unlocked());
+
+  /// Sayfaların `dispose`'u bunu okur (akış yok → muafiyet kapatılmaz).
+  @override
+  bool get systemFileFlowActive => false;
+
   @override
   noSuchMethod(Invocation i) {}
 }

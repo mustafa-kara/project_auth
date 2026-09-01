@@ -426,7 +426,7 @@ reports a format error instead of masquerading as a wrong password (and costs no
 | `createdAt` | a parseable ISO-8601 timestamp |
 | `kdf.alg` | exactly `argon2id` |
 | `kdf.opslimit` | `1..10` |
-| `kdf.memlimit` | `8 MiB .. 1 GiB` |
+| `kdf.memlimit` | `8 MiB .. 512 MiB` |
 | `kdf.salt` | exactly `16` bytes (`crypto_pwhash_SALTBYTES`) |
 | `cipher.alg` | exactly `xchacha20poly1305-ietf` |
 | `cipher.nonce` | exactly `24` bytes (reuses `EncryptedBlob`) |
@@ -488,9 +488,14 @@ The import and export flows are consequently wrapped in a
 - the exemption skips the background lock **including `paused`**, not only `inactive` (which is all
   the pre-existing biometric-prompt exemption covers);
 - it is bounded by a **fixed 2-minute budget** — a picker left open longer is no longer protected;
-- every call site closes it in a **`finally`**, so cancel, throw and screen dispose all end it;
-- on resume `main.dart` checks `systemFileFlowExpired` and **locks immediately** when the budget was
-  exceeded, so an app parked in the background does not stay open indefinitely.
+- every call site closes it in a **`finally`**, and the import/export screens additionally close it
+  from `State.dispose` (a screen torn down while the picker is up — router redirect, back gesture —
+  would otherwise leave it open), so cancel, throw and screen dispose all end it;
+- `endSystemFileFlow()` itself **locks immediately** when the budget has already lapsed, so an
+  over-long picker is caught even when the picker result arrives before the `resumed` lifecycle
+  event;
+- on resume `main.dart` repeats the check via `systemFileFlowExpired` and **locks immediately** when
+  the budget was exceeded, so an app parked in the background does not stay open indefinitely.
 
 **What the exemption does NOT cover:** `onAuthSignedOut` (the identity gate closing) and an
 interactive `lock()` still take effect during a flow.

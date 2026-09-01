@@ -192,16 +192,23 @@ class ImportService {
   /// only source that preserves it — a restore over a partially synced vault
   /// must not clone tokens whose issuer/name the user has since edited.
   ///
-  /// [EmptyImportException] is raised when *parsing* produced nothing at all. A
-  /// file whose entries all turn out to be duplicates is NOT empty: the preview
-  /// still has something worth showing ("N already in your vault").
+  /// [EmptyImportException] is raised only when the file yielded NOTHING — no
+  /// importable account and no skipped entry either. A file whose entries all
+  /// turn out to be duplicates is not empty, and neither is one whose entries
+  /// were all skipped by the parser (unsupported type, unreadable secret): the
+  /// preview still has something worth showing, and telling the user WHICH
+  /// entries were dropped and why beats a bare "nothing to import" (review
+  /// follow-up). Such a preview has an empty `toAdd`, so the UI keeps the
+  /// confirm button disabled.
   @visibleForTesting
   static ImportPreview dedupeSync(
     ParsedImport parsed, {
     required List<OtpAccount> existing,
     required String Function(OtpAccount account) keyOf,
   }) {
-    if (parsed.accounts.isEmpty) throw const EmptyImportException();
+    if (parsed.accounts.isEmpty && parsed.skipped.isEmpty) {
+      throw const EmptyImportException();
+    }
 
     final matchIds = parsed.source == ImportSource.projectauthBackup;
     final existingKeys = existing.map(keyOf).toSet();

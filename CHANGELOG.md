@@ -56,7 +56,7 @@ No new primitive — the same Argon2id + XChaCha20-Poly1305 IETF through the exi
   brute force simply fails the tag check. A stored `aad` field would be attacker-controlled too and would defeat
   the construction. The salt is re-encoded from its decoded bytes, so a non-canonical base64 cannot shift the AAD.
 - **Strict validation before sodium** (same doctrine as CRYPTO.md §8): `format`, `version`, ISO-8601 `createdAt`,
-  `kdf.alg`, `opslimit` 1..10, `memlimit` 8 MiB..1 GiB, 16-byte salt, `cipher.alg`, 24-byte nonce, ≥16-byte
+  `kdf.alg`, `opslimit` 1..10, `memlimit` 8 MiB..512 MiB, 16-byte salt, `cipher.alg`, 24-byte nonce, ≥16-byte
   ciphertext. Two-sided bounds: the floor blocks a cost downgrade even before the AAD check, the ceiling blocks a
   DoS file that would ask sodium for an absurd allocation.
 - **The backup password is independent of the master password** — the file must open on a device with no vault, so
@@ -143,6 +143,48 @@ password, tampered ciphertext, tampered nonce, and the `opslimit`/`memlimit` dow
 - **R4:** create a backup, `resetVault`, restore the backup, then confirm sync converges (a restore re-adds ids the
   local tombstone had removed — a backup is a point-in-time copy, so resurrection is intended, but the
   tombstone/sync interaction has not been exercised end to end).
+
+### Review follow-ups
+
+Fixes for the findings of the Phase 5 Patch 1 code review; same scope rules (no new crypto primitive, no server
+schema change, no sync-protocol change). Host suite **713/713 → 736/736**, `flutter analyze --fatal-infos` clean.
+
+- **[P1] The picker left a plaintext copy of the backup in the app cache.** `withData: true` does not stop
+  file_picker from materialising the picked document (iOS `NSTemporaryDirectory()`, Android
+  `cacheDir/file_picker/`) and it never deletes it. `FilePickerDocumentPort.pickJson` now calls
+  `FilePicker.clearTemporaryFiles()` from a `finally` — success, cancel and throw alike — swallowing every error so
+  a failed cleanup (desktop/web throw `UnimplementedError`) cannot turn a completed import into a failure. New
+  method-channel test covers all four exits.
+- **[P2] The file-flow budget could be lost to a race.** `endSystemFileFlow()` cleared the flag unconditionally, so
+  a picker result arriving before the `resumed` lifecycle event slipped past `main.dart`'s `systemFileFlowExpired`
+  check and the vault stayed open. The budget is now enforced **on `end`**: an already-lapsed exemption locks
+  immediately. The resume check stays as a second layer.
+- **[P2] 2FAS Steam heuristic read the wrong field.** It used the issuer-with-name fallback, so a service the user
+  named "Steam" with an ordinary 6-digit TOTP was rewritten into a 5-digit Steam token. It now reads `otp.issuer`
+  only; the `tokenType == steam` path is unchanged.
+- **[P3] The lock exemption now also ends on screen `dispose`.** A page torn down while the OS dialog was up
+  (router redirect, back gesture) left the exemption running until its budget lapsed. Both pages capture the cubit
+  in `didChangeDependencies` and close an active flow in `dispose` — which is what docs/CRYPTO.md §17 already
+  claimed.
+- **[P3] `BackupEnvelope.maxMemLimit` 1 GiB → 512 MiB.** A 1 GiB Argon2id allocation is an OOM kill on a mid-range
+  phone, i.e. a crash rather than a rejected file. No backup we write comes near the new ceiling.
+- **[P3] An all-skipped file no longer throws away the reason.** `dedupeSync` raised `EmptyImportException` whenever
+  parsing produced 0 accounts, discarding the skip records. It now throws only when the file yielded *nothing at
+  all*; 0 accounts + skips returns a preview with an empty `toAdd`, so the UI keeps "İçe aktar" disabled and shows
+  the "Atlananlar" list.
+- **[P3] `VaultCubit.addAll` drops ids already present.** The vault can change between preview and confirm (sync
+  pull, another path), which would have put the same id in the list twice — `removeById` deletes both, sync pushes
+  one row twice. A cheap set check keeps the existing row; an all-duplicate call is a no-op (no write, no push).
+- **[P3] `OtpAccount.toString()` no longer prints the secret.** Equatable's `stringify` defaults to ON in debug
+  builds, so any widget-tree dump, assertion message or failing CI test that interpolated an account leaked the
+  TOTP seed. `stringify => false`; equality and `hashCode` are untouched.
+- **[P3] `pushUpsert` chunks at 500 rows.** A large import or first sync sent thousands of bytea rows in one body
+  (413 / statement timeout). Chunks go out in order and the upsert is id-idempotent, so an interrupted push resumes.
+- **[P3] Docs + smaller notes:** `createdAt` is marked as unauthenticated-by-design next to the AAD derivation (the
+  authenticated timestamp is `exportedAt`, inside the payload); `pickJson` documents that its size ceiling is a UX
+  guard which cannot run before the bytes exist; docs/CRYPTO.md §16 limit table and §17 bullets updated.
+- **Deferred:** the detector's double JSON decode (an optimisation) and a pre-read size limit (documented as
+  impossible with this plugin) were left alone.
 
 ## 2026-09-01 (Phase 3.5 — CI, dependency cleanup, screen-capture protection, config fail-fast)
 

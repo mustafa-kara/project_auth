@@ -550,9 +550,12 @@ class VaultLockCubit extends Cubit<VaultLockState> {
   ///  2. **`finally` discipline** — every call site wraps the picker in
   ///     try/finally so [endSystemFileFlow] runs on success, cancel, throw and
   ///     screen dispose alike.
-  ///  3. **Resume check** — `main.dart` inspects [systemFileFlowExpired] on
-  ///     resume: an app that spent longer than the budget in the background is
-  ///     locked immediately, so a stolen device is not held open indefinitely.
+  ///  3. **Budget check on end** — [endSystemFileFlow] locks straight away when
+  ///     the budget already lapsed, so an over-long picker is caught even if the
+  ///     picker result arrives BEFORE the `resumed` lifecycle event.
+  ///     `main.dart` repeats the check on resume ([systemFileFlowExpired]) for a
+  ///     flow that is still open, so a stolen device is not held open
+  ///     indefinitely either way.
   ///
   /// Note this covers the LIFECYCLE lock only: [onAuthSignedOut] (identity gate
   /// closed) and interactive [lock] still take effect during a flow.
@@ -563,8 +566,18 @@ class VaultLockCubit extends Cubit<VaultLockState> {
 
   /// Ends the exemption. Idempotent — safe to call from a `finally` that may run
   /// after the budget already lapsed.
+  ///
+  /// If the budget HAS lapsed, the lock the exemption suppressed is applied here
+  /// and now. Clearing the flag first and relying on `main.dart`'s resume check
+  /// alone loses the lock whenever the picker's result lands before the
+  /// `resumed` lifecycle event — a race the platform makes no promises about
+  /// (review follow-up).
   void endSystemFileFlow() {
+    final until = _systemFileFlowUntil;
     _systemFileFlowUntil = null;
+    if (until != null && !_now().isBefore(until)) {
+      onAppBackgrounded(paused: true);
+    }
   }
 
   /// A file flow is running AND still inside its budget.

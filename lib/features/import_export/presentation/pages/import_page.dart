@@ -111,8 +111,24 @@ class _ImportPageState extends State<ImportPage> {
   ImportSource? _source;
   ImportPreview? _preview;
 
+  /// Kilit cubit'i, element hâlâ ağaçtayken yakalanır — `dispose` içinde
+  /// `context.read` GÜVENLİ DEĞİL (review takibi).
+  VaultLockCubit? _lock;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _lock = context.read<VaultLockCubit>();
+  }
+
   @override
   void dispose() {
+    // Sayfa, sistem seçicisi AÇIKKEN sökülebilir (router redirect, geri hareketi,
+    // kilit). O durumda `_pickFile`'ın `finally`'si henüz çalışmamıştır ve muafiyet
+    // bütçesi dolana kadar açık kalırdı → burada kapatılır. `endSystemFileFlow`
+    // idempotent (docs/CRYPTO.md §17 "screen dispose").
+    final lock = _lock;
+    if (lock != null && lock.systemFileFlowActive) lock.endSystemFileFlow();
     _passwordCtrl
       ..clear()
       ..dispose();

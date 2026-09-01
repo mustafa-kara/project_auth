@@ -300,8 +300,16 @@ class VaultCubit extends Cubit<VaultState> {
   /// + N push demek olurdu. Burada tek kritik bölümde tek `_emitAndPersist` +
   /// tek `_pushAfterMutation` var.
   ///
-  /// Dedupe ÇAĞIRANIN işi (`ImportService.preview` vault'a karşı zaten eler) —
-  /// bu metot aldığı listeyi olduğu gibi, SIRASINI koruyarak ekler.
+  /// İçerik dedupe'u (issuer/hesap/secret) ÇAĞIRANIN işi
+  /// (`ImportService.preview` vault'a karşı zaten eler) — bu metot aldığı listeyi
+  /// SIRASINI koruyarak ekler.
+  ///
+  /// **Tek istisna, id-bazlı son eleme (review takibi):** önizleme ile onay
+  /// arasında vault değişebilir (sync pull, başka bir sekme, kullanıcı elle
+  /// ekledi) → o aralıkta gelen bir satır aynı `id`'ye sahip olabilirdi ve liste
+  /// aynı id'yi İKİ KEZ taşırdı (`removeById` ikisini birden siler, sync tek
+  /// satırı iki kez push eder). Ucuz bir set kontrolü bunu keser; düşen girdi
+  /// zaten vault'ta VAR olduğu için kullanıcı bir şey kaybetmez.
   Future<void> addAll(List<OtpAccount> accounts) async {
     await _awaitLoaded();
     if (accounts.isEmpty) return; // no-op: yazma da push da yok
@@ -309,7 +317,13 @@ class VaultCubit extends Cubit<VaultState> {
     final normalized = accounts.map(_canonicalize).toList(growable: false);
     return _sequence(() async {
       _guardIntegrity();
-      await _emitAndPersist([...state.accounts, ...normalized]);
+      final existingIds = state.accounts.map((a) => a.id).toSet();
+      final fresh = <OtpAccount>[];
+      for (final account in normalized) {
+        if (existingIds.add(account.id)) fresh.add(account);
+      }
+      if (fresh.isEmpty) return; // hepsi bu arada eklenmiş → yazma da push da yok
+      await _emitAndPersist([...state.accounts, ...fresh]);
       _pushAfterMutation();
     });
   }

@@ -5,6 +5,7 @@
 /// libsodium, file_picker ve DI gerekmez.
 library;
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -47,11 +48,25 @@ class _FakeLock extends Cubit<VaultLockState> implements VaultLockCubit {
   _FakeLock() : super(const VaultLockState.unlocked());
   int begins = 0;
   int ends = 0;
+
+  /// Gerçek cubit gibi: begin ile açılır, end ile kapanır (dispose testi bunu okur).
+  bool _active = false;
+
   @override
-  void beginSystemFileFlow({Duration budget = const Duration(minutes: 2)}) =>
-      begins++;
+  bool get systemFileFlowActive => _active;
+
   @override
-  void endSystemFileFlow() => ends++;
+  void beginSystemFileFlow({Duration budget = const Duration(minutes: 2)}) {
+    begins++;
+    _active = true;
+  }
+
+  @override
+  void endSystemFileFlow() {
+    ends++;
+    _active = false;
+  }
+
   @override
   noSuchMethod(Invocation i) {}
 }
@@ -98,8 +113,12 @@ class _FakeBackup implements BackupService {
 }
 
 class _FakeDocuments implements DocumentPort {
-  _FakeDocuments({this.saveResult = true});
+  _FakeDocuments({this.saveResult = true, this.gate});
   final bool saveResult;
+
+  /// Doluysa `saveJson` bu completer tamamlanana kadar ASILI kalır — kaydetme
+  /// diyaloğu hâlâ ekrandayken sayfanın sökülmesini simüle eder.
+  final Completer<bool>? gate;
 
   int saveCount = 0;
   String? lastFileName;
@@ -116,6 +135,8 @@ class _FakeDocuments implements DocumentPort {
     saveCount++;
     lastFileName = fileName;
     lastBytes = bytes;
+    final open = gate;
+    if (open != null) return open.future;
     return saveResult;
   }
 }
@@ -310,6 +331,37 @@ void main() {
     expect(find.text('Yedek oluşturulamadı — tekrar dene.'), findsOneWidget);
     expect(find.textContaining('crypto patladı'), findsNothing,
         reason: 'teknik detay UI\'a sızmamalı');
+  });
+
+  testWidgets('kaydetme diyaloğu AÇIKKEN sayfa sökülürse muafiyet dispose\'ta '
+      'kapanır', (tester) async {
+    final gate = Completer<bool>();
+    final docs = _FakeDocuments(gate: gate);
+    await _pumpPage(
+      tester,
+      backup: _FakeBackup(),
+      documents: docs,
+      lock: lock,
+      accounts: [_acc('a')],
+    );
+
+    await _fillForm(tester, password: _goodPassword);
+    await tester.tap(find.widgetWithText(FilledButton, 'Yedek oluştur'));
+    await tester.pump(); // diyalog açıldı, sonuç HENÜZ yok
+    await tester.pump();
+    expect(docs.saveCount, 1);
+    expect(lock.begins, 1);
+    expect(lock.ends, 0);
+    expect(lock.systemFileFlowActive, isTrue);
+
+    await tester.pumpWidget(const MaterialApp(home: SizedBox.shrink()));
+    await tester.pump();
+
+    expect(lock.ends, 1, reason: 'dispose muafiyeti kapatmalı');
+    expect(lock.systemFileFlowActive, isFalse);
+
+    gate.complete(false); // asılı future'ı temizle
+    await tester.pumpAndSettle();
   });
 
   test('yedek dosya adı tarih damgalı', () {

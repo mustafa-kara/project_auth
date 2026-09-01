@@ -358,6 +358,8 @@ class _AuthenticatorAppState extends State<AuthenticatorApp>
       // BÜTÇELİ olarak askıya alır. Bütçe biz yokken dolduysa muafiyet geçersizdir:
       // muafiyeti kapat ve arka plana geçmiş gibi HEMEN kilitle (uzun süre arka
       // planda kalmış bir cihaz muafiyetten faydalanmasın).
+      // (`endSystemFileFlow` bütçe aşımını kendisi de uygular; buradaki
+      // `onAppBackgrounded` ÇİFT GÜVENLİK — kilitli state'te no-op'tur.)
       if (_lock.systemFileFlowExpired) {
         _lock.endSystemFileFlow();
         _lock.onAppBackgrounded(paused: true);

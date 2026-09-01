@@ -268,6 +268,48 @@ void main() {
       expect(result.skipped.single.detail, isNot(contains('not-base32')));
     });
 
+    test('the Steam heuristic reads otp.issuer ONLY, never the service name',
+        () {
+      // A service the user named "Steam" whose otp block has no issuer: this is
+      // an ordinary 6-digit TOTP (e.g. a Steam *forum* login) and must NOT be
+      // rewritten into a 5-digit Steam token (review follow-up).
+      final result = parser.parse(_export([
+        _service(
+          name: 'Steam',
+          otp: const {
+            'account': 'user',
+            'digits': 6,
+            'period': 30,
+            'algorithm': 'SHA1',
+            'tokenType': 'TOTP',
+          },
+        ),
+      ]));
+      final a = result.accounts.single;
+      expect(a.type, OtpType.totp);
+      expect(a.digits, 6);
+      expect(a.issuer, 'Steam'); // issuer still falls back to the service name
+    });
+
+    test('otp.issuer "Steam" on a TOTP still promotes to a Steam token', () {
+      final result = parser.parse(_export([
+        _service(
+          name: 'Valve',
+          otp: const {
+            'account': 'user',
+            'issuer': 'Steam',
+            'digits': 6,
+            'period': 30,
+            'algorithm': 'SHA1',
+            'tokenType': 'TOTP',
+          },
+        ),
+      ]));
+      final a = result.accounts.single;
+      expect(a.type, OtpType.steam);
+      expect(a.digits, 5);
+    });
+
     test('tokenType is case-insensitive', () {
       final result = parser.parse(_export([
         _service(otp: const {'account': 'a', 'tokenType': 'steam'}),

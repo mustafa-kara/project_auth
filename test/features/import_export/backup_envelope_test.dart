@@ -157,8 +157,8 @@ void main() {
         (j) => (j['kdf'] as Map)['opslimit'] = 11);
     rejects('memlimit below 8 MiB',
         (j) => (j['kdf'] as Map)['memlimit'] = 8 * 1024 * 1024 - 1);
-    rejects('memlimit above 1 GiB',
-        (j) => (j['kdf'] as Map)['memlimit'] = 1024 * 1024 * 1024 + 1);
+    rejects('memlimit above 512 MiB',
+        (j) => (j['kdf'] as Map)['memlimit'] = 512 * 1024 * 1024 + 1);
     rejects('salt shorter than 16 bytes',
         (j) => (j['kdf'] as Map)['salt'] = base64Encode(Uint8List(15)));
     rejects('salt longer than 16 bytes',
@@ -183,8 +183,10 @@ void main() {
 
       final high = validJson();
       (high['kdf'] as Map)['opslimit'] = 10;
-      (high['kdf'] as Map)['memlimit'] = 1024 * 1024 * 1024;
-      expect(BackupEnvelope.fromJson(high).memLimit, 1024 * 1024 * 1024);
+      (high['kdf'] as Map)['memlimit'] = 512 * 1024 * 1024;
+      expect(BackupEnvelope.fromJson(high).memLimit, 512 * 1024 * 1024);
+      expect(BackupEnvelope.maxMemLimit, 512 * 1024 * 1024,
+          reason: 'mobil OOM sigortası — docs/CRYPTO.md §16 tablosu');
     });
 
     test('integer-valued doubles are accepted (JSON has no int type)', () {

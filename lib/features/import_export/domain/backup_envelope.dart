@@ -42,10 +42,15 @@ class BackupEnvelope {
   /// Argon2id cost bounds accepted on read. The lower bounds stop a downgrade to
   /// a trivially brute-forceable cost; the upper bounds stop a denial-of-service
   /// file that would ask sodium for an absurd allocation.
+  ///
+  /// [maxMemLimit] is 512 MiB rather than 1 GiB: this is a phone-first app, and
+  /// a 1 GiB Argon2id allocation is an out-of-memory kill on mid-range devices,
+  /// which reads to the user as a crash instead of a rejected file. No backup we
+  /// write comes near it (`BackupService` uses the interactive/moderate limits).
   static const int minOpsLimit = 1;
   static const int maxOpsLimit = 10;
   static const int minMemLimit = 8 * 1024 * 1024;
-  static const int maxMemLimit = 1024 * 1024 * 1024;
+  static const int maxMemLimit = 512 * 1024 * 1024;
 
   final int version;
   final DateTime createdAt;
@@ -108,6 +113,9 @@ class BackupEnvelope {
     required Uint8List salt,
     required String cipherAlg,
   }) {
+    // `createdAt` is deliberately NOT in the AAD: it is unauthenticated metadata
+    // (a convenience label for the file list). The authenticated timestamp is
+    // `exportedAt`, which lives INSIDE the encrypted payload.
     final text = 'backup|$version|$kdfAlg|$opsLimit|$memLimit|'
         '${base64Encode(salt)}|$cipherAlg';
     return Uint8List.fromList(utf8.encode(text));

@@ -165,8 +165,12 @@ class TwoFasParser implements ImportParser {
     _requireDecodableSecret(secret);
 
     // Plan D5: a TOTP entry whose issuer is "Steam" is really a Steam token.
+    // The heuristic reads `otp.issuer` ONLY — never `issuerRaw`, which falls
+    // back to the service name. A service the user happened to name "Steam"
+    // (say, a Steam *forum* account with an ordinary 6-digit TOTP) would
+    // otherwise be rewritten into a 5-digit Steam token and stop matching.
     final isSteam = declared == OtpType.steam ||
-        (declared == OtpType.totp && issuerRaw.toLowerCase() == 'steam');
+        (declared == OtpType.totp && otpIssuer.toLowerCase() == 'steam');
     final type = isSteam ? OtpType.steam : declared;
 
     final int digits;

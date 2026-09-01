@@ -253,6 +253,52 @@ void main() {
       expect(cubit.state, same(before));
     });
 
+    test('addAll aynı id\'yi ELER (önizleme ile onay arası vault değişebilir)',
+        () async {
+      // Önizleme alındıktan sonra sync pull/başka bir yol aynı satırı vault'a
+      // eklemiş olabilir → aynı id iki kez listeye girmemeli (review takibi).
+      final vardi = OtpAccount(
+        id: 'sabit-id',
+        secret: 'JBSWY3DPEHPK3PXP',
+        type: OtpType.totp,
+        accountName: 'vardi',
+      );
+      final ayniId = OtpAccount(
+        id: 'sabit-id',
+        secret: 'GEZDGNBVGY3TQOJQ',
+        type: OtpType.totp,
+        accountName: 'kopya',
+      );
+      final repo = _FakeRepo();
+      final cubit = VaultCubit(repo);
+      await cubit.add(vardi);
+      final yeni = _acc('yeni');
+
+      await cubit.addAll([ayniId, yeni]);
+
+      expect(cubit.state.accounts.map((e) => e.id), ['sabit-id', yeni.id]);
+      expect(cubit.state.accounts.map((e) => e.accountName),
+          ['vardi', 'yeni'], reason: 'mevcut satır korunur, kopya düşer');
+    });
+
+    test('addAll TAMAMI kopya id ise no-op (save YOK)', () async {
+      final vardi = OtpAccount(
+        id: 'sabit-id',
+        secret: 'JBSWY3DPEHPK3PXP',
+        type: OtpType.totp,
+        accountName: 'vardi',
+      );
+      final repo = _FakeRepo();
+      final cubit = VaultCubit(repo);
+      await cubit.add(vardi);
+      final savesBefore = repo.saveCount;
+
+      await cubit.addAll([vardi]);
+
+      expect(repo.saveCount, savesBefore, reason: 'gereksiz yazma/push yok');
+      expect(cubit.state.accounts, hasLength(1));
+    });
+
     test('addAll bütünlük hatası state\'inde REDDEDİLİR (depo EZİLMEZ)',
         () async {
       final repo = _FakeRepo()..loadError = StateError('top-level bozuk');

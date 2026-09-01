@@ -67,16 +67,31 @@ class _ExportPageState extends State<ExportPage> {
   bool _busy = false;
   String? _error;
 
+  /// Kilit cubit'i, element hâlâ ağaçtayken yakalanır — `dispose` içinde
+  /// `context.read` GÜVENLİ DEĞİL (review takibi).
+  VaultLockCubit? _lock;
+
   @override
   void initState() {
     super.initState();
     _passwordCtrl.addListener(_onPasswordChanged);
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _lock = context.read<VaultLockCubit>();
+  }
+
   void _onPasswordChanged() => setState(() {});
 
   @override
   void dispose() {
+    // Sayfa, kaydetme diyaloğu AÇIKKEN sökülebilir → `_submit`'in `finally`'si
+    // henüz çalışmamış olur ve muafiyet bütçesi dolana kadar açık kalırdı.
+    // `endSystemFileFlow` idempotent (docs/CRYPTO.md §17 "screen dispose").
+    final lock = _lock;
+    if (lock != null && lock.systemFileFlowActive) lock.endSystemFileFlow();
     _passwordCtrl.removeListener(_onPasswordChanged);
     _passwordCtrl
       ..clear()

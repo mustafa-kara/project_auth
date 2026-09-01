@@ -164,12 +164,24 @@ void main() {
       );
     });
 
-    test('zero parsed accounts → EmptyImportException', () async {
+    test('zero parsed accounts AND zero skips → EmptyImportException', () async {
       await expectLater(
         service(parsers: [const _StubParser(ImportSource.aegis)])
             .preview(raw: anyJson, existing: const []),
         throwsA(isA<EmptyImportException>()),
       );
+    });
+
+    test('zero parsed accounts but skips present → preview with the skips',
+        () async {
+      final preview = await service(parsers: [
+        const _StubParser(
+          ImportSource.aegis,
+          skipped: [SkippedEntry(reason: SkipReason.unsupportedType)],
+        ),
+      ]).preview(raw: anyJson, existing: const []);
+      expect(preview.toAdd, isEmpty);
+      expect(preview.skipped, hasLength(1));
     });
 
     test('the parser\'s own skipped entries survive into the preview', () async {
@@ -233,9 +245,28 @@ void main() {
       expect(preview.duplicateCount, 1);
     });
 
-    test('an empty parse result → EmptyImportException', () {
+    test('a truly empty parse result → EmptyImportException', () {
       expect(() => run(const [], const []),
           throwsA(isA<EmptyImportException>()));
+    });
+
+    test('0 accounts but skipped entries → preview, NOT EmptyImportException',
+        () {
+      // Every entry was dropped by the parser. Telling the user WHICH ones and
+      // why beats a bare "nothing to import" (review follow-up). `toAdd` is
+      // empty, so the UI keeps the confirm button disabled.
+      final preview = run(
+        const [],
+        const [],
+        skipped: const [
+          SkippedEntry(reason: SkipReason.unsupportedType, label: 'Mystery'),
+          SkippedEntry(reason: SkipReason.invalidSecret, label: 'Broken'),
+        ],
+      );
+      expect(preview.toAdd, isEmpty);
+      expect(preview.skipped, hasLength(2));
+      expect(preview.skippedCount, 2);
+      expect(preview.duplicateCount, 0);
     });
 
     test('parser skips are counted separately from duplicates', () {

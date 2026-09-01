@@ -199,4 +199,13 @@ class OtpAccount extends Equatable {
   @override
   List<Object?> get props =>
       [id, secret, type, issuer, accountName, algorithm, digits, period, counter];
+
+  /// SECURITY: Equatable's `stringify` defaults to ON in debug builds, which
+  /// would make `toString()` print every prop — [secret] included. Any debug
+  /// `print`, a widget-tree dump, an assertion message or a CI test failure that
+  /// interpolates an account would then leak the TOTP seed into a log. Keep the
+  /// terse `OtpAccount` form instead; call sites that need detail can name the
+  /// non-secret fields explicitly.
+  @override
+  bool get stringify => false;
 }
