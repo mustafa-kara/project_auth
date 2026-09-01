@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs on the same ref (a new push to a PR invalidates the old run).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze-and-test:
+    name: Analyze & test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Flutter version is pinned to the toolchain used locally (Flutter 3.38.6 / Dart 3.10.7).
+      # sodium 3.x is pinned in pubspec.yaml because sodium 4.x requires Dart 3.11+, so the
+      # CI SDK must not drift ahead of the local one.
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.38.6
+          channel: stable
+          cache: true
+
+      - name: Flutter version
+        run: flutter --version
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      # No native libsodium package is installed on purpose: the sodium_libs Flutter plugin
+      # is not registered in the plain `flutter test` VM host, and no test under test/ imports
+      # package:sodium or package:sodium_libs (crypto round-trips live in integration_test/,
+      # which needs a device/simulator and is therefore not run here).
+      - name: Analyze
+        run: flutter analyze --fatal-infos
+
+      - name: Test
+        run: flutter test
