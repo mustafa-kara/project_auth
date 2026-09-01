@@ -85,6 +85,10 @@ class _FakeRemote implements RemoteTokenRepository {
     subscribeCount++;
     return _NoopHandle();
   }
+  @override
+  Future<void> tombstoneAllRemote(String uid) async {}
+  @override
+  Future<void> tombstoneAllRemoteBefore(String uid, String beforeIso) async {}
 }
 
 class _NoopHandle implements RealtimeChannelHandle {

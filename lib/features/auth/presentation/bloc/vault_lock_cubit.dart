@@ -31,8 +31,10 @@ import '../../../auth/domain/biometric_exceptions.dart';
 import '../../../auth/domain/biometric_service.dart';
 import '../../../auth/domain/key_manager.dart';
 import '../../../account/data/attrs_dirty_store.dart';
+import '../../../account/data/reset_pending_store.dart';
 import '../../../account/domain/key_attributes_repository.dart';
 import '../../../account/domain/sync_exceptions.dart';
+import '../../../vault/domain/remote_token_repository.dart';
 import '../../data/key_attributes_store.dart';
 import 'vault_lock_state.dart';
 
@@ -138,10 +140,21 @@ class VaultLockCubit extends Cubit<VaultLockState> {
   final KeyAttributesRepository? _remoteRepo;
   final String? _uid;
 
+  /// Security review finding 1 — server-side token store, used ONLY to wipe this
+  /// uid's remote rows on [resetVault]. Optional (null → legacy/uid-less/tests,
+  /// remote wipe is a no-op; previous behaviour preserved). Not used for sync
+  /// (that lives in [TokenSyncService] under VaultCubit) — reset is its only job here.
+  final RemoteTokenRepository? _remoteTokenRepo;
+
   /// Faz 3 Patch 3 (Adım K) — changePassword sonrası sunucu UPDATE'i ağ hatasına
   /// düşerse SET kalır → unlock'ta dirty-replay yeniden dener. Opsiyonel (null →
   /// retry yok; eski testler/legacy etkilenmez).
   final AttrsDirtyStore? _attrsDirtyStore;
+
+  /// Security review finding 1 (round 2) — when [resetVault]'s remote tombstone
+  /// fails offline, this records the reset instant so a later signed-in unlock can
+  /// retry (tombstoning only pre-reset rows). Optional (null → no retry; legacy/tests).
+  final ResetPendingStore? _resetPendingStore;
 
   VaultLockCubit({
     required KeyManager keyManager,
@@ -150,16 +163,20 @@ class VaultLockCubit extends Cubit<VaultLockState> {
     required BiometricService biometric,
     required Future<void> Function(List<String> keys) deleteKeys,
     KeyAttributesRepository? remoteRepo,
+    RemoteTokenRepository? remoteTokenRepo,
     String? uid,
     AttrsDirtyStore? attrsDirtyStore,
+    ResetPendingStore? resetPendingStore,
   })  : _keyManager = keyManager,
         _attrsStore = attrsStore,
         _migrate = migrate,
         _biometric = biometric,
         _deleteKeys = deleteKeys,
         _remoteRepo = remoteRepo,
+        _remoteTokenRepo = remoteTokenRepo,
         _uid = uid,
         _attrsDirtyStore = attrsDirtyStore,
+        _resetPendingStore = resetPendingStore,
         super(const VaultLockState.uninitialized());
 
   /// `locked` emit'i biyometri field'larını taşıyarak yapar (tek nokta — reviewer 4.tur [P1]).
@@ -397,7 +414,16 @@ class VaultLockCubit extends Cubit<VaultLockState> {
         return;
       }
       emit(_unlocked());
-      unawaited(_backfillRemote()); // Patch 2: yeni hesabın ilk attrs'ını sunucuya yaz (best-effort)
+      // Push the new vault's attrs to the server. Use update-if-exists (not the
+      // insert-once backfill) so a fresh setup AFTER a reset overwrites the stale
+      // server-wrapped masterKey instead of being blocked by the server-wins
+      // guard (security review finding 1). At commitSetup the local attrs are
+      // authoritative for this uid: had the server held a real vault, bootstrap
+      // would have restored it rather than routing here to setup. Best-effort.
+      unawaited(_syncAttrsAfterPasswordChange());
+      // Finding 1 (round 2): if a prior reset couldn't tombstone the server, retry
+      // now (cut off at the reset instant so THIS new vault's tokens are spared).
+      unawaited(_replayResetTombstoneIfNeeded());
     } finally {
       _commitInFlight = false;
     }
@@ -446,6 +472,8 @@ class VaultLockCubit extends Cubit<VaultLockState> {
       unawaited(_backfillRemote()); // Patch 2: backfill (best-effort, guard'lı)
       // Patch 3 (Adım K): önceki changePassword sunucuya yazılamadıysa (dirty) yeniden dene.
       unawaited(_replayDirtyAttrsIfNeeded());
+      // Finding 1 (round 2): retry an offline reset's owed remote tombstone.
+      unawaited(_replayResetTombstoneIfNeeded());
     } finally {
       if (!owned) key.dispose(); // migration fail / background-abort → key sızmaz
     }
@@ -615,6 +643,34 @@ class VaultLockCubit extends Cubit<VaultLockState> {
   Future<void> resetVault() async {
     _disposeKey();
     _pendingAttrs = null;
+
+    // Security review finding 1 — discard the SERVER token rows too (signed-in
+    // only). Otherwise stale ciphertext encrypted under the OLD masterKey lingers
+    // and, once sync runs after a fresh setup, can't be decrypted → the user
+    // falls into an integrity-error/reset loop. Tombstone (soft-delete) rather
+    // than hard-delete: the schema has no DELETE grant and soft-delete is the
+    // sync model, so this also propagates the deletion to other devices on pull.
+    // The server's key_attributes row is overwritten by the next commitSetup
+    // (update-if-exists), not here. Best-effort: the local wipe below ALWAYS
+    // completes so the device is clean even offline; the server reconciles later.
+    //
+    // If the tombstone FAILS (offline/RLS), record the reset instant so the next
+    // signed-in unlock retries — otherwise the old rows stay live and re-surface
+    // as a corruption banner once a fresh vault syncs (review finding 1, round 2).
+    final uid = _uid;
+    if (uid != null && _remoteTokenRepo != null) {
+      final resetAt = DateTime.now().toUtc().toIso8601String();
+      try {
+        await _remoteTokenRepo.tombstoneAllRemote(uid);
+        await _resetPendingStore?.clear(); // succeeded → no retry owed
+      } catch (_) {
+        // Couldn't reach the server → owe a retry from the reset instant.
+        try {
+          await _resetPendingStore?.setPending(resetAt);
+        } catch (_) {/* marker write best-effort; local reset still proceeds */}
+      }
+    }
+
     // Biyometrik OS anahtarı ayrı options'lı/namespace'li storage'da → `_deleteKeys`
     // (default storage) ona ulaşamayabilir. Doğru options ile sil (reviewer [P1]).
     // disable() idempotent; hata yutulur (reset her durumda tamamlanmalı).
@@ -624,6 +680,24 @@ class VaultLockCubit extends Cubit<VaultLockState> {
     _biometricEnrolled = false;
     await _deleteKeys(VaultStorageKeys.all);
     emit(const VaultLockState.uninitialized());
+  }
+
+  /// Retries a reset's owed remote tombstone (review finding 1, round 2). If a
+  /// reset couldn't reach the server, the marker holds the reset instant; here we
+  /// tombstone only rows older than it (a fresh vault's newer tokens are kept).
+  /// Best-effort + idempotent; runs before sync's first push so the cut-off is
+  /// honoured. Clears the marker on success.
+  Future<void> _replayResetTombstoneIfNeeded() async {
+    final store = _resetPendingStore;
+    final repo = _remoteTokenRepo;
+    final uid = _uid;
+    if (store == null || repo == null || uid == null) return;
+    try {
+      final since = await store.pendingSince();
+      if (since == null) return;
+      await repo.tombstoneAllRemoteBefore(uid, since);
+      await store.clear();
+    } catch (_) {/* stays pending → retried on a later unlock */}
   }
 
   // --- Biyometri (Patch 5) ---

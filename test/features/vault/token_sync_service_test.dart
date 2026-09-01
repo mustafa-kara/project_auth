@@ -71,6 +71,11 @@ class FakeRemote implements RemoteTokenRepository {
     _onChange = onChange;
     return _FakeHandle(this);
   }
+
+  @override
+  Future<void> tombstoneAllRemote(String uid) async {}
+  @override
+  Future<void> tombstoneAllRemoteBefore(String uid, String beforeIso) async {}
 }
 
 class _FakeHandle implements RealtimeChannelHandle {

@@ -16,9 +16,11 @@ import 'features/account/domain/announcements_repository.dart';
 import 'features/account/domain/device_registrar.dart';
 import 'features/account/domain/feature_flags_service.dart';
 import 'features/account/domain/key_attributes_repository.dart';
+import 'features/account/data/active_account_store.dart';
 import 'features/account/data/announcements_cache_store.dart';
 import 'features/account/data/attrs_dirty_store.dart';
 import 'features/account/data/pending_confirmation_store.dart';
+import 'features/account/data/reset_pending_store.dart';
 import 'features/account/presentation/bloc/session_cubit.dart';
 import 'features/account/presentation/bloc/session_state.dart';
 import 'features/auth/data/key_attributes_store.dart';
@@ -37,6 +39,10 @@ import 'features/vault/presentation/bloc/vault_cubit.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Fail fast (debug + release) when the Supabase dart-defines are missing or
+  // malformed — no embedded fallback, so a misconfigured build must not connect
+  // to an unintended project. Developer configuration error → throw is enough.
+  SupabaseConfig.ensureConfigured();
   // Faz 3 Patch 1: kimlik katmanı. PKCE → e-posta onay deep-link'ini güvenli tamamlar.
   await Supabase.initialize(
     url: SupabaseConfig.url,
@@ -45,11 +51,28 @@ Future<void> main() async {
         const FlutterAuthClientOptions(authFlowType: AuthFlowType.pkce),
   );
   await configureDependencies();
-  runApp(const AuthenticatorApp());
+  // Read the persisted active uid BEFORE the first frame so the initial vault
+  // stack is built in the correct namespace. Without this we'd start in the
+  // legacy ('') namespace and only switch once the session resolves — wasted
+  // legacy bootstrap + a wrong-namespace window under slow storage. Best-effort:
+  // on read failure fall back to '' (session resolution still corrects it).
+  String initialPrefix = '';
+  try {
+    final uid = await locator<ActiveAccountStore>().read();
+    if (uid != null && uid.isNotEmpty) {
+      initialPrefix = AccountVaultManager.prefixFor(uid);
+    }
+  } catch (_) {/* fall back to legacy ''; _onSession re-derives on signedIn */}
+  runApp(AuthenticatorApp(initialPrefix: initialPrefix));
 }
 
 class AuthenticatorApp extends StatefulWidget {
-  const AuthenticatorApp({super.key});
+  const AuthenticatorApp({super.key, this.initialPrefix = ''});
+
+  /// Vault namespace prefix to build the initial stack with (from the persisted
+  /// active uid). Empty = legacy/uid-less. [_onSession] re-derives the correct
+  /// prefix once the Supabase session resolves to signedIn.
+  final String initialPrefix;
 
   @override
   State<AuthenticatorApp> createState() => _AuthenticatorAppState();
@@ -82,8 +105,9 @@ class _AuthenticatorAppState extends State<AuthenticatorApp>
       onAuthSignedOut: () => _lock.onAuthSignedOut(),
     );
 
-    // İlk vault stack'i kayıtlı aktif uid'in namespace'iyle kur (yoksa boş = legacy).
-    _activePrefix = '';
+    // Build the initial vault stack with the persisted active uid's namespace
+    // (resolved in main() before first frame; empty = legacy/uid-less).
+    _activePrefix = widget.initialPrefix;
     _buildVaultStack(_activePrefix);
 
     // Oturum signedIn olunca aktif uid'in namespace'ine geç (gerekirse yeniden kur).
@@ -154,9 +178,15 @@ class _AuthenticatorAppState extends State<AuthenticatorApp>
       attrsStore: KeyAttributesStore(storage: storage, keyPrefix: prefix),
       biometric: locator<BiometricService>(),
       remoteRepo: locator<KeyAttributesRepository>(),
+      // Security review finding 1 — reset must also wipe this uid's server token
+      // rows (not just key_attributes). Used by resetVault only; null for legacy
+      // (uid == null) → remote wipe is a no-op there.
+      remoteTokenRepo: locator<RemoteTokenRepository>(),
       uid: uid,
       // Faz 3 Patch 3 (Adım K): changePassword sonrası sunucu UPDATE retry marker'ı.
       attrsDirtyStore: AttrsDirtyStore(storage: storage, keyPrefix: prefix),
+      // Finding 1 (round 2): offline reset'in borçlu kaldığı remote tombstone retry marker'ı.
+      resetPendingStore: ResetPendingStore(storage: storage, keyPrefix: prefix),
       migrate: (masterKey) => migration.migrateIfNeeded(masterKey: masterKey),
       deleteKeys: (keys) async {
         // Namespace'li reset: forUser(prefix) anahtarlarını sil (prefix boşsa Faz2 all).

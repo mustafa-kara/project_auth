@@ -47,7 +47,12 @@ class _RecoveryShowPageState extends State<RecoveryShowPage> {
 
   @override
   void dispose() {
-    _clearTimer?.cancel();
+    // NOTE: _clearTimer is intentionally NOT cancelled — if the user taps
+    // "Devam" (or otherwise leaves) before the 60s window elapses, the recovery
+    // key must STILL be wiped from the clipboard. The recovery key is the most
+    // sensitive value in the app (permanent master-key recovery), so leaving it
+    // in the clipboard indefinitely is worse than for an OTP. The callback is
+    // disposed-safe (touches only instance fields + Clipboard, no context).
     SecureScreen.disable();
     super.dispose();
   }

@@ -67,4 +67,22 @@ abstract interface class RemoteTokenRepository {
   /// Realtime: yalnız TETİKLEYİCİ (bytea payload #1180 → OKUNMAZ). Değişiklikte
   /// [onChange] çağrılır (çağıran REST pull tetikler).
   RealtimeChannelHandle subscribe(String uid, void Function() onChange);
+
+  /// Soft-deletes (tombstones) ALL of this uid's server token rows on vault reset.
+  ///
+  /// Sets `deleted = true` for every row via UPDATE (the schema deliberately has
+  /// no hard DELETE — soft-delete is the sync model; see the init migration). A
+  /// wiped vault must not leave live remote ciphertext that the new masterKey
+  /// can't decrypt; tombstoning marks them gone and propagates the deletion to
+  /// other devices on their next pull. Idempotent. Network/permission →
+  /// `SyncError`; the caller treats it as best-effort.
+  Future<void> tombstoneAllRemote(String uid);
+
+  /// Like [tombstoneAllRemote] but only rows with `updated_at < beforeIso`.
+  ///
+  /// Used to RETRY a reset's tombstone after it failed offline: by the time the
+  /// retry runs, a fresh vault may have pushed new tokens for the same uid. The
+  /// reset instant cut-off tombstones only the OLD (pre-reset) rows and leaves
+  /// the new vault's tokens intact. Idempotent; network/permission → `SyncError`.
+  Future<void> tombstoneAllRemoteBefore(String uid, String beforeIso);
 }

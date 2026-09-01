@@ -8,6 +8,7 @@ import 'package:go_router/go_router.dart';
 import '../../../../core/di/locator.dart';
 import '../../../../core/otp/otp_account.dart';
 import '../../../../core/otp/otpauth_uri.dart';
+import '../../../../core/platform/secure_screen.dart';
 import '../../../../core/router/app_router.dart';
 import '../../../../core/ui/tokens.dart';
 import '../../../../core/ui/widgets/app_banner.dart';
@@ -46,6 +47,10 @@ class _VaultPageState extends State<VaultPage> {
   @override
   void initState() {
     super.initState();
+    // Live OTP codes are on screen → screenshot / screen-recording / recents
+    // preview protection (same sensitive-screen treatment as the recovery screens).
+    // Android FLAG_SECURE + iOS background overlay; silent no-op where unsupported.
+    SecureScreen.enable();
     _viewModeStore = _resolveViewModeStore();
     _viewModeStore.read().then((m) {
       if (mounted) setState(() => _viewMode = m);
@@ -62,6 +67,7 @@ class _VaultPageState extends State<VaultPage> {
 
   @override
   void dispose() {
+    SecureScreen.disable();
     _searchController.dispose();
     super.dispose();
   }
