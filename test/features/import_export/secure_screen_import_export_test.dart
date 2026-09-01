@@ -85,6 +85,12 @@ class _NoopBackup implements BackupService {
   }) async =>
       const [];
   @override
+  Future<BackupPayload> importDetailed({
+    required String json,
+    required String password,
+  }) async =>
+      const BackupPayload(accounts: []);
+  @override
   CryptoService get crypto => throw UnimplementedError();
 }
 

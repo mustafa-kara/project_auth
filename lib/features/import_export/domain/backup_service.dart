@@ -171,8 +171,12 @@ class BackupService {
 
   /// Decodes and strictly validates the envelope WITHOUT deriving a key.
   /// Malformed → [FormatException]; too new → [UnsupportedBackupVersionException].
+  ///
+  /// Static because it touches no instance state (no crypto): keeping it off the
+  /// implicit interface means test doubles that `implements BackupService` do not
+  /// have to stub a pure JSON helper.
   @visibleForTesting
-  BackupEnvelope parseEnvelope(String json) {
+  static BackupEnvelope parseEnvelope(String json) {
     Object? decoded;
     try {
       decoded = jsonDecode(json);
@@ -191,8 +195,10 @@ class BackupService {
   /// Parses the decrypted payload. A single malformed record is recorded as a
   /// [SkipReason.invalidFields] entry instead of failing the whole restore —
   /// one bad row must never cost the user the other 40 tokens.
+  ///
+  /// Static for the same reason as [parseEnvelope]: pure decoding, no crypto.
   @visibleForTesting
-  BackupPayload parsePayload(Uint8List plaintext) {
+  static BackupPayload parsePayload(Uint8List plaintext) {
     Object? decoded;
     try {
       decoded = jsonDecode(utf8.decode(plaintext));

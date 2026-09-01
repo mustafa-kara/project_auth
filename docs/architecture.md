@@ -38,7 +38,11 @@ lib/
     │   ├── data/        # encrypted_vault_repository, vault_migration, supabase_token_repository, *_store
     │   └── presentation/{bloc/vault_cubit, pages/vault_page, widgets/otp_card}
     ├── scan/      # QR scanning (scan_page → VaultCubit.add)
-    └── settings/  # settings_page (biometrics / live-sync / announcements)
+    ├── import_export/  # Faz 5 Patch 1 — Aegis/2FAS import + encrypted backup
+    │   ├── domain/      # import_service, backup_service, backup_envelope, import_format_detector, dedupe, file_port (DocumentPort), import_models, import_exceptions
+    │   ├── data/        # aegis_parser, twofas_parser, file_picker_document_port
+    │   └── presentation/pages/{import_page, export_page}
+    └── settings/  # settings_page (biometrics / live-sync / announcements / backup & transfer)
 ```
 
 ## 2. Feature → Screen → State Map
@@ -49,6 +53,7 @@ lib/
 | `auth` | setup_password, recovery_show, recovery_verify, unlock, recovery_unlock, auth_integrity | `VaultLockCubit` (vault lock) + `KeyManager` |
 | `vault` | vault, settings | `VaultCubit` + `TokenSyncService`, `FeatureFlagsService`, `AnnouncementsRepository` |
 | `scan` | scan | `VaultCubit.add()` |
+| `import_export` | import, export | `ImportService` / `BackupService` + `VaultCubit.addAll()`, `DocumentPort` |
 
 Navigation is **state-driven**: screens never force routing with `context.go`; when cubit state changes the guard redirects (`refreshListenable`).
 
@@ -166,6 +171,24 @@ Key transitions: `bootstrap`, `beginSetup`, `commitSetup`, `cancelSetup`, `unloc
 **Screen-capture protection:** sensitive pages wrap their `build` in `SecureScreenScope`
 (vault, unlock, setup_password, recovery_unlock, recovery_show, recovery_verify). The ref count lives in Dart because
 the native flag is last-caller-wins — see [CRYPTO.md §15](CRYPTO.md).
+
+## 8.1 Import / Export (Faz 5 Patch 1)
+
+`features/import_export/` is layered like the rest: `domain/` is pure Dart (parsers are driven through the
+`ImportParser` interface, `DocumentPort` abstracts file access), `data/` holds the concrete parsers and the
+`file_picker` adapter, `presentation/` the two pages.
+
+- **`DocumentPort`** (`domain/file_port.dart`) — `pickJson({maxBytes})` / `saveJson({fileName, bytes})`. The only
+  seam onto the platform file picker, so the pages stay testable without a plugin.
+- **`file_picker ^11.0.3`** — held on the 11.x line deliberately: `file_picker >=12.1.3` pulls `windows_file_picker` →
+  `win32 ^6.3.0`, while `device_info_plus ^12.1.0` (already a dependency, for the Android SDK gate) requires
+  `win32 ^5.11.0` — the 12.x line does not resolve. 11.0.3 offers the same `withData` / `saveFile(bytes:)` API.
+- **`VaultCubit.addAll(List<OtpAccount>)`** — bulk insert with exactly one persist and one push, instead of N
+  round trips through `add()`. Callers de-duplicate beforehand.
+- **Routes** `/import` and `/export` are children of the unlocked ShellRoute and are on the guard's unlocked
+  allow-list (`app_router.dart`), so a deep link into them while locked still redirects to unlock.
+- **Lock exemption** — both flows wrap the picker in `VaultLockCubit.beginSystemFileFlow()` /
+  `endSystemFileFlow()`; a budgeted, deliberate concession documented in [CRYPTO.md §17](CRYPTO.md).
 
 ## 9. Document Map
 - This file: client UI/state architecture.

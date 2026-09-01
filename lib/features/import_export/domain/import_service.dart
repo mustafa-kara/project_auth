@@ -47,7 +47,8 @@ class ImportPreview {
 
 class ImportService {
   /// Source parsers, tried after [detect] picks a format. Defaults to the empty
-  /// set until W1's parsers are wired in.
+  /// set; DI wires the concrete parsers (`AegisParser`, `TwoFasParser`) — with
+  /// none of them only our own encrypted backup format can be read.
   final List<ImportParser> parsers;
 
   final BackupService backup;
@@ -60,8 +61,9 @@ class ImportService {
   /// always uses `dedupeKey`.
   final String Function(OtpAccount account) _keyOf;
 
-  /// [detector] and [keyOf] exist only so this service can be unit-tested before
-  /// W1's `detectSource`/`dedupeKey` land; production wiring passes neither.
+  /// [detector] and [keyOf] exist only so this service can be unit-tested in
+  /// isolation; production wiring passes neither and gets `detectSource` /
+  /// `dedupeKey`.
   ImportService({
     List<ImportParser>? parsers,
     required this.backup,
@@ -133,8 +135,11 @@ class ImportService {
 
   /// Size guard (UTF-8 bytes) → root JSON object. Shared by [detect] and
   /// [preview] so an oversized or unreadable file is rejected on both entries.
+  ///
+  /// Static because it uses no instance state: test doubles that
+  /// `implements ImportService` then need not stub a pure JSON helper.
   @visibleForTesting
-  Map<String, dynamic> decodeRoot(String raw) {
+  static Map<String, dynamic> decodeRoot(String raw) {
     // `raw` is already a Dart String, so the meaningful ceiling is what it costs
     // as UTF-8 bytes (what the file actually was).
     final bytes = utf8.encode(raw).length;

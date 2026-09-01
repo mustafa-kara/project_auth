@@ -17,9 +17,11 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../../core/di/locator.dart';
 import '../../../../core/platform/secure_screen.dart';
+import '../../../../core/router/app_router.dart';
 import '../../../../core/ui/tokens.dart';
 import '../../../../core/ui/widgets/app_banner.dart';
 import '../../../../core/ui/widgets/app_text_field.dart';
@@ -206,6 +208,8 @@ class _ImportPageState extends State<ImportPage> {
     final vault = context.read<VaultCubit>();
     final messenger = ScaffoldMessenger.of(context);
     final navigator = Navigator.of(context);
+    // null in widget tests, where the page is pumped without a GoRouter.
+    final router = GoRouter.maybeOf(context);
     setState(() {
       _busy = true;
       _error = null;
@@ -216,8 +220,13 @@ class _ImportPageState extends State<ImportPage> {
       messenger.showSnackBar(
         SnackBar(content: Text('${preview.addCount} token eklendi')),
       );
-      // Kök route olarak açıldıysa (test/deep-link) `maybePop` sessizce false döner.
-      if (mounted) await navigator.maybePop();
+      if (mounted) {
+        // Deep-link ile doğrudan /import'a girildiyse geri dönülecek bir kayıt
+        // yoktur → `maybePop` sessizce false döner ve kullanıcı tüketilmiş bir
+        // önizlemede kalır. Bu durumda vault'a yönlendir.
+        final popped = await navigator.maybePop();
+        if (!popped) router?.go(Routes.vault);
+      }
     } catch (_) {
       if (mounted) {
         setState(() => _error = 'Tokenlar kaydedilemedi — tekrar dene.');

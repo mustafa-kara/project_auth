@@ -556,7 +556,7 @@ class VaultLockCubit extends Cubit<VaultLockState> {
   ///
   /// Note this covers the LIFECYCLE lock only: [onAuthSignedOut] (identity gate
   /// closed) and interactive [lock] still take effect during a flow.
-  /// Rationale is recorded in docs/CRYPTO.md §15.
+  /// Rationale is recorded in docs/CRYPTO.md §17.
   void beginSystemFileFlow({Duration budget = const Duration(minutes: 2)}) {
     _systemFileFlowUntil = _now().add(budget);
   }

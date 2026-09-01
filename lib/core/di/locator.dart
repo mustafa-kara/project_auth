@@ -31,7 +31,9 @@ import '../../features/auth/data/biometric_service_impl.dart';
 import '../../features/auth/data/key_attributes_store.dart';
 import '../../features/auth/domain/biometric_service.dart';
 import '../../features/auth/domain/key_manager.dart';
+import '../../features/import_export/data/aegis_parser.dart';
 import '../../features/import_export/data/file_picker_document_port.dart';
+import '../../features/import_export/data/twofas_parser.dart';
 import '../../features/import_export/domain/backup_service.dart';
 import '../../features/import_export/domain/file_port.dart';
 import '../../features/import_export/domain/import_service.dart';
@@ -155,10 +157,10 @@ Future<void> configureDependencies() async {
   locator.registerLazySingleton<DocumentPort>(
       () => const FilePickerDocumentPort());
 
-  // TODO(integration): wire parsers — `parsers: [AegisParser(), TwoFasParser()]`
-  // (W1'in parser sınıfları entegrasyon adımında eklenecek). Şimdilik yalnız
-  // kendi şifreli yedek biçimimiz çözülür; Aegis/2FAS dosyaları desteklenmeyen
-  // biçim olarak reddedilir.
-  locator.registerLazySingleton<ImportService>(
-      () => ImportService(backup: locator<BackupService>()));
+  // Kaynak parser'lar burada bağlanır; `detector`/`keyOf` GEÇİLMEZ, böylece
+  // üretimde her zaman gerçek `detectSource` / `dedupeKey` kullanılır.
+  locator.registerLazySingleton<ImportService>(() => ImportService(
+        backup: locator<BackupService>(),
+        parsers: const [AegisParser(), TwoFasParser()],
+      ));
 }

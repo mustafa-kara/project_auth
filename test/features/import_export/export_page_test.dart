@@ -84,6 +84,15 @@ class _FakeBackup implements BackupService {
   }) async =>
       const [];
 
+  /// ExportPage never restores; an explicit throw keeps a wrong call loud
+  /// instead of silently returning an empty vault.
+  @override
+  Future<BackupPayload> importDetailed({
+    required String json,
+    required String password,
+  }) async =>
+      throw UnimplementedError();
+
   @override
   CryptoService get crypto => throw UnimplementedError();
 }

@@ -470,3 +470,35 @@ Integration (`integration_test/backup_service_test.dart`, real libsodium, per §
 including the stable `id`, wrong password, tampered ciphertext, tampered nonce, and — the reason the
 AAD exists — an `opslimit`/`memlimit` downgrade that stays inside the accepted range and still fails
 to decrypt.
+
+## 17. System file-picker lock exemption (Phase 5 Patch 1)
+
+**This is a deliberate concession in the threat model, not a neutral implementation detail.** It is
+documented here so it is reviewed as such.
+
+The system file picker (Android SAF, iOS `UIDocumentPicker`) runs in a **separate process**. While it
+is on screen our app receives `paused`, and the normal lifecycle rule (§ `VaultLockCubit.onAppBackgrounded`)
+wipes the master key from memory and tears the unlocked subtree down. Applied literally, choosing a
+file would therefore always lock the vault before the import/export flow could finish — the feature
+would be impossible.
+
+The import and export flows are consequently wrapped in a
+`VaultLockCubit.beginSystemFileFlow()` / `endSystemFileFlow()` pair:
+
+- the exemption skips the background lock **including `paused`**, not only `inactive` (which is all
+  the pre-existing biometric-prompt exemption covers);
+- it is bounded by a **fixed 2-minute budget** — a picker left open longer is no longer protected;
+- every call site closes it in a **`finally`**, so cancel, throw and screen dispose all end it;
+- on resume `main.dart` checks `systemFileFlowExpired` and **locks immediately** when the budget was
+  exceeded, so an app parked in the background does not stay open indefinitely.
+
+**What the exemption does NOT cover:** `onAuthSignedOut` (the identity gate closing) and an
+interactive `lock()` still take effect during a flow.
+
+**What is actually given up:** during a window of at most 2 minutes, an attacker with physical access
+to an unlocked-but-backgrounded device can return to a still-unlocked vault, where the ordinary rule
+would have locked it on the first `paused`. The master key stays resident in memory for that window.
+The budget, the `finally` discipline and the resume check bound the exposure; they do not remove it.
+
+Covered by `test/features/auth/vault_lock_cubit_test.dart` (exemption honoured, budget expiry, the
+`finally` pairing) and by the import/export widget tests, which assert the begin/end call counts.
