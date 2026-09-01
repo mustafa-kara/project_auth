@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "header": {
+    "slots": [
+      {
+        "type": 1,
+        "uuid": "6b0f6a3d-9c2e-4a11-8b7c-0d1e2f3a4b5c",
+        "key": "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
+        "key_params": {
+          "nonce": "000102030405060708090a0b",
+          "tag": "0f1e2d3c4b5a69788796a5b4c3d2e1f0"
+        },
+        "n": 32768,
+        "r": 8,
+        "p": 1,
+        "salt": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+        "repaired": true
+      },
+      {
+        "type": 2,
+        "uuid": "7c1a7b4e-ad3f-4b22-9c8d-1e2f3a4b5c6d",
+        "key": "ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100",
+        "key_params": {
+          "nonce": "0b0a090807060504030201f0",
+          "tag": "f0e1d2c3b4a5968778695a4b3c2d1e0f"
+        },
+        "repaired": false
+      }
+    ],
+    "params": {
+      "nonce": "0a0b0c0d0e0f101112131415",
+      "tag": "112233445566778899aabbccddeeff00"
+    }
+  },
+  "db": "3q2+7wAAAAABAgMEBQYHCAkKCwwNDg8QERITFBUWFxgZGhscHR4fICEiIyQlJicoKSorLC0uLzA="
+}
