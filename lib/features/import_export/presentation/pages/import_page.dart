@@ -39,6 +39,7 @@ import '../../domain/import_service.dart';
 String importSourceLabel(ImportSource source) => switch (source) {
       ImportSource.aegis => 'Aegis',
       ImportSource.twofas => '2FAS',
+      ImportSource.googleAuth => 'Google Authenticator',
       ImportSource.projectauthBackup => 'Şifreli yedek',
       ImportSource.unknown => 'Bilinmeyen biçim',
     };

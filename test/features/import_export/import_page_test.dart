@@ -136,6 +136,13 @@ class _FakeImportService implements ImportService {
   }
 
   @override
+  ImportPreview previewParsed(
+    ParsedImport parsed, {
+    required List<OtpAccount> existing,
+  }) =>
+      throw UnimplementedError();
+
+  @override
   BackupService get backup => throw UnimplementedError();
   @override
   List<ImportParser> get parsers => const [];

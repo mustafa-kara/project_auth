@@ -69,6 +69,12 @@ class _NoopImportService implements ImportService {
   }) async =>
       const ImportPreview(source: ImportSource.unknown, toAdd: []);
   @override
+  ImportPreview previewParsed(
+    ParsedImport parsed, {
+    required List<OtpAccount> existing,
+  }) =>
+      throw UnimplementedError();
+  @override
   BackupService get backup => throw UnimplementedError();
   @override
   List<ImportParser> get parsers => const [];

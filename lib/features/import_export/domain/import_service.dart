@@ -133,6 +133,21 @@ class ImportService {
         ));
   }
 
+  /// Dedupes an already-parsed import (no file, no JSON, no isolate).
+  ///
+  /// The Google Authenticator path produces its [ParsedImport] from scanned QR
+  /// codes rather than from a file, so it enters the pipeline here instead of at
+  /// [preview]. Merging a handful of QR batches is trivial CPU work, so it runs
+  /// inline; the vault is still untouched — the caller applies the result.
+  ///
+  /// Throws [EmptyImportException] when [parsed] carried neither an account nor
+  /// a skipped entry, matching the file path's contract.
+  ImportPreview previewParsed(
+    ParsedImport parsed, {
+    required List<OtpAccount> existing,
+  }) =>
+      dedupeSync(parsed, existing: existing, keyOf: _keyOf);
+
   /// Size guard (UTF-8 bytes) → root JSON object. Shared by [detect] and
   /// [preview] so an oversized or unreadable file is rejected on both entries.
   ///
