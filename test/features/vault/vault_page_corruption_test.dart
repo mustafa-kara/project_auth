@@ -4,6 +4,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -12,6 +13,7 @@ import 'package:project_auth/core/crypto/crypto_exceptions.dart';
 import 'package:project_auth/core/di/locator.dart';
 import 'package:project_auth/core/otp/otp_account.dart';
 import 'package:project_auth/core/otp/otp_generator.dart';
+import 'package:project_auth/core/platform/secure_screen.dart';
 import 'package:project_auth/features/vault/data/view_mode_store.dart';
 import 'package:project_auth/features/auth/presentation/bloc/vault_lock_cubit.dart';
 import 'package:project_auth/features/auth/presentation/bloc/vault_lock_state.dart';
@@ -242,5 +244,40 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.widgetWithText(FloatingActionButton, 'Ekle'), findsOneWidget);
+  });
+
+  // Canlı OTP kodları ekranda → screenshot/recording/recents koruması. Ref-count'lu
+  // scope: sayfa mount iken açık, unmount olunca (son tutucu) kapanır.
+  testWidgets('VaultPage mount → SecureScreen enable, unmount → disable',
+      (tester) async {
+    const channel = MethodChannel('dev.mustafakara.project_auth/secure_screen');
+    final calls = <String>[];
+    SecureScreen.debugReset();
+    tester.binding.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      calls.add(call.method);
+      return null;
+    });
+    addTearDown(() {
+      tester.binding.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null);
+      SecureScreen.debugReset();
+    });
+
+    final repo = _FakeRepo(accounts: [_acc('a')]);
+    final vault = VaultCubit(repo)..load();
+    addTearDown(vault.close);
+    final lock = _FakeLockCubit();
+    addTearDown(lock.close);
+
+    await tester.pumpWidget(_wrap(vault, lock));
+    await tester.pumpAndSettle();
+    expect(calls, ['enable']);
+    expect(SecureScreen.holderCount, 1);
+
+    await tester.pumpWidget(const MaterialApp(home: SizedBox.shrink()));
+    await tester.pumpAndSettle();
+    expect(calls, ['enable', 'disable']);
+    expect(SecureScreen.holderCount, 0);
   });
 }

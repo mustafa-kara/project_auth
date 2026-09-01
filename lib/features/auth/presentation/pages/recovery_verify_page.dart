@@ -39,15 +39,7 @@ class _RecoveryVerifyPageState extends State<RecoveryVerifyPage> {
   int _attempts = 0;
 
   @override
-  void initState() {
-    super.initState();
-    // Recovery kelimeleri giriliyor → ekran görüntüsü/recents koruması.
-    SecureScreen.enable();
-  }
-
-  @override
   void dispose() {
-    SecureScreen.disable();
     for (final c in _controllers.values) {
       c
         ..clear()
@@ -93,7 +85,7 @@ class _RecoveryVerifyPageState extends State<RecoveryVerifyPage> {
 
   @override
   Widget build(BuildContext context) {
-    return AuthScaffold(
+    final page = AuthScaffold(
       appBarTitle: 'Recovery key doğrula',
       leading: IconButton(
         icon: const Icon(Icons.close),
@@ -126,5 +118,8 @@ class _RecoveryVerifyPageState extends State<RecoveryVerifyPage> {
         ),
       ],
     );
+
+    // Recovery kelimeleri giriliyor → ekran görüntüsü/recents koruması.
+    return SecureScreenScope(child: page);
   }
 }
