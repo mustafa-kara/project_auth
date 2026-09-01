@@ -47,10 +47,6 @@ class _VaultPageState extends State<VaultPage> {
   @override
   void initState() {
     super.initState();
-    // Live OTP codes are on screen → screenshot / screen-recording / recents
-    // preview protection (same sensitive-screen treatment as the recovery screens).
-    // Android FLAG_SECURE + iOS background overlay; silent no-op where unsupported.
-    SecureScreen.enable();
     _viewModeStore = _resolveViewModeStore();
     _viewModeStore.read().then((m) {
       if (mounted) setState(() => _viewMode = m);
@@ -67,7 +63,6 @@ class _VaultPageState extends State<VaultPage> {
 
   @override
   void dispose() {
-    SecureScreen.disable();
     _searchController.dispose();
     super.dispose();
   }
@@ -110,7 +105,7 @@ class _VaultPageState extends State<VaultPage> {
     // de mutasyonu reddeder (asıl emniyet); bu FAB gizleme savunma katmanı.
     final state = context.watch<VaultCubit>().state;
     final integrityBlocked = state.loaded && state.error != null;
-    return Scaffold(
+    final scaffold = Scaffold(
       appBar: AppBar(
         title: const Text('Authenticator'),
         actions: [
@@ -263,6 +258,13 @@ class _VaultPageState extends State<VaultPage> {
               label: const Text('Ekle'),
             ),
     );
+
+    // Live OTP codes are on screen → screenshot / screen-recording / recents
+    // preview protection (same sensitive-screen treatment as the recovery and
+    // master-password screens). Ref-counted scope: pushing /scan or /settings
+    // keeps this page mounted (protection stays on), and a nested sensitive
+    // screen closing above it no longer turns the protection off early.
+    return SecureScreenScope(child: scaffold);
   }
 
   /// Ekleme yöntemini seçtirir: QR tara veya manuel `otpauth://`.

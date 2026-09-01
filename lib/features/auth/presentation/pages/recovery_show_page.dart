@@ -39,13 +39,6 @@ class _RecoveryShowPageState extends State<RecoveryShowPage> {
   String? _copiedValue;
 
   @override
-  void initState() {
-    super.initState();
-    // 24 kelime ekranda → ekran görüntüsü/recents koruması (hassas ekran).
-    SecureScreen.enable();
-  }
-
-  @override
   void dispose() {
     // NOTE: _clearTimer is intentionally NOT cancelled — if the user taps
     // "Devam" (or otherwise leaves) before the 60s window elapses, the recovery
@@ -53,7 +46,6 @@ class _RecoveryShowPageState extends State<RecoveryShowPage> {
     // sensitive value in the app (permanent master-key recovery), so leaving it
     // in the clipboard indefinitely is worse than for an OTP. The callback is
     // disposed-safe (touches only instance fields + Clipboard, no context).
-    SecureScreen.disable();
     super.dispose();
   }
 
@@ -92,7 +84,7 @@ class _RecoveryShowPageState extends State<RecoveryShowPage> {
         context.select<VaultLockCubit, List<String>>((c) => c.state.mnemonic);
     final scheme = Theme.of(context).colorScheme;
 
-    return AuthScaffold(
+    final page = AuthScaffold(
       appBarTitle: 'Recovery key',
       leading: IconButton(
         icon: const Icon(Icons.close),
@@ -139,5 +131,8 @@ class _RecoveryShowPageState extends State<RecoveryShowPage> {
         ),
       ],
     );
+
+    // 24 kelime ekranda → ekran görüntüsü/recents koruması (hassas ekran).
+    return SecureScreenScope(child: page);
   }
 }

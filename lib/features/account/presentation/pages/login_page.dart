@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../core/platform/secure_screen.dart';
 import '../../../../core/ui/tokens.dart';
 import '../../../../core/ui/widgets/app_text_field.dart';
 import '../../../../core/ui/widgets/auth_bits.dart';
@@ -50,51 +51,54 @@ class _LoginPageState extends State<LoginPage> {
         context.select<SessionCubit, AuthError?>((c) => c.state.error);
     final notConfirmed = error is AuthEmailNotConfirmed;
 
-    return AuthScaffold(
-      icon: Icons.login,
-      title: 'Giriş yap',
-      description: 'Hesabına giriş yap. Bu parola, vault master parolandan ayrıdır.',
-      body: [
-        AppTextField(
-          controller: _emailCtrl,
-          label: 'E-posta',
-          keyboardType: TextInputType.emailAddress,
-          autocorrect: false,
-          enableSuggestions: false,
-          autofocus: true,
-        ),
-        const SizedBox(height: Gap.md),
-        AppTextField(
-          controller: _passwordCtrl,
-          label: 'Parola',
-          obscure: true,
-          autocorrect: false,
-          enableSuggestions: false,
-          onSubmitted: (_) => busy ? null : _signIn(),
-        ),
-        if (error != null) ...[
+    // Parola alanı içerir → screenshot/recents koruması (SecureScreenScope).
+    return SecureScreenScope(
+      child: AuthScaffold(
+        icon: Icons.login,
+        title: 'Giriş yap',
+        description: 'Hesabına giriş yap. Bu parola, vault master parolandan ayrıdır.',
+        body: [
+          AppTextField(
+            controller: _emailCtrl,
+            label: 'E-posta',
+            keyboardType: TextInputType.emailAddress,
+            autocorrect: false,
+            enableSuggestions: false,
+            autofocus: true,
+          ),
           const SizedBox(height: Gap.md),
-          AuthErrorText(error.message),
+          AppTextField(
+            controller: _passwordCtrl,
+            label: 'Parola',
+            obscure: true,
+            autocorrect: false,
+            enableSuggestions: false,
+            onSubmitted: (_) => busy ? null : _signIn(),
+          ),
+          if (error != null) ...[
+            const SizedBox(height: Gap.md),
+            AuthErrorText(error.message),
+          ],
+          if (notConfirmed) ...[
+            const SizedBox(height: Gap.sm),
+            TextButton(
+              onPressed: busy ? null : () => context.goNamed('authConfirm'),
+              child: const Text('E-postanı onayla'),
+            ),
+          ],
         ],
-        if (notConfirmed) ...[
+        actions: [
+          FilledButton(
+            onPressed: busy ? null : _signIn,
+            child: busy ? const BtnSpinner() : const Text('Giriş yap'),
+          ),
           const SizedBox(height: Gap.sm),
           TextButton(
-            onPressed: busy ? null : () => context.goNamed('authConfirm'),
-            child: const Text('E-postanı onayla'),
+            onPressed: busy ? null : () => context.goNamed('authRegister'),
+            child: const Text('Hesabın yok mu? Kayıt ol'),
           ),
         ],
-      ],
-      actions: [
-        FilledButton(
-          onPressed: busy ? null : _signIn,
-          child: busy ? const BtnSpinner() : const Text('Giriş yap'),
-        ),
-        const SizedBox(height: Gap.sm),
-        TextButton(
-          onPressed: busy ? null : () => context.goNamed('authRegister'),
-          child: const Text('Hesabın yok mu? Kayıt ol'),
-        ),
-      ],
+      ),
     );
   }
 }

@@ -11,12 +11,41 @@
 | Postgres | 17.6 |
 | Publishable key (client) | `sb_publishable_rxrL2mVbh1XgojMexy1cMw_Og8wE3xI` |
 
+## How to run the Flutter app (credentials are NOT in the source)
+
+`lib/core/config/supabase_config.dart` reads both values from `--dart-define`
+and has **no embedded fallback**. A missing/malformed value throws a
+`StateError` before `Supabase.initialize` — in debug builds too, so a
+misconfigured run can never silently reach an unintended project.
+
+1. Copy the template and fill it in with the values from the table above:
+   ```bash
+   cp env/dev.example.json env/dev.json     # env/*.json is git-ignored
+   ```
+2. Run / build:
+   ```bash
+   flutter run   --dart-define-from-file=env/dev.json
+   flutter build apk --dart-define-from-file=env/dev.json
+   # or, without a file:
+   flutter run --dart-define=SUPABASE_URL=https://<project-ref>.supabase.co \
+               --dart-define=SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
+   ```
+3. **Android Studio / IntelliJ:** `.idea/` is git-ignored, so run configurations
+   cannot be committed — each developer sets this up once:
+   Run → Edit Configurations… → (the `main.dart` configuration) →
+   **Additional run args:** `--dart-define-from-file=env/dev.json`
+   (VS Code equivalent: `"toolArgs": ["--dart-define-from-file=env/dev.json"]`
+   in `.vscode/launch.json`.)
+
+`flutter test` needs no configuration (the host tests use fakes and never touch
+Supabase).
+
 ## Client usage (Flutter)
 ```dart
 await Supabase.initialize(
-  url: 'https://vfyqokvgtdxxurroqbtj.supabase.co',
+  url: SupabaseConfig.url,             // --dart-define=SUPABASE_URL=...
   // The 'publishableKey' parameter (NOT the old 'anonKey').
-  publishableKey: 'sb_publishable_rxrL2mVbh1XgojMexy1cMw_Og8wE3xI',
+  publishableKey: SupabaseConfig.publishableKey,
 );
 ```
 > Notes:

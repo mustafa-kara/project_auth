@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../../core/crypto/bip39.dart';
+import '../../../../core/platform/secure_screen.dart';
 import '../../../../core/ui/tokens.dart';
 import '../../../../core/ui/widgets/app_text_field.dart';
 import '../../../../core/ui/widgets/auth_bits.dart';
@@ -75,7 +76,7 @@ class _RecoveryUnlockPageState extends State<RecoveryUnlockPage> {
     final error = context.select<VaultLockCubit, VaultLockError?>(
         (c) => c.state.status == VaultLockStatus.locked ? c.state.error : null);
 
-    return Form(
+    final page = Form(
       key: _formKey,
       child: AuthScaffold(
         appBarTitle: 'Recovery key ile aç',
@@ -130,5 +131,9 @@ class _RecoveryUnlockPageState extends State<RecoveryUnlockPage> {
         ],
       ),
     );
+
+    // 24 kelimelik recovery key VE yeni master parola aynı formda giriliyor →
+    // uygulamanın en hassas iki değeri ekranda; koruma şart.
+    return SecureScreenScope(child: page);
   }
 }

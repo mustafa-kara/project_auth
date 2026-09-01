@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../core/platform/secure_screen.dart';
 import '../../../../core/ui/tokens.dart';
 import '../../../../core/ui/widgets/app_text_field.dart';
 import '../../../../core/ui/widgets/auth_bits.dart';
@@ -79,7 +80,7 @@ class _UnlockPageState extends State<UnlockPage> {
     // Parola alanı hatası yalnız parola/biyometri hata sebepleri için.
     final pwdError = _errorText(error);
 
-    return AuthScaffold(
+    final page = AuthScaffold(
       icon: Icons.lock_outline,
       title: 'Vault kilitli',
       description: 'Devam etmek için master parolanı gir.',
@@ -115,5 +116,9 @@ class _UnlockPageState extends State<UnlockPage> {
         ),
       ],
     );
+
+    // Master parola klavyeden giriliyor → ekran görüntüsü / ekran kaydı /
+    // recents önizleme koruması (hassas ekran).
+    return SecureScreenScope(child: page);
   }
 }

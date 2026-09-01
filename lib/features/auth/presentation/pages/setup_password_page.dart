@@ -10,6 +10,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/crypto/crypto_exceptions.dart';
+import '../../../../core/platform/secure_screen.dart';
 import '../../../../core/ui/tokens.dart';
 import '../../../../core/ui/widgets/app_text_field.dart';
 import '../../../../core/ui/widgets/auth_bits.dart';
@@ -74,7 +75,7 @@ class _SetupPasswordPageState extends State<SetupPasswordPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Form(
+    final page = Form(
       key: _formKey,
       child: AuthScaffold(
         icon: Icons.lock_outline,
@@ -132,6 +133,10 @@ class _SetupPasswordPageState extends State<SetupPasswordPage> {
         ],
       ),
     );
+
+    // Yeni master parola klavyeden giriliyor → ekran görüntüsü / ekran kaydı /
+    // recents önizleme koruması (hassas ekran).
+    return SecureScreenScope(child: page);
   }
 }
 
