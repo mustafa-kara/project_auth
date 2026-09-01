@@ -210,6 +210,106 @@ void main() {
       expect(repo.saveCount, 0, reason: 'integrity state\'te save edilmemeli');
     });
 
+    // --- Faz 5 Patch 1: addAll (toplu import) ---
+
+    test('addAll TEK save ile yazar (add\'e delege etmez — plan §3.6/D7)',
+        () async {
+      final repo = _FakeRepo();
+      final cubit = VaultCubit(repo);
+      await cubit.load();
+      final savesBefore = repo.saveCount;
+
+      await cubit.addAll([_acc('a'), _acc('b'), _acc('c')]);
+
+      expect(repo.saveCount - savesBefore, 1,
+          reason: '3 token için 3 değil TEK persist olmalı');
+      expect(cubit.state.accounts.length, 3);
+    });
+
+    test('addAll listenin SIRASINI korur ve mevcutların SONUNA ekler', () async {
+      final repo = _FakeRepo();
+      final cubit = VaultCubit(repo);
+      final vardi = _acc('vardi');
+      await cubit.add(vardi);
+
+      final a = _acc('a'), b = _acc('b'), c = _acc('c');
+      await cubit.addAll([a, b, c]);
+
+      expect(cubit.state.accounts.map((e) => e.accountName),
+          ['vardi', 'a', 'b', 'c']);
+      expect(repo.stored.map((e) => e.id), [vardi.id, a.id, b.id, c.id]);
+    });
+
+    test('addAll boş liste → no-op (save YOK, state DEĞİŞMEZ)', () async {
+      final repo = _FakeRepo();
+      final cubit = VaultCubit(repo);
+      await cubit.add(_acc('a'));
+      final before = cubit.state;
+      final savesBefore = repo.saveCount;
+
+      await cubit.addAll(const []);
+
+      expect(repo.saveCount, savesBefore, reason: 'gereksiz yazma yok');
+      expect(cubit.state, same(before));
+    });
+
+    test('addAll aynı id\'yi ELER (önizleme ile onay arası vault değişebilir)',
+        () async {
+      // Önizleme alındıktan sonra sync pull/başka bir yol aynı satırı vault'a
+      // eklemiş olabilir → aynı id iki kez listeye girmemeli (review takibi).
+      final vardi = OtpAccount(
+        id: 'sabit-id',
+        secret: 'JBSWY3DPEHPK3PXP',
+        type: OtpType.totp,
+        accountName: 'vardi',
+      );
+      final ayniId = OtpAccount(
+        id: 'sabit-id',
+        secret: 'GEZDGNBVGY3TQOJQ',
+        type: OtpType.totp,
+        accountName: 'kopya',
+      );
+      final repo = _FakeRepo();
+      final cubit = VaultCubit(repo);
+      await cubit.add(vardi);
+      final yeni = _acc('yeni');
+
+      await cubit.addAll([ayniId, yeni]);
+
+      expect(cubit.state.accounts.map((e) => e.id), ['sabit-id', yeni.id]);
+      expect(cubit.state.accounts.map((e) => e.accountName),
+          ['vardi', 'yeni'], reason: 'mevcut satır korunur, kopya düşer');
+    });
+
+    test('addAll TAMAMI kopya id ise no-op (save YOK)', () async {
+      final vardi = OtpAccount(
+        id: 'sabit-id',
+        secret: 'JBSWY3DPEHPK3PXP',
+        type: OtpType.totp,
+        accountName: 'vardi',
+      );
+      final repo = _FakeRepo();
+      final cubit = VaultCubit(repo);
+      await cubit.add(vardi);
+      final savesBefore = repo.saveCount;
+
+      await cubit.addAll([vardi]);
+
+      expect(repo.saveCount, savesBefore, reason: 'gereksiz yazma/push yok');
+      expect(cubit.state.accounts, hasLength(1));
+    });
+
+    test('addAll bütünlük hatası state\'inde REDDEDİLİR (depo EZİLMEZ)',
+        () async {
+      final repo = _FakeRepo()..loadError = StateError('top-level bozuk');
+      final cubit = VaultCubit(repo);
+      await cubit.load();
+      expect(cubit.state.error, isNotNull);
+
+      await expectLater(cubit.addAll([_acc('yeni')]), throwsStateError);
+      expect(repo.saveCount, 0, reason: 'integrity state\'te save edilmemeli');
+    });
+
     test('load idempotent (ikinci çağrı reload etmez)', () async {
       final repo = _FakeRepo([_acc('a')]);
       final cubit = VaultCubit(repo);

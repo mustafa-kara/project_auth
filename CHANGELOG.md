@@ -2,6 +2,190 @@
 
 Project progress log. Newest at the top.
 
+## 2026-09-02 (Phase 5 Patch 1 — Import/Export)
+
+Aegis + 2FAS import and a password-encrypted backup export. **NO Supabase schema change, NO new crypto
+primitive, NO sync-protocol change.** Imported tokens travel the existing `VaultCubit → EncryptedVaultRepository
+→ RawTokenStore → pushUpsert` path as opaque blobs.
+host **459/459 → 713/713**, integration **38 → 50** (not run on a device this patch — see the manual checklist
+below), `flutter analyze --fatal-infos` clean.
+
+### Source parsers — Aegis (plain JSON) + 2FAS (schema v4)
+
+`features/import_export/data/{aegis_parser,twofas_parser}.dart`, both pure Dart behind the `ImportParser`
+interface. The guiding rule: **one bad entry must never cost the user the rest of the file.** Every failure is
+recorded as a `SkippedEntry` (reason + an `"Issuer (account)"` label at most — **never a secret**) and the import
+continues. Deliberate tolerance decisions:
+
+- **HOTP without a counter → skipped**, not defaulted to 0. Both `counter` and `initialCounter` are accepted
+  (the field has been spelled both ways in the wild), but a guessed counter silently produces codes the server
+  rejects, which is worse than an honest "skipped".
+- **`motp` / `yandex` entries → skipped** (`unsupportedType`). Their "secret" is not an RFC 4648 Base32 OTP
+  secret, so importing them would only create tokens that generate wrong codes.
+- **Unknown algorithm → skipped** (e.g. a 2FAS service declaring `MD5`).
+- **Steam promotion:** an entry declared `totp` whose issuer is `steam` is promoted to `OtpType.steam`, matching
+  how the `otpauth://` parser already behaves. Steam entries then get `digits: 5` / SHA-1 forced, because the
+  Steam codec is fixed and the file's values are cosmetic.
+- **Encrypted sources are recognized, not mangled:** an Aegis vault with populated `header.slots`, or a 2FAS file
+  with `servicesEncrypted`, raises `EncryptedSourceException` with source-specific guidance instead of failing as
+  "malformed".
+- **`groups` is deliberately not read** — tags/folders are Patch 3.
+
+### Format detection + duplicate key
+
+- **`detectSource`** (`domain/import_format_detector.dart`) fingerprints the ROOT JSON object, in order:
+  `format == "projectauth-backup"` → our backup; `db` && `header` → Aegis; `services` || `servicesEncrypted` →
+  2FAS; otherwise `unknown`. The UI calls it first so it only asks for a backup password when the file actually
+  is one of our own backups.
+- **`dedupeKey`** (`domain/dedupe.dart`) = `issuer + accountName + Base32.decode→encode(secret)`, all trimmed and
+  lower-cased. The Base32 round trip is the point: exporters disagree on padding and case, so
+  `"jbswy3dp ehpk3pxp="` and `"JBSWY3DPEHPK3PXP"` must yield one key. `type`, `digits`, `period` and `counter`
+  are intentionally **excluded** — a re-import after the user edited digits, or an HOTP counter that has since
+  advanced, must still read as "already in your vault" rather than silently cloning the token.
+  **The key contains the secret** and is an in-memory comparison value only: never logged, persisted or shown.
+
+### Encrypted backup envelope + `BackupService`
+
+`projectauth-backup` **v1**: `{format, version, createdAt, kdf{alg,opslimit,memlimit,salt}, cipher{alg,nonce}, ciphertext}`.
+No new primitive — the same Argon2id + XChaCha20-Poly1305 IETF through the existing `CryptoService`, with
+`defaultKdfParams()` as the single source of the cost values.
+
+- **Why the AAD is derived and never stored:** the KDF cost parameters must live in the file so a future build can
+  open an old backup — which makes them **attacker-controlled**. `AAD = "backup|<v>|<kdf.alg>|<ops>|<mem>|<b64 salt>|<cipher.alg>"`
+  is recomputed from the envelope on every read, so an attacker who rewrites `opslimit` to `1` to cheapen a
+  brute force simply fails the tag check. A stored `aad` field would be attacker-controlled too and would defeat
+  the construction. The salt is re-encoded from its decoded bytes, so a non-canonical base64 cannot shift the AAD.
+- **Strict validation before sodium** (same doctrine as CRYPTO.md §8): `format`, `version`, ISO-8601 `createdAt`,
+  `kdf.alg`, `opslimit` 1..10, `memlimit` 8 MiB..512 MiB, 16-byte salt, `cipher.alg`, 24-byte nonce, ≥16-byte
+  ciphertext. Two-sided bounds: the floor blocks a cost downgrade even before the AAD check, the ceiling blocks a
+  DoS file that would ask sodium for an absurd allocation.
+- **The backup password is independent of the master password** — the file must open on a device with no vault, so
+  it cannot be tied to `KeyAttributes`. Neither the master password nor the recovery mnemonic opens a backup; the
+  export screen says so explicitly.
+- Wrong password and tampered bytes are indistinguishable by design (that is what an AEAD is) → one
+  `WrongBackupPasswordException`. A malformed record inside a decrypted payload is skipped, not fatal;
+  `importDetailed()` surfaces the drop count for the preview while `import()` returns just the usable accounts.
+- **`KeyManager.enforcePolicy`** extracted as a static: `KeyManager._enforcePasswordPolicy` now delegates to it and
+  `BackupService.export` calls it directly, so the backup password is held to exactly the same 12-character /
+  3-character-class rule and the same Turkish messages as the master password — refused **before** any Argon2id work.
+
+### `ImportService` — preview before anything is written
+
+`preview()` returns an `ImportPreview` (`toAdd`, `skipped`, `addCount`/`duplicateCount`/`skippedCount`) and touches
+the vault not at all, so previewing is always side-effect free. Parsing runs in `Isolate.run` (pure CPU on plain
+data); backup decryption stays on the main isolate because the crypto service holds native handles. An 8 MiB
+ceiling is enforced on the UTF-8 byte length before any JSON is decoded. Duplicates are reported separately from
+real failures — a file whose entries all turn out to be duplicates is a valid preview ("N already in your vault"),
+not an error. Our own backups additionally de-duplicate on the stable `id`, the only source that preserves it.
+
+### Shared `FakeCrypto`
+
+The inline fake from `encrypted_vault_raw_store_test.dart` moved to `test/support/fake_crypto.dart` and grew into a
+proper oracle: round-trip, **AAD binding**, **key binding** (derived from password + salt) and a hash-based stand-in
+for the Poly1305 tag — so wrong-password, tamper and parameter-downgrade behaviour is reproducible on the plain
+`flutter test` VM, where libsodium's plugin does not load. `BackupFakeCrypto` adds envelope-legal Argon2id
+parameters (the base fake's 1 MiB is below the envelope's 8 MiB floor on purpose).
+
+### UI, routes and packages
+
+- **`ImportPage`** (one page, three steps: pick file → backup password if needed → preview → confirm) and
+  **`ExportPage`** (two password fields + strength bar → save → a warning dialog that the backup password is the
+  only key). Both wrapped in `SecureScreenScope`; password fields obscured, cleared on dispose; **nothing is ever
+  put on the clipboard** and no secret reaches the screen or a log.
+- **Settings → "YEDEKLEME VE AKTARIM"** section ("İçe aktar" / "Şifreli yedek al"), and an
+  "import from another app" entry in the vault's add menu.
+- **Routes `/import` and `/export`** as children of the unlocked ShellRoute, added to the router guard's unlocked
+  allow-list. `_confirmImport` falls back to `context.go(Routes.vault)` when there is nothing to pop (a deep link
+  straight into `/import`), so the user is never stranded on a consumed preview.
+- **`DocumentPort`** (`pickJson({maxBytes})` / `saveJson({fileName, bytes})`) is the only seam onto the platform,
+  which keeps both pages testable without a plugin.
+- **`file_picker ^11.0.3`** — held on the 11.x line deliberately: `file_picker >=12.1.3` pulls
+  `windows_file_picker` → `win32 ^6.3.0`, while the existing `device_info_plus ^12.1.0` requires `win32 ^5.11.0`,
+  so the 12.x line does not resolve. 11.0.3 exposes the same `withData` / `saveFile(bytes:)` API, and SAF /
+  `UIDocumentPicker` need no runtime permission → no `share_plus`/`path_provider` fallback is required.
+- **`VaultCubit.addAll(List<OtpAccount>)`** — a whole import lands with **exactly one persist and one push**
+  instead of N round trips through `add()`. It deliberately does not delegate to `add()`; callers de-duplicate
+  beforehand.
+
+### ⚠️ Lock exemption during system file flows — a deliberate threat-model concession
+
+The system file picker runs in a separate process, so the app receives `paused` and the normal rule wipes the
+master key and tears the unlocked subtree down — which would make the feature impossible. Both flows are therefore
+wrapped in `VaultLockCubit.beginSystemFileFlow()` / `endSystemFileFlow()`:
+
+- skips the background lock **including `paused`** (the pre-existing biometric exemption only covered `inactive`);
+- bounded by a **fixed 2-minute budget**;
+- closed in a **`finally`** at every call site (cancel, throw and dispose all end it);
+- on resume `main.dart` checks `systemFileFlowExpired` and **locks immediately** when the budget was exceeded.
+
+`onAuthSignedOut` and an interactive `lock()` are **not** affected. **What is given up:** for at most two minutes,
+someone with physical access to an unlocked-but-backgrounded device finds the vault still unlocked, and the master
+key stays resident for that window. Recorded as a concession in [docs/CRYPTO.md §17](docs/CRYPTO.md).
+
+### Integration wiring + regression cover
+
+`locator.dart` now injects the concrete parsers (`ImportService(backup: ..., parsers: [AegisParser(), TwoFasParser()])`)
+and passes **no** `detector`/`keyOf`, so production always gets the real `detectSource`/`dedupeKey`.
+`test/features/import_export/end_to_end_test.dart` drives that exact wiring against the fixtures — every other test
+in the folder stubs one layer, so a mis-wired DI would have left them all green.
+`BackupService.parseEnvelope`/`parsePayload` and `ImportService.decodeRoot` were made `static`: they use no
+instance state, and keeping them off the implicit interface means test doubles that `implements` these classes do
+not have to stub pure JSON helpers.
+
+### Not verified on a device — manual checklist
+
+The integration suite (`integration_test/backup_service_test.dart`, 12 tests: real-libsodium round trip, wrong
+password, tampered ciphertext, tampered nonce, and the `opslimit`/`memlimit` downgrade that proves the AAD) was
+**not executed on a device or simulator in this patch**. Before release, run it and walk through:
+
+- import a **real** Aegis export and a **real** 2FAS export (field names verified against fixtures only so far);
+- `DocumentPort.saveJson` → `file_picker.saveFile(bytes:)` on a **real Android device and a real iOS device**;
+- **R4:** create a backup, `resetVault`, restore the backup, then confirm sync converges (a restore re-adds ids the
+  local tombstone had removed — a backup is a point-in-time copy, so resurrection is intended, but the
+  tombstone/sync interaction has not been exercised end to end).
+
+### Review follow-ups
+
+Fixes for the findings of the Phase 5 Patch 1 code review; same scope rules (no new crypto primitive, no server
+schema change, no sync-protocol change). Host suite **713/713 → 736/736**, `flutter analyze --fatal-infos` clean.
+
+- **[P1] The picker left a plaintext copy of the backup in the app cache.** `withData: true` does not stop
+  file_picker from materialising the picked document (iOS `NSTemporaryDirectory()`, Android
+  `cacheDir/file_picker/`) and it never deletes it. `FilePickerDocumentPort.pickJson` now calls
+  `FilePicker.clearTemporaryFiles()` from a `finally` — success, cancel and throw alike — swallowing every error so
+  a failed cleanup (desktop/web throw `UnimplementedError`) cannot turn a completed import into a failure. New
+  method-channel test covers all four exits.
+- **[P2] The file-flow budget could be lost to a race.** `endSystemFileFlow()` cleared the flag unconditionally, so
+  a picker result arriving before the `resumed` lifecycle event slipped past `main.dart`'s `systemFileFlowExpired`
+  check and the vault stayed open. The budget is now enforced **on `end`**: an already-lapsed exemption locks
+  immediately. The resume check stays as a second layer.
+- **[P2] 2FAS Steam heuristic read the wrong field.** It used the issuer-with-name fallback, so a service the user
+  named "Steam" with an ordinary 6-digit TOTP was rewritten into a 5-digit Steam token. It now reads `otp.issuer`
+  only; the `tokenType == steam` path is unchanged.
+- **[P3] The lock exemption now also ends on screen `dispose`.** A page torn down while the OS dialog was up
+  (router redirect, back gesture) left the exemption running until its budget lapsed. Both pages capture the cubit
+  in `didChangeDependencies` and close an active flow in `dispose` — which is what docs/CRYPTO.md §17 already
+  claimed.
+- **[P3] `BackupEnvelope.maxMemLimit` 1 GiB → 512 MiB.** A 1 GiB Argon2id allocation is an OOM kill on a mid-range
+  phone, i.e. a crash rather than a rejected file. No backup we write comes near the new ceiling.
+- **[P3] An all-skipped file no longer throws away the reason.** `dedupeSync` raised `EmptyImportException` whenever
+  parsing produced 0 accounts, discarding the skip records. It now throws only when the file yielded *nothing at
+  all*; 0 accounts + skips returns a preview with an empty `toAdd`, so the UI keeps "İçe aktar" disabled and shows
+  the "Atlananlar" list.
+- **[P3] `VaultCubit.addAll` drops ids already present.** The vault can change between preview and confirm (sync
+  pull, another path), which would have put the same id in the list twice — `removeById` deletes both, sync pushes
+  one row twice. A cheap set check keeps the existing row; an all-duplicate call is a no-op (no write, no push).
+- **[P3] `OtpAccount.toString()` no longer prints the secret.** Equatable's `stringify` defaults to ON in debug
+  builds, so any widget-tree dump, assertion message or failing CI test that interpolated an account leaked the
+  TOTP seed. `stringify => false`; equality and `hashCode` are untouched.
+- **[P3] `pushUpsert` chunks at 500 rows.** A large import or first sync sent thousands of bytea rows in one body
+  (413 / statement timeout). Chunks go out in order and the upsert is id-idempotent, so an interrupted push resumes.
+- **[P3] Docs + smaller notes:** `createdAt` is marked as unauthenticated-by-design next to the AAD derivation (the
+  authenticated timestamp is `exportedAt`, inside the payload); `pickJson` documents that its size ceiling is a UX
+  guard which cannot run before the bytes exist; docs/CRYPTO.md §16 limit table and §17 bullets updated.
+- **Deferred:** the detector's double JSON decode (an optimisation) and a pre-read size limit (documented as
+  impossible with this plugin) were left alone.
+
 ## 2026-09-01 (Phase 3.5 — CI, dependency cleanup, screen-capture protection, config fail-fast)
 
 Three infrastructure/hardening changes on top of Phase 3. **NO crypto routine, NO server schema, NO sync-protocol change.**

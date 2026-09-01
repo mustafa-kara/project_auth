@@ -1,0 +1,11 @@
+{
+  "services": [],
+  "servicesEncrypted": "3q2+7wAAAAABAgMEBQYHCAkKCwwNDg8QERITFBUWFxgZGhscHR4fICE=:AQIDBAUGBwgJCgsMDQ4PEA==:ERITFBUWFxgZGhscHR4f",
+  "groups": [],
+  "updatedAt": 1699999999500,
+  "schemaVersion": 4,
+  "appVersionCode": 50000,
+  "appVersionName": "5.0.0",
+  "appOrigin": "android",
+  "reference": "8J+SgSBmYWtlIHJlZmVyZW5jZSBibG9iIGZvciB0ZXN0cyBvbmx5"
+}

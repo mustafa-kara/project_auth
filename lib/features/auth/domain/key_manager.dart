@@ -72,16 +72,13 @@ class KeyManager {
       password.length >= minPasswordLength &&
       passwordClassCount(password) >= minPasswordClasses;
 
-  final CryptoService _crypto;
-
-  KeyManager(this._crypto);
-
-  Uint8List _aad(String s) => Uint8List.fromList(s.codeUnits);
-
-  /// Boş/çok kısa parola domain'de reddedilir (Argon2id'e gitmeden). Parola
-  /// içeriği kırpılarak HASH'lenmez — yalnız politika kontrolü trim'lenir;
+  /// Politika ihlalinde [WeakPasswordException] atar. **Mesajların tek kaynağı**
+  /// burasıdır: hem master parola (`setup`/`changePassword`) hem de şifreli yedek
+  /// parolası (`BackupService.export`) aynı metni ve aynı eşikleri kullanır.
+  ///
+  /// Parola içeriği kırpılarak HASH'lenmez — yalnız "boş mu" kontrolü trim'lenir;
   /// gerçek KEK türetiminde parola birebir (orijinal) kullanılır.
-  void _enforcePasswordPolicy(String password) {
+  static void enforcePolicy(String password) {
     if (password.trim().isEmpty) {
       throw const WeakPasswordException('Parola boş olamaz');
     }
@@ -95,6 +92,16 @@ class KeyManager {
           '$minPasswordClasses farklı tür içermeli');
     }
   }
+
+  final CryptoService _crypto;
+
+  KeyManager(this._crypto);
+
+  Uint8List _aad(String s) => Uint8List.fromList(s.codeUnits);
+
+  /// Boş/çok kısa parola domain'de reddedilir (Argon2id'e gitmeden).
+  /// Tek kaynak [enforcePolicy]'dir — burası yalnız ona delege eder.
+  void _enforcePasswordPolicy(String password) => enforcePolicy(password);
 
   /// Yeni vault kurulumu. masterKey + KEK(parola) + recovery key üretir,
   /// masterKey'i ikisiyle de sarmalar. **Hiçbir şey diske yazmaz** — dönen

@@ -89,10 +89,21 @@
 - [ ] Device push token registration (`devices`) + admin→push Edge Function.
 
 ## Phase 5 — Import/Export + service catalog (weeks 5–6)
-- [ ] Import: Google Authenticator (migration payload), Aegis, 2FAS.
-- [ ] Export (encrypted backup).
-- [ ] Issuer logo/matching via `catalog_services`.
-- [ ] Tag/folder organization.
+> **Patch 1 (2026-09-02) — DONE:** Aegis + 2FAS import and the encrypted backup export.
+> **NO server schema change, NO new crypto primitive.** Details: [CHANGELOG 2026-09-02](CHANGELOG.md).
+- [x] **Import: Aegis, 2FAS** ✅ (Patch 1, 2026-09-02) — plain-JSON Aegis (`db`/`header`) and 2FAS schema v4, format
+  auto-detection, tolerant per-entry skipping (the file never fails as a whole), Base32-canonicalizing dedupe key,
+  preview → confirm → single `VaultCubit.addAll`.
+- [ ] Import: **Google Authenticator** (migration protobuf payload) → **Patch 2**.
+- [x] **Export (encrypted backup)** ✅ (Patch 1, 2026-09-02) — own `projectauth-backup` v1 envelope, Argon2id +
+  XChaCha20-Poly1305 through the existing `CryptoService`, KDF parameters bound into the AAD. The backup password is
+  independent of the master password.
+- [x] **Issuer logo/matching via `catalog_services`** ✅ — already delivered in Phase 3 Patch 4 (issuer canonicalization;
+  `logo_url` is deliberately ignored for offline/privacy).
+- [ ] Tag/folder organization → **Patch 3** (this patch deliberately does not read Aegis/2FAS `groups`).
+- **Deps note:** `file_picker` is held at **^11.0.3**. `file_picker >=12.1.3` pulls `windows_file_picker` → `win32 ^6.3.0`,
+  while `device_info_plus ^12.1.0` requires `win32 ^5.11.0` → the 12.x line does not resolve. 11.0.3 has the same
+  `withData` / `saveFile(bytes:)` API.
 
 ## Phase 6 — Admin panel (Next.js) (can start in parallel, once the tables are ready in Phase 3)
 - [ ] Next.js + Supabase SDK + shadcn/ui + admin claim middleware (`app_metadata.admin`).

@@ -134,6 +134,53 @@ void main() {
     expect(repo.saveCount, 1);
   });
 
+  /// `load()` sonrası `sync.start` kendi ilk turunu (pull + push) unawaited
+  /// çalıştırır → sayaç ölçümleri DELTA ile yapılır. Bu helper o turu boşaltır.
+  Future<void> drain() async {
+    for (var i = 0; i < 8; i++) {
+      await Future<void>.delayed(Duration.zero);
+    }
+  }
+
+  test('addAll → TEK save + TEK pushChanged (N token için N push DEĞİL)',
+      () async {
+    cubit = buildWithSync();
+    await cubit.load();
+    await drain(); // start()'ın ilk turu bitsin → temiz taban
+    final pushBefore = remote.pushCount;
+    final saveBefore = repo.saveCount;
+
+    rawStore.dirty = [
+      RawTokenRecord(
+          id: 'new', blob: _blob(), updatedAtMs: 1, serverUpdatedAtIso: null),
+    ];
+    await cubit.addAll([_acc('a'), _acc('b'), _acc('c')]);
+    await drain();
+
+    expect(repo.saveCount - saveBefore, 1, reason: '3 token → tek persist');
+    expect(remote.pushCount - pushBefore, 1,
+        reason: '3 token → tek push (batched)');
+    expect(cubit.state.accounts.length, 3);
+  });
+
+  test('addAll boş liste → save da push da YOK', () async {
+    cubit = buildWithSync();
+    await cubit.load();
+    await drain();
+    final pushBefore = remote.pushCount;
+    final saveBefore = repo.saveCount;
+
+    rawStore.dirty = [
+      RawTokenRecord(
+          id: 'new', blob: _blob(), updatedAtMs: 1, serverUpdatedAtIso: null),
+    ];
+    await cubit.addAll(const []);
+    await drain();
+
+    expect(repo.saveCount, saveBefore);
+    expect(remote.pushCount, pushBefore);
+  });
+
   test('removeById → soft-delete (markDeleted), hard-remove DEĞİL', () async {
     cubit = buildWithSync(seed: [_acc('a')]);
     await cubit.load();

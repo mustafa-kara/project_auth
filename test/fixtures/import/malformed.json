@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "header": {
+    "slots": null,
+    "params": null
+  },
+  "db": {
+    "version": 3,
+    "entries": {
+      "0": {
+        "type": "totp",
+        "name": "alice@example.com",
+        "issuer": "GitHub",
+        "info": {
+          "secret": "JBSWY3DPEHPK3PXP",
+          "algo": "SHA1",
+          "digits": 6,
+          "period": 30
+        }
+      }
+    }
+  }
+}

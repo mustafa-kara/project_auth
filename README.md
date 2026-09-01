@@ -45,6 +45,7 @@ End-to-end (E2E) encrypted, multi-device synchronized **TOTP/HOTP authenticator*
 | Flutter — Phase 3 token sync (Patch 3) | ✅ Encrypted token push/pull + soft-delete (tombstone) + arrival-order LWW (server `updated_at`; per-record `sv` cursor). `RawTokenStore` (raw port without decrypt) + `SupabaseTokenRepository` + `TokenSyncService`. Realtime = trigger only → REST pull (bytea #1180); corrupt-row quarantine (`safeCursorIso` cap). **changePassword now performs an UPDATE on `key_attributes`** (`attrs_dirty_v1` retry marker); masterKey does not change → no token re-encryption. Settings live-sync toggle + AppBar sync indicator. **Only opaque ciphertext/nonce goes to the server; the `uid==null` legacy path is inert.** · **host 347/347** |
 | Flutter — Phase 3 devices+catalog (Patch 4) | ✅ `devices` record (random `device_id` uuid v4, GLOBAL; signedIn→register, resume→`last_seen` heartbeat + 0-row register-fallback; owner-only RLS). Public read tables (read-only): `catalog_services` → add-token issuer canonicalization (`logo_url` is IGNORED — offline/privacy), `feature_flags` → **`token_sync_enabled` kill-switch** (gate inside `TokenSyncService` → Realtime bypass disabled; `ensureLoaded` cache-ready; fallback=true; token sync ONLY — key_attributes excluded), `announcements` → read-only Settings section (`audience` client-filtered). NO Realtime → fetch+cache. **Cross-account correlation tradeoff documented.** Server schema unchanged; E2E untouched. · **host 413/413** |
 | Flutter — Phase 3.5 hardening | ✅ Security review fixes (release manifest + Auto Backup off, master password **min 12 + ≥3 character classes**, conditional clipboard auto-clear, `resetVault` server tombstone cleanup + `ResetPendingStore` retry, strict `OtpAccount.fromJson`), **ref-counted `SecureScreen`/`SecureScreenScope`** on vault/unlock/setup/recovery, Supabase config **fail-fast** (embedded fallbacks removed, `--dart-define` only), 8 unused codegen/test packages dropped + minor upgrades, **GitHub Actions CI** · **host 454/454** |
+| Flutter — Phase 5 Patch 1 (import/export) | ✅ (2026-09-02) Aegis (plain JSON) + 2FAS (schema v4) import: format auto-detection, tolerant per-entry skipping, Base32-canonicalizing dedupe key, preview → confirm → single `VaultCubit.addAll`. **Encrypted backup export** (`projectauth-backup` v1: Argon2id + XChaCha20-Poly1305 through the existing `CryptoService`, KDF parameters bound into the AAD, backup password independent of the master password). `file_picker ^11.0.3` `DocumentPort`, `/import` `/export` routes + guard, budgeted lock exemption for the system file picker ([docs/CRYPTO.md §17](docs/CRYPTO.md)). **Server schema unchanged.** · **host 713/713** |
 | Admin panel (Next.js) | ⏳ Phase 6 |
 
 **Live backend project:** `authenticator-dev` (Supabase, eu-central-1, PG17). Details: [PROJECT_INFO.md](supabase/PROJECT_INFO.md).
@@ -59,7 +60,7 @@ End-to-end (E2E) encrypted, multi-device synchronized **TOTP/HOTP authenticator*
 3. **Supabase auth + sync** — DB ✅; Flutter Patch 1 (auth) ✅ + Patch 2 (key_attributes) ✅ + Patch 3 (token sync + changePassword UPDATE) ✅ + Patch 4 (devices + catalog/feature_flags/announcements + token_sync kill-switch) ✅ — **Phase 3 DONE**
    - **Phase 3.5 — CI, deps, hardening (2026-09-01) — DONE:** GitHub Actions (`analyze --fatal-infos` + `test`), unused-dependency cleanup, ref-counted screen-capture protection, Supabase config fail-fast
 4. **Social sign-in + push** — Google/Apple Sign-In, FCM *(developer accounts required)*
-5. **Import/Export + catalog** — Google Auth / Aegis / 2FAS migration
+5. **Import/Export + catalog** — Patch 1 (Aegis + 2FAS import, encrypted backup export) ✅ 2026-09-02; Google Authenticator (protobuf) → Patch 2, tags/folders → Patch 3
 6. **Admin panel** — Next.js, analytics, announcements/push, feature flags
 7. **Hardening & release** — security review, store
 
@@ -104,14 +105,14 @@ In Android Studio / IntelliJ the same flag goes into Run → Edit Configurations
 ```bash
 flutter pub get
 flutter analyze          # lint — currently clean (CI runs it with --fatal-infos)
-flutter test             # 454/454 host — no --dart-define needed (Supabase is not initialized in tests)
+flutter test             # 713/713 host — no --dart-define needed (Supabase is not initialized in tests)
 flutter run --dart-define-from-file=env/dev.json   # run on a device/emulator
 ```
 
 > **libsodium tests on device/simulator:** the `sodium_libs` platform plugin is not loaded
 > on the plain `flutter test` VM host → crypto round-trip tests live under
-> `integration_test/` (**38 tests**: sodium service 8 + KeyManager 12 +
-> encrypted vault/migration 18). Run: `flutter test integration_test/ -d <device>`.
+> `integration_test/` (**50 tests**: sodium service 8 + KeyManager 12 +
+> encrypted vault/migration 18 + backup service 12). Run: `flutter test integration_test/ -d <device>`.
 >
 > **CI:** `.github/workflows/ci.yml` runs `flutter analyze --fatal-infos` + `flutter test` on every push to `main` and
 > every pull request (Flutter 3.38.6, ubuntu-latest); the integration suite is excluded because it needs a device/simulator.
@@ -128,6 +129,9 @@ lib/
     vault/      data/ — VaultRepository (secure_storage persistence)
                 presentation/{bloc,pages,widgets} — VaultCubit, VaultPage (search), OtpCard
     scan/       presentation — ScanPage (mobile_scanner QR scanning)
+    import_export/  domain/ — ImportService, BackupService, DocumentPort (pure Dart)
+                data/ — AegisParser, TwoFasParser, FilePickerDocumentPort
+                presentation/pages — ImportPage, ExportPage
   main.dart     DI init + MaterialApp.router + VaultCubit provider
 test/
   core/otp/     RFC 4226/6238 test vectors + URI parse tests

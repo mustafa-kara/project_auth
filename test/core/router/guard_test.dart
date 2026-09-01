@@ -63,6 +63,29 @@ void main() {
       expect(guardRedirect(s, Routes.settings), Routes.unlock);
     });
 
+    test('unlocked → /import + /export serbest (Faz 5 Patch 1)', () {
+      const s = VaultLockState.unlocked();
+      expect(guardRedirect(s, Routes.importData), isNull);
+      expect(guardRedirect(s, Routes.exportData), isNull);
+    });
+
+    test('locked/locking → /import + /export engellenir → /unlock', () {
+      // Token listesi ve şifreleme masterKey ister → kilitliyken açılmamalı.
+      for (final s in const [
+        VaultLockState.locked(),
+        VaultLockState.locking(),
+      ]) {
+        expect(guardRedirect(s, Routes.importData), Routes.unlock);
+        expect(guardRedirect(s, Routes.exportData), Routes.unlock);
+      }
+    });
+
+    test('uninitialized → /import + /export → /setup', () {
+      const s = VaultLockState.uninitialized();
+      expect(guardRedirect(s, Routes.importData), Routes.setup);
+      expect(guardRedirect(s, Routes.exportData), Routes.setup);
+    });
+
     test('keyAttributesCorrupted → /auth-integrity', () {
       const s = VaultLockState.keyAttributesCorrupted();
       expect(guardRedirect(s, Routes.vault), Routes.authIntegrity);

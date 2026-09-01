@@ -53,6 +53,15 @@ dependencies:
   crypto: ^3.0.7
   uuid: ^4.6.0
   flutter_svg: ^2.3.0
+  # Faz 5 Patch 1 — import/export dosya seçimi ve kaydı. TEK paket yeter:
+  # `pickFiles(withData: true)` bytes'ı belleğe okur (path/izin gerekmez; Android
+  # SAF + iOS document picker runtime izin İSTEMEZ) ve `saveFile(bytes:)` dosyayı
+  # Android/iOS'ta da yazar (paket kaynağı: mobil kanalda `bytes` ZORUNLU, masaüstünde
+  # verilirse yazılır) → share_plus/path_provider fallback'i GEREKMEZ.
+  # 11.x hattı: file_picker >=12.1.3 → windows_file_picker → win32 ^6.3.0 iken
+  # device_info_plus ^12.1.0 (Patch 5 Android SDK gate'i) win32 ^5.11.0 istiyor →
+  # 12.x sürüm çözümü ÇAKIŞIR. 11.0.3 aynı API'yi (withData/saveFile bytes) sunar.
+  file_picker: ^11.0.3
 
 dev_dependencies:
   flutter_test:

@@ -292,6 +292,42 @@ class VaultCubit extends Cubit<VaultState> {
     });
   }
 
+  /// Faz 5 Patch 1 — toplu ekleme (import). Listenin TAMAMI tek `save` ve tek
+  /// push ile yazılır.
+  ///
+  /// **[add]'e DELEGE EDİLMEZ (plan §3.6 / D7):** `add` her çağrıda tüm listeyi
+  /// diske yazar ve ayrı bir push tetikler → N token'lık bir import N kez şifreleme
+  /// + N push demek olurdu. Burada tek kritik bölümde tek `_emitAndPersist` +
+  /// tek `_pushAfterMutation` var.
+  ///
+  /// İçerik dedupe'u (issuer/hesap/secret) ÇAĞIRANIN işi
+  /// (`ImportService.preview` vault'a karşı zaten eler) — bu metot aldığı listeyi
+  /// SIRASINI koruyarak ekler.
+  ///
+  /// **Tek istisna, id-bazlı son eleme (review takibi):** önizleme ile onay
+  /// arasında vault değişebilir (sync pull, başka bir sekme, kullanıcı elle
+  /// ekledi) → o aralıkta gelen bir satır aynı `id`'ye sahip olabilirdi ve liste
+  /// aynı id'yi İKİ KEZ taşırdı (`removeById` ikisini birden siler, sync tek
+  /// satırı iki kez push eder). Ucuz bir set kontrolü bunu keser; düşen girdi
+  /// zaten vault'ta VAR olduğu için kullanıcı bir şey kaybetmez.
+  Future<void> addAll(List<OtpAccount> accounts) async {
+    await _awaitLoaded();
+    if (accounts.isEmpty) return; // no-op: yazma da push da yok
+    // Adım E ile aynı kanonikleştirme (katalog yoksa no-op).
+    final normalized = accounts.map(_canonicalize).toList(growable: false);
+    return _sequence(() async {
+      _guardIntegrity();
+      final existingIds = state.accounts.map((a) => a.id).toSet();
+      final fresh = <OtpAccount>[];
+      for (final account in normalized) {
+        if (existingIds.add(account.id)) fresh.add(account);
+      }
+      if (fresh.isEmpty) return; // hepsi bu arada eklenmiş → yazma da push da yok
+      await _emitAndPersist([...state.accounts, ...fresh]);
+      _pushAfterMutation();
+    });
+  }
+
   /// Stabil token id'sine göre siler (index değil). Faz 3 Patch 3: sync'li yolda
   /// **soft-delete** (tombstone push edilebilsin); legacy yolda eski hard-remove.
   Future<void> removeById(String id) async {

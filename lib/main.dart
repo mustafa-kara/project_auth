@@ -354,6 +354,16 @@ class _AuthenticatorAppState extends State<AuthenticatorApp>
     } else if (state == AppLifecycleState.inactive) {
       _lock.onAppBackgrounded(paused: false);
     } else if (state == AppLifecycleState.resumed) {
+      // Faz 5 Patch 1 (plan §3.2) — sistem dosya seçici akışı arka plan kilidini
+      // BÜTÇELİ olarak askıya alır. Bütçe biz yokken dolduysa muafiyet geçersizdir:
+      // muafiyeti kapat ve arka plana geçmiş gibi HEMEN kilitle (uzun süre arka
+      // planda kalmış bir cihaz muafiyetten faydalanmasın).
+      // (`endSystemFileFlow` bütçe aşımını kendisi de uygular; buradaki
+      // `onAppBackgrounded` ÇİFT GÜVENLİK — kilitli state'te no-op'tur.)
+      if (_lock.systemFileFlowExpired) {
+        _lock.endSystemFileFlow();
+        _lock.onAppBackgrounded(paused: true);
+      }
       // Faz 3 Patch 4 — resume'da device last_seen heartbeat (best-effort; 0 satır →
       // register-fallback). Yalnız signedIn iken (uid var). Vault kilidini etkilemez.
       final uid = _session.currentUid;

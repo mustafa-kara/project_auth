@@ -67,13 +67,36 @@ class SupabaseTokenRepository implements RemoteTokenRepository {
     }
   }
 
+  /// Tek `upsert` isteğinde gönderilen EN FAZLA satır sayısı (review takibi).
+  /// Büyük bir import/ilk-senkron tek gövdede binlerce bytea satırı yollardı →
+  /// PostgREST/gateway gövde limiti (413) ya da statement timeout. Parçalar
+  /// SIRAYLA gönderilir; upsert id-bazlı idempotent olduğu için yarıda kalan bir
+  /// push bir sonraki denemede kaldığı yerden tamamlanır.
+  @visibleForTesting
+  static const int upsertChunkSize = 500;
+
+  /// [records]'ı [upsertChunkSize]'lık ardışık parçalara böler (sıra korunur).
+  @visibleForTesting
+  static List<List<RawTokenRecord>> chunkRecords(List<RawTokenRecord> records) {
+    final out = <List<RawTokenRecord>>[];
+    for (var i = 0; i < records.length; i += upsertChunkSize) {
+      final end = (i + upsertChunkSize < records.length)
+          ? i + upsertChunkSize
+          : records.length;
+      out.add(records.sublist(i, end));
+    }
+    return out;
+  }
+
   @override
   Future<void> pushUpsert(String uid, List<RawTokenRecord> records) async {
     if (records.isEmpty) return;
     try {
-      final rows = [for (final r in records) toRow(uid, r)];
-      // id-bazlı idempotent: PK çakışmada UPDATE. updated_at/created_at GÖNDERİLMEZ.
-      await _client.from(_table).upsert(rows, onConflict: 'id');
+      for (final chunk in chunkRecords(records)) {
+        final rows = [for (final r in chunk) toRow(uid, r)];
+        // id-bazlı idempotent: PK çakışmada UPDATE. updated_at/created_at GÖNDERİLMEZ.
+        await _client.from(_table).upsert(rows, onConflict: 'id');
+      }
     } catch (e) {
       throw _mapError(e);
     }

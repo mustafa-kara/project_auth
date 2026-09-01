@@ -65,6 +65,7 @@ context (e.g. a masterKey-wrap blob cannot be opened as a token).
 | masterKey ← recovery key | `masterkey-recovery\|1` |
 | masterKey ← biometricKey (Patch 5) | `masterkey-biometric\|1` |
 | Token record (Patch 3) | `token\|1\|<id>` |
+| Encrypted backup (Phase 5) | `backup\|<v>\|<kdf.alg>\|<opslimit>\|<memlimit>\|<base64 salt>\|<cipher.alg>` |
 
 ## 5. Recovery key — our own BIP-39 implementation
 
@@ -365,3 +366,144 @@ Widget build(BuildContext context) => SecureScreenScope(
 
 **Never call enable/disable (or `acquire`/`release`) by hand** — manual pairing is exactly the bug the
 scope exists to prevent.
+
+## 16. Encrypted backup (Phase 5 Patch 1)
+
+`BackupService` writes a **password-encrypted copy of the whole vault** to a file the user keeps
+themselves. It introduces **no new crypto primitive**: the same Argon2id + XChaCha20-Poly1305 IETF
+pair as the key hierarchy, through the same `CryptoService`.
+
+The backup password is **independent of the master password**. The file must be openable on a device
+that has no vault yet, so it cannot be tied to `KeyAttributes`; a backup is therefore NOT recoverable
+with the master password or the recovery mnemonic. The export screen says so explicitly.
+
+### 16.1 Envelope
+
+```json
+{
+  "format": "projectauth-backup",
+  "version": 1,
+  "createdAt": "2026-09-02T10:11:12.000Z",
+  "kdf": { "alg": "argon2id", "opslimit": 3, "memlimit": 268435456, "salt": "<b64 16B>" },
+  "cipher": { "alg": "xchacha20poly1305-ietf", "nonce": "<b64 24B>" },
+  "ciphertext": "<b64>"
+}
+```
+
+The encrypted payload is `{"exportedAt": "...", "accounts": [OtpAccount.toJson(), ...]}` — the same
+JSON the local store uses, so the stable `id` survives a restore (which is what lets the import
+preview detect "already in your vault" by id rather than only by issuer/name).
+
+Everything outside `ciphertext` is public metadata. Nothing in the envelope reveals a secret, an
+issuer or an account name.
+
+### 16.2 Why the AAD is derived, never stored
+
+```
+AAD = "backup|<version>|<kdf.alg>|<opslimit>|<memlimit>|<base64 salt>|<cipher.alg>"   (UTF-8)
+```
+
+The KDF cost parameters live in the file, because a future build must be able to open an old backup.
+That makes them **attacker-controlled**: anyone holding the file can rewrite `opslimit` to `1` and
+brute-force the password far more cheaply. Feeding those exact fields into the AEAD's additional data
+binds them to the ciphertext — a downgraded envelope simply fails its tag check, so the attacker
+gains nothing and the honest user sees "wrong password or corrupted file".
+
+For the same reason the envelope has **no `aad` field**: a stored AAD would be attacker-controlled
+too and would defeat the whole construction. It is recomputed from the envelope on every read.
+The salt is re-encoded from its decoded bytes (`base64Encode`), so a non-canonical encoding in the
+file cannot produce a different AAD for identical salt bytes.
+
+### 16.3 Strict validation before sodium
+
+Same doctrine as §8 — the envelope is fully validated before a key is derived, so a malformed file
+reports a format error instead of masquerading as a wrong password (and costs no Argon2id work):
+
+| Field | Rule |
+|------|-------|
+| `format` | exactly `projectauth-backup` |
+| `version` | `1..supportedVersion`; greater → `UnsupportedBackupVersionException` |
+| `createdAt` | a parseable ISO-8601 timestamp |
+| `kdf.alg` | exactly `argon2id` |
+| `kdf.opslimit` | `1..10` |
+| `kdf.memlimit` | `8 MiB .. 512 MiB` |
+| `kdf.salt` | exactly `16` bytes (`crypto_pwhash_SALTBYTES`) |
+| `cipher.alg` | exactly `xchacha20poly1305-ietf` |
+| `cipher.nonce` | exactly `24` bytes (reuses `EncryptedBlob`) |
+| `ciphertext` | at least `16` bytes — the Poly1305 tag (reuses `EncryptedBlob`) |
+
+The bounds are two-sided on purpose: the lower bound blocks a cost downgrade even before the AAD
+check, and the upper bound blocks a denial-of-service file that would ask sodium for an absurd
+allocation. A fractional `num` is rejected rather than truncated, exactly as in §8.
+
+Wrong password and tampered bytes are **indistinguishable by design** (that is what an AEAD is), so
+both surface as the single `WrongBackupPasswordException`.
+
+### 16.4 Password policy
+
+`KeyManager.enforcePolicy` is the single source of both the thresholds and the Turkish messages
+(§7): `KeyManager._enforcePasswordPolicy` now delegates to it, and `BackupService.export` calls it
+directly. A weak backup password is refused **before** any Argon2id work.
+
+### 16.5 Hygiene and limits
+
+- The derived KEK is disposed in a `finally`, and the plaintext byte buffer is zero-filled on both
+  the export and the import path.
+- **Limit (accepted):** the intermediate `String` produced by `jsonEncode`/`utf8.decode` cannot be
+  wiped — Dart offers no way to pin or clear a `String`. The window is short and the buffer we can
+  reach is cleared; a heap dump of a live process remains outside this threat model.
+- A malformed record inside a decrypted payload is **skipped, not fatal** — one bad row must never
+  cost the user the rest of their tokens. `import()` returns the usable accounts; `importDetailed()`
+  additionally returns a `SkippedEntry` per dropped record so the preview can report the count. Skip
+  labels are `"Issuer (account)"` at most and **never** contain a secret.
+- Restoring an old backup can resurrect a token the user has since deleted: local deletion is a
+  tombstone (§9), and a restore re-adds the id. This is intended — a backup is a point-in-time copy.
+
+### 16.6 Tests
+
+Host (`test/features/import_export/`): envelope JSON + AAD derivation + strict validation;
+`BackupService` export/import against the shared `test/support/fake_crypto.dart`, which binds both
+the key (derived from password + salt) and the AAD and carries a hash-based stand-in for the
+Poly1305 tag, so wrong-password, tamper and parameter-downgrade behaviour is reproducible on the VM.
+
+Integration (`integration_test/backup_service_test.dart`, real libsodium, per §10): round-trip
+including the stable `id`, wrong password, tampered ciphertext, tampered nonce, and — the reason the
+AAD exists — an `opslimit`/`memlimit` downgrade that stays inside the accepted range and still fails
+to decrypt.
+
+## 17. System file-picker lock exemption (Phase 5 Patch 1)
+
+**This is a deliberate concession in the threat model, not a neutral implementation detail.** It is
+documented here so it is reviewed as such.
+
+The system file picker (Android SAF, iOS `UIDocumentPicker`) runs in a **separate process**. While it
+is on screen our app receives `paused`, and the normal lifecycle rule (§ `VaultLockCubit.onAppBackgrounded`)
+wipes the master key from memory and tears the unlocked subtree down. Applied literally, choosing a
+file would therefore always lock the vault before the import/export flow could finish — the feature
+would be impossible.
+
+The import and export flows are consequently wrapped in a
+`VaultLockCubit.beginSystemFileFlow()` / `endSystemFileFlow()` pair:
+
+- the exemption skips the background lock **including `paused`**, not only `inactive` (which is all
+  the pre-existing biometric-prompt exemption covers);
+- it is bounded by a **fixed 2-minute budget** — a picker left open longer is no longer protected;
+- every call site closes it in a **`finally`**, and the import/export screens additionally close it
+  from `State.dispose` (a screen torn down while the picker is up — router redirect, back gesture —
+  would otherwise leave it open), so cancel, throw and screen dispose all end it;
+- `endSystemFileFlow()` itself **locks immediately** when the budget has already lapsed, so an
+  over-long picker is caught even when the picker result arrives before the `resumed` lifecycle
+  event;
+- on resume `main.dart` repeats the check via `systemFileFlowExpired` and **locks immediately** when
+  the budget was exceeded, so an app parked in the background does not stay open indefinitely.
+
+**What the exemption does NOT cover:** `onAuthSignedOut` (the identity gate closing) and an
+interactive `lock()` still take effect during a flow.
+
+**What is actually given up:** during a window of at most 2 minutes, an attacker with physical access
+to an unlocked-but-backgrounded device can return to a still-unlocked vault, where the ordinary rule
+would have locked it on the first `paused`. The master key stays resident in memory for that window.
+The budget, the `finally` discipline and the resume check bound the exposure; they do not remove it.
+
+Covered by `test/features/auth/vault_lock_cubit_test.dart` (exemption honoured, budget expiry, the
+`finally` pairing) and by the import/export widget tests, which assert the begin/end call counts.

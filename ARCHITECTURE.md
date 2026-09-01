@@ -148,13 +148,35 @@ lib/
 │   │   ├── domain/ (Token entity, GenerateCode, AddToken, SyncTokens)
 │   │   └── presentation/ (VaultBloc, code cards, search, folders)
 │   ├── scanner/                 # QR scanning + manual entry
-│   ├── import_export/           # Google Auth / Aegis / 2FAS
+│   ├── import_export/           # Aegis / 2FAS import + encrypted backup (Phase 5 Patch 1)
+│   │   ├── domain/  (ImportService, BackupService, BackupEnvelope, detectSource, dedupeKey, DocumentPort)
+│   │   ├── data/    (AegisParser, TwoFasParser, FilePickerDocumentPort)
+│   │   └── presentation/ (ImportPage, ExportPage)
 │   ├── lock/                    # biometric/PIN app lock
 │   └── settings/                # theme, language, account, change password
 └── shared/                      # shared widgets
 ```
 
 The `otp/` core (TOTP/HOTP/Steam algorithms) is isolated as a separate `core/otp/` module and validated against the RFC 6238/4226 test vectors with unit tests.
+
+### 4.1 Import / Export (Phase 5 Patch 1)
+
+`features/import_export/` follows the same domain/data/presentation split. `domain/` is pure Dart — parsers are
+reached through the `ImportParser` interface and the file system through `DocumentPort`
+(`pickJson({maxBytes})` / `saveJson({fileName, bytes})`), so both pages are testable without a platform plugin.
+The concrete adapters live in `data/`.
+
+- **`file_picker ^11.0.3`**, held on the 11.x line on purpose: `file_picker >=12.1.3` pulls `windows_file_picker` →
+  `win32 ^6.3.0`, while the existing `device_info_plus ^12.1.0` needs `win32 ^5.11.0`, so the 12.x line does not
+  resolve. 11.0.3 exposes the same `withData` / `saveFile(bytes:)` API.
+- **`VaultCubit.addAll(List<OtpAccount>)`** applies a whole import with a single persist and a single push instead
+  of N calls to `add()`. Callers de-duplicate first.
+- **Routes `/import` and `/export`** are children of the unlocked ShellRoute and are listed in the router guard's
+  unlocked allow-list, so reaching them while locked still redirects to unlock.
+- **Lock exemption:** the system file picker backgrounds the app, so both flows are wrapped in
+  `VaultLockCubit.beginSystemFileFlow()` / `endSystemFileFlow()` — a budgeted, deliberate threat-model concession
+  documented in [docs/CRYPTO.md §17](docs/CRYPTO.md).
+- Supabase schema is **unchanged**: imported tokens travel the existing encrypted-blob path.
 
 ---
 

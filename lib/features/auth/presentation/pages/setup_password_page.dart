@@ -15,6 +15,7 @@ import '../../../../core/ui/tokens.dart';
 import '../../../../core/ui/widgets/app_text_field.dart';
 import '../../../../core/ui/widgets/auth_bits.dart';
 import '../../../../core/ui/widgets/auth_scaffold.dart';
+import '../../../../core/ui/widgets/password_strength_bar.dart';
 import '../../domain/key_manager.dart';
 import '../bloc/vault_lock_cubit.dart';
 
@@ -108,7 +109,7 @@ class _SetupPasswordPageState extends State<SetupPasswordPage> {
           ),
           if (_passwordCtrl.text.isNotEmpty) ...[
             const SizedBox(height: Gap.sm),
-            _PasswordStrengthBar(password: _passwordCtrl.text),
+            PasswordStrengthBar(password: _passwordCtrl.text),
           ],
           const SizedBox(height: Gap.md),
           AppTextField(
@@ -137,59 +138,5 @@ class _SetupPasswordPageState extends State<SetupPasswordPage> {
     // Yeni master parola klavyeden giriliyor → ekran görüntüsü / ekran kaydı /
     // recents önizleme koruması (hassas ekran).
     return SecureScreenScope(child: page);
-  }
-}
-
-/// Parola güç göstergesi (color-not-only: dolu çubuk + metin etiketi + ikon).
-/// Skor `KeyManager` politikasından türetilir → tek doğruluk noktası.
-class _PasswordStrengthBar extends StatelessWidget {
-  const _PasswordStrengthBar({required this.password});
-
-  final String password;
-
-  /// 0 = zayıf, 1 = orta, 2 = güçlü. Politika tabanı (min uzunluk + min sınıf)
-  /// karşılanmadan "güçlü" verilmez.
-  int get _score {
-    final len = password.length;
-    final classes = KeyManager.passwordClassCount(password);
-    if (len < KeyManager.minPasswordLength ||
-        classes < KeyManager.minPasswordClasses) {
-      return 0;
-    }
-    if (len >= 16 && classes >= 4) return 2;
-    return 1;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final score = _score;
-    final (label, color, icon) = switch (score) {
-      0 => ('Zayıf', scheme.error, Icons.warning_amber_rounded),
-      1 => ('Orta', Colors.orange, Icons.shield_outlined),
-      _ => ('Güçlü', Colors.green, Icons.verified_user_outlined),
-    };
-    return Semantics(
-      label: 'Parola gücü: $label',
-      child: Row(
-        children: [
-          Expanded(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(Radii.sm),
-              child: LinearProgressIndicator(
-                value: (score + 1) / 3,
-                minHeight: 6,
-                backgroundColor: scheme.surfaceContainerHighest,
-                color: color,
-              ),
-            ),
-          ),
-          const SizedBox(width: Gap.sm),
-          Icon(icon, size: 16, color: color),
-          const SizedBox(width: 4),
-          Text(label, style: Theme.of(context).textTheme.bodySmall),
-        ],
-      ),
-    );
   }
 }

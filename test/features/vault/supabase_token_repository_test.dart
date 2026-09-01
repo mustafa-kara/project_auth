@@ -53,6 +53,42 @@ void main() {
     });
   });
 
+  group('pushUpsert chunking', () {
+    test('1200 kayıt → 3 parça (500/500/200) = 3 upsert çağrısı', () {
+      final records = [for (var i = 0; i < 1200; i++) _rec('t$i')];
+      final chunks = SupabaseTokenRepository.chunkRecords(records);
+      expect(chunks, hasLength(3),
+          reason: 'pushUpsert her parça için bir upsert gönderir');
+      expect(chunks.map((c) => c.length), [500, 500, 200]);
+    });
+
+    test('sıra korunur (parçalar birleştirilince orijinal liste)', () {
+      final records = [for (var i = 0; i < 1200; i++) _rec('t$i')];
+      final flat = [
+        for (final c in SupabaseTokenRepository.chunkRecords(records)) ...c
+      ];
+      expect(flat.map((r) => r.id), records.map((r) => r.id));
+    });
+
+    test('sınır boyu tek parça kalır, +1 ikiye böler', () {
+      const size = SupabaseTokenRepository.upsertChunkSize;
+      expect(
+        SupabaseTokenRepository.chunkRecords(
+            [for (var i = 0; i < size; i++) _rec('t$i')]),
+        hasLength(1),
+      );
+      expect(
+        SupabaseTokenRepository.chunkRecords(
+            [for (var i = 0; i < size + 1; i++) _rec('t$i')]),
+        hasLength(2),
+      );
+    });
+
+    test('boş liste → parça YOK (istek gönderilmez)', () {
+      expect(SupabaseTokenRepository.chunkRecords(const []), isEmpty);
+    });
+  });
+
   group('tryParseRow', () {
     test('round-trip KAYIPSIZ (toRow → satır → tryParseRow)', () {
       final rec = _rec('t1');

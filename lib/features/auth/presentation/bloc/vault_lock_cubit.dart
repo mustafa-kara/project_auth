@@ -156,6 +156,13 @@ class VaultLockCubit extends Cubit<VaultLockState> {
   /// retry (tombstoning only pre-reset rows). Optional (null → no retry; legacy/tests).
   final ResetPendingStore? _resetPendingStore;
 
+  /// Clock, injected so the file-flow budget can be tested without waiting.
+  final DateTime Function() _now;
+
+  /// Deadline of the running system file flow (import/export), or null when no
+  /// flow is active. See [beginSystemFileFlow].
+  DateTime? _systemFileFlowUntil;
+
   VaultLockCubit({
     required KeyManager keyManager,
     required KeyAttributesStore attrsStore,
@@ -167,7 +174,9 @@ class VaultLockCubit extends Cubit<VaultLockState> {
     String? uid,
     AttrsDirtyStore? attrsDirtyStore,
     ResetPendingStore? resetPendingStore,
+    DateTime Function()? now,
   })  : _keyManager = keyManager,
+        _now = now ?? DateTime.now,
         _attrsStore = attrsStore,
         _migrate = migrate,
         _biometric = biometric,
@@ -521,6 +530,72 @@ class VaultLockCubit extends Cubit<VaultLockState> {
     }
   }
 
+  // --- System file flow exemption (Faz 5 Patch 1, plan §3.2 — team lead approved) ---
+
+  /// Suspends the background auto-lock while the OS document UI is on screen.
+  ///
+  /// **This is a deliberate, budgeted security trade-off, not an oversight.**
+  /// Android's SAF picker and iOS' document picker run in another process, so
+  /// the app receives `AppLifecycleState.paused` — the exact signal
+  /// [onAppBackgrounded] uses to wipe the master key and tear the unlocked
+  /// subtree down (ARCHITECTURE §2.3). Without an exemption, every import or
+  /// export would drop the user back on the unlock screen the moment they pick
+  /// a file, making the feature unusable. So while a flow is active we skip the
+  /// background lock entirely — `paused` INCLUDED, unlike the
+  /// `_biometricPromptInFlight` exemption which only covers `inactive`.
+  ///
+  /// The weakening is bounded three ways:
+  ///  1. **Time budget** — the exemption expires [budget] (default 2 minutes)
+  ///     after this call; a picker left open longer is no longer protected.
+  ///  2. **`finally` discipline** — every call site wraps the picker in
+  ///     try/finally so [endSystemFileFlow] runs on success, cancel, throw and
+  ///     screen dispose alike.
+  ///  3. **Budget check on end** — [endSystemFileFlow] locks straight away when
+  ///     the budget already lapsed, so an over-long picker is caught even if the
+  ///     picker result arrives BEFORE the `resumed` lifecycle event.
+  ///     `main.dart` repeats the check on resume ([systemFileFlowExpired]) for a
+  ///     flow that is still open, so a stolen device is not held open
+  ///     indefinitely either way.
+  ///
+  /// Note this covers the LIFECYCLE lock only: [onAuthSignedOut] (identity gate
+  /// closed) and interactive [lock] still take effect during a flow.
+  /// Rationale is recorded in docs/CRYPTO.md §17.
+  void beginSystemFileFlow({Duration budget = const Duration(minutes: 2)}) {
+    _systemFileFlowUntil = _now().add(budget);
+  }
+
+  /// Ends the exemption. Idempotent — safe to call from a `finally` that may run
+  /// after the budget already lapsed.
+  ///
+  /// If the budget HAS lapsed, the lock the exemption suppressed is applied here
+  /// and now. Clearing the flag first and relying on `main.dart`'s resume check
+  /// alone loses the lock whenever the picker's result lands before the
+  /// `resumed` lifecycle event — a race the platform makes no promises about
+  /// (review follow-up).
+  void endSystemFileFlow() {
+    final until = _systemFileFlowUntil;
+    _systemFileFlowUntil = null;
+    if (until != null && !_now().isBefore(until)) {
+      onAppBackgrounded(paused: true);
+    }
+  }
+
+  /// A file flow is running AND still inside its budget.
+  bool get _fileFlowActive {
+    final until = _systemFileFlowUntil;
+    return until != null && _now().isBefore(until);
+  }
+
+  /// Exposed for tests/UI: is the background-lock exemption currently in force?
+  bool get systemFileFlowActive => _fileFlowActive;
+
+  /// A file flow was begun but its budget has run out. `main.dart` checks this on
+  /// resume and locks immediately (the exemption must not survive the budget).
+  bool get systemFileFlowExpired {
+    final until = _systemFileFlowUntil;
+    return until != null && !_now().isBefore(until);
+  }
+
   // --- Lock / lifecycle ---
 
   /// Kilitle — tek sahiplik modeli: `locking` emit (guard subtree/`VaultCubit`'i
@@ -574,7 +649,17 @@ class VaultLockCubit extends Cubit<VaultLockState> {
   /// `_biometricPromptInFlight` ise abort ETME (başarılı biyometri unlock'u sistem
   /// prompt'unun ürettiği inactive yüzünden yarıda kesilmesin). Diğer durumlarda
   /// `inactive` de güvenlik-strict davranır (önceki Faz 2 kararı korunur).
+  ///
+  /// **[beginSystemFileFlow] (Faz 5 Patch 1):** bir sistem dosya seçici akışı
+  /// bütçesi içinde AÇIKSA bu metot TAMAMEN atlanır — `paused` DAHİL. Bilinçli,
+  /// bütçeli taviz; gerekçe ve sınırları [beginSystemFileFlow] doc'unda.
   void onAppBackgrounded({required bool paused}) {
+    // Sistem dosya seçici (import/export) açıkken arka plan kilidi UYGULANMAZ —
+    // picker başka bir process'te çalıştığı için `paused` bu akışın NORMAL bir
+    // adımı. Bütçe dolduğunda `_fileFlowActive` false olur → koruma geri gelir;
+    // resume'da `main.dart` bütçe aşımını ayrıca kilitle karşılar.
+    if (_fileFlowActive) return;
+
     // Biyometri prompt'u devam ederken gelen `inactive` (paused=false) → MUAF.
     // Bu sistem prompt'unun kendisinin ürettiği geçici durum; gerçek arka plan değil.
     if (!paused && _biometricPromptInFlight) return;
