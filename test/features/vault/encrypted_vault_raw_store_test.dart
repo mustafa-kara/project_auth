@@ -1,7 +1,8 @@
 /// Faz 3 Patch 3 — EncryptedVaultRepository'nin RawTokenStore yüzü + merge testleri.
 ///
 /// Decrypt edilmemiş ham port: exportRaw / importRemote(LWW) / markDeleted (tombstone).
-/// Gerçek libsodium yerine round-trip yapan FakeCrypto kullanılır (host VM'de plugin yok).
+/// Gerçek libsodium yerine round-trip yapan paylaşılan `FakeCrypto`
+/// (`test/support/fake_crypto.dart`) kullanılır (host VM'de plugin yok).
 library;
 
 import 'dart:convert';
@@ -9,12 +10,12 @@ import 'dart:typed_data';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:project_auth/core/crypto/crypto_service.dart';
 import 'package:project_auth/core/crypto/encrypted_blob.dart';
-import 'package:project_auth/core/crypto/key_handle.dart';
 import 'package:project_auth/core/otp/otp_account.dart';
 import 'package:project_auth/features/vault/data/encrypted_vault_repository.dart';
 import 'package:project_auth/features/vault/domain/remote_token_repository.dart';
+
+import '../../support/fake_crypto.dart';
 
 // --- Fakes ---
 
@@ -63,59 +64,9 @@ class FakeSecureStorage implements FlutterSecureStorage {
   noSuchMethod(Invocation invocation) => throw UnimplementedError();
 }
 
-class _FakeKey implements KeyHandle {
-  @override
-  void dispose() {}
-}
-
-/// Round-trip fake: ciphertext = 16-byte tag (sabit) + plaintext + aad işareti.
-/// decrypt: aad eşleşmezse DecryptException benzeri (FormatException) at.
-class FakeCrypto implements CryptoService {
-  @override
-  EncryptedBlob encrypt({
-    required Uint8List plaintext,
-    required KeyHandle key,
-    required Uint8List aad,
-  }) {
-    // ciphertext: [16B tag][aadLen:1][aad][plaintext]  → decrypt geri ayıklar.
-    final tag = Uint8List(16);
-    final body = <int>[...tag, aad.length, ...aad, ...plaintext];
-    return EncryptedBlob(
-      nonce: Uint8List(24),
-      ciphertext: Uint8List.fromList(body),
-    );
-  }
-
-  @override
-  Uint8List decrypt({
-    required EncryptedBlob blob,
-    required KeyHandle key,
-    required Uint8List aad,
-  }) {
-    final c = blob.ciphertext;
-    final aadLen = c[16];
-    final storedAad = c.sublist(17, 17 + aadLen);
-    if (!_eq(storedAad, aad)) {
-      throw const FormatException('FakeCrypto: AAD mismatch (tamper)');
-    }
-    return Uint8List.fromList(c.sublist(17 + aadLen));
-  }
-
-  static bool _eq(List<int> a, List<int> b) {
-    if (a.length != b.length) return false;
-    for (var i = 0; i < a.length; i++) {
-      if (a[i] != b[i]) return false;
-    }
-    return true;
-  }
-
-  @override
-  noSuchMethod(Invocation invocation) => throw UnimplementedError();
-}
-
 EncryptedVaultRepository _repo(FakeSecureStorage storage) =>
     EncryptedVaultRepository(
-      masterKey: _FakeKey(),
+      masterKey: FakeKeyHandle(),
       crypto: FakeCrypto(),
       storage: storage,
     );
@@ -312,7 +263,7 @@ void main() {
     final blob = FakeCrypto()
         .encrypt(
             plaintext: Uint8List.fromList(utf8.encode(jsonEncode(_acc('old').toJson()))),
-            key: _FakeKey(),
+            key: FakeKeyHandle(),
             aad: Uint8List.fromList('token|1|oldid'.codeUnits))
         ;
     storage.data['vault_encrypted_v1'] = jsonEncode([

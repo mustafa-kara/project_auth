@@ -1,13 +1,21 @@
 /// Orchestrates raw file text → preview the user can confirm before anything is
 /// written to the vault.
 ///
-/// Filled by W2 (parsing runs off the UI isolate; tests drive the sync path).
+/// Parsing runs off the UI isolate; tests drive the synchronous core directly.
 /// This layer never touches the vault itself — the caller applies the result via
 /// `VaultCubit.addAll`, so a preview is always side-effect free.
 library;
 
+import 'dart:convert';
+import 'dart:isolate';
+
+import 'package:flutter/foundation.dart';
+
 import '../../../core/otp/otp_account.dart';
 import 'backup_service.dart';
+import 'dedupe.dart';
+import 'import_exceptions.dart';
+import 'import_format_detector.dart';
 import 'import_models.dart';
 
 /// What the confirm screen renders: the accounts that would be added plus the
@@ -44,26 +52,184 @@ class ImportService {
 
   final BackupService backup;
 
-  ImportService({List<ImportParser>? parsers, required this.backup})
-      : parsers = parsers ?? const <ImportParser>[];
+  /// Root-JSON fingerprinting. Injectable only so this service can be tested
+  /// without the real detector; production always uses `detectSource`.
+  final ImportSource Function(Map<String, dynamic> json) _detector;
+
+  /// Duplicate identity function. Injectable for the same reason; production
+  /// always uses `dedupeKey`.
+  final String Function(OtpAccount account) _keyOf;
+
+  /// [detector] and [keyOf] exist only so this service can be unit-tested before
+  /// W1's `detectSource`/`dedupeKey` land; production wiring passes neither.
+  ImportService({
+    List<ImportParser>? parsers,
+    required this.backup,
+    ImportSource Function(Map<String, dynamic> json)? detector,
+    String Function(OtpAccount account)? keyOf,
+  })  : parsers = parsers ?? const <ImportParser>[],
+        _detector = detector ?? detectSource,
+        _keyOf = keyOf ?? dedupeKey;
 
   /// Hard ceiling on file size (8 MiB): a real export is orders of magnitude
   /// smaller, and the whole file is decoded in memory.
   static const int maxBytes = 8 * 1024 * 1024;
 
   /// Decodes [raw] far enough to fingerprint it. Throws
-  /// `MalformedImportFileException` when it is not a JSON object.
-  ImportSource detect(String raw) {
-    throw UnimplementedError('W2 fills this');
-  }
+  /// [MalformedImportFileException] when it is not a JSON object, and
+  /// [ImportFileTooLargeException] before decoding an oversized file.
+  ///
+  /// Public (and cheap) on purpose: the UI calls it first so it can ask for the
+  /// backup password only when the file actually is one of our own backups.
+  ImportSource detect(String raw) => _detector(decodeRoot(raw));
 
   /// Parses, deduplicates against [existing] and returns the preview.
-  /// [backupPassword] is required only for our own encrypted backup format.
+  /// [backupPassword] is required only for our own encrypted backup format;
+  /// omitting it there is a programming error ([ArgumentError]) because [detect]
+  /// lets the caller find out before ever calling this.
   Future<ImportPreview> preview({
     required String raw,
     required List<OtpAccount> existing,
     String? backupPassword,
+  }) async {
+    final root = decodeRoot(raw);
+    final source = _detector(root);
+    if (source == ImportSource.unknown) {
+      throw const UnsupportedImportFormatException();
+    }
+
+    if (source == ImportSource.projectauthBackup) {
+      if (backupPassword == null || backupPassword.isEmpty) {
+        throw ArgumentError.value(backupPassword, 'backupPassword',
+            'required for ${BackupService.formatId} files — call detect() first');
+      }
+      // Decryption cannot move to a worker isolate: the crypto service holds
+      // native handles. Argon2id itself already runs isolated inside sodium.
+      final payload =
+          await backup.importDetailed(json: raw, password: backupPassword);
+      return dedupeSync(
+        ParsedImport(
+          source: source,
+          accounts: payload.accounts,
+          skipped: payload.skipped,
+        ),
+        existing: existing,
+        keyOf: _keyOf,
+      );
+    }
+
+    // Everything below is pure CPU work on plain data → safe to move off the UI
+    // isolate. Only sendable values are captured (no `this`, no plugins).
+    final selected = parsers.where((p) => p.source == source).toList();
+    final keyOf = _keyOf;
+    return Isolate.run(() => parseAndDedupeSync(
+          root: root,
+          source: source,
+          parsers: selected,
+          existing: existing,
+          keyOf: keyOf,
+        ));
+  }
+
+  /// Size guard (UTF-8 bytes) → root JSON object. Shared by [detect] and
+  /// [preview] so an oversized or unreadable file is rejected on both entries.
+  @visibleForTesting
+  Map<String, dynamic> decodeRoot(String raw) {
+    // `raw` is already a Dart String, so the meaningful ceiling is what it costs
+    // as UTF-8 bytes (what the file actually was).
+    final bytes = utf8.encode(raw).length;
+    if (bytes > maxBytes) {
+      throw ImportFileTooLargeException(bytes, maxBytes);
+    }
+    Object? decoded;
+    try {
+      decoded = jsonDecode(raw);
+    } on FormatException {
+      throw const MalformedImportFileException('not valid JSON');
+    }
+    if (decoded is Map<String, dynamic>) return decoded;
+    if (decoded is Map) {
+      return decoded.map((k, v) => MapEntry(k.toString(), v));
+    }
+    throw const MalformedImportFileException('root is not a JSON object');
+  }
+
+  /// The whole CPU-bound half of [preview] for non-backup sources: pick the
+  /// parser, parse, deduplicate. Static and free of `this` so it can be sent to
+  /// a worker isolate, and synchronous so tests can drive it directly.
+  @visibleForTesting
+  static ImportPreview parseAndDedupeSync({
+    required Map<String, dynamic> root,
+    required ImportSource source,
+    required List<ImportParser> parsers,
+    required List<OtpAccount> existing,
+    required String Function(OtpAccount account) keyOf,
   }) {
-    throw UnimplementedError('W2 fills this');
+    ImportParser? parser;
+    for (final candidate in parsers) {
+      if (candidate.source == source) {
+        parser = candidate;
+        break;
+      }
+    }
+    if (parser == null) {
+      // Detected a format we have no parser wired for — same user-facing
+      // outcome as an unrecognized file.
+      throw const UnsupportedImportFormatException();
+    }
+    return dedupeSync(parser.parse(root), existing: existing, keyOf: keyOf);
+  }
+
+  /// Drops accounts already present in [existing] ([SkipReason.alreadyInVault])
+  /// and repeats within the file ([SkipReason.duplicateInFile], first wins).
+  ///
+  /// Our own backups additionally match on the stable `id`, because they are the
+  /// only source that preserves it — a restore over a partially synced vault
+  /// must not clone tokens whose issuer/name the user has since edited.
+  ///
+  /// [EmptyImportException] is raised when *parsing* produced nothing at all. A
+  /// file whose entries all turn out to be duplicates is NOT empty: the preview
+  /// still has something worth showing ("N already in your vault").
+  @visibleForTesting
+  static ImportPreview dedupeSync(
+    ParsedImport parsed, {
+    required List<OtpAccount> existing,
+    required String Function(OtpAccount account) keyOf,
+  }) {
+    if (parsed.accounts.isEmpty) throw const EmptyImportException();
+
+    final matchIds = parsed.source == ImportSource.projectauthBackup;
+    final existingKeys = existing.map(keyOf).toSet();
+    final existingIds =
+        matchIds ? existing.map((a) => a.id).toSet() : const <String>{};
+
+    final seenKeys = <String>{};
+    final seenIds = <String>{};
+    final toAdd = <OtpAccount>[];
+    final skipped = <SkippedEntry>[...parsed.skipped];
+
+    for (final account in parsed.accounts) {
+      final key = keyOf(account);
+      if (existingKeys.contains(key) ||
+          (matchIds && existingIds.contains(account.id))) {
+        skipped.add(SkippedEntry(
+            reason: SkipReason.alreadyInVault, label: account.label));
+        continue;
+      }
+      if (seenKeys.contains(key) || (matchIds && seenIds.contains(account.id))) {
+        skipped.add(SkippedEntry(
+            reason: SkipReason.duplicateInFile, label: account.label));
+        continue;
+      }
+      seenKeys.add(key);
+      if (matchIds) seenIds.add(account.id);
+      toAdd.add(account);
+    }
+
+    return ImportPreview(
+      source: parsed.source,
+      toAdd: List<OtpAccount>.unmodifiable(toAdd),
+      skipped: List<SkippedEntry>.unmodifiable(skipped),
+    );
   }
 }
