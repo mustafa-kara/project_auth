@@ -42,6 +42,10 @@
 - **Party we do NOT trust:** the Supabase server / DB administrator / an attacker — even if they read the DB, they must not be able to decrypt the TOTP secrets.
 - **Party we trust:** the user's device (secure enclave/keystore) and the master password held in the user's mind.
 - **Conclusion:** every secret sent to the server must be **encrypted on the client side**. The server only sees opaque blobs.
+- **Partially mitigated (2026-09-01):** an on-device **observer** — shoulder-surfing, screenshot malware, or a screen
+  recorder — is a different threat from the server. Sensitive screens (vault, unlock, setup, the three recovery screens)
+  are marked with `SecureScreenScope` → Android `FLAG_SECURE`. **iOS has no equivalent**, so only the recents/background
+  snapshot is hidden there. See [docs/CRYPTO.md §15](docs/CRYPTO.md).
 
 ### 2.2 Key hierarchy (Ente model)
 
@@ -82,6 +86,10 @@ Master Password (set by the user — SEPARATE from the login password)
   - Here `local_auth` only triggers the UI prompt; **the real security lies in the OS keystore access-control** (a "success" return from local_auth alone does not grant access to the key — the keystore itself holds the key behind biometrics).
   - `flutter_secure_storage` is used to store this wrapped blob; the access-control requirements are configured through the platform channel (a thin native bridge if needed).
 - Fallback when biometrics fail/are absent: the user enters the master password → KEK → master key.
+- **Master password policy** (single source of truth in `KeyManager`): minimum **12 characters** and at least
+  **3 distinct character classes** (upper/lower/digit/symbol) — raised from "min 8" on 2026-06-19.
+- **Android Auto Backup is disabled** (`allowBackup=false`, `fullBackupContent=false`): `flutter_secure_storage`'s
+  `EncryptedSharedPreferences` must not be backed up (privacy + a new-device Keystore mismatch would corrupt the vault).
 
 ### 2.4 Encryption primitives
 | Purpose | Primitive |
@@ -110,10 +118,10 @@ Data (Repository impl + DataSource + DTO) ── Supabase, secure storage, crypt
 ```
 
 - The **View** never calls the Repository/Supabase directly; it only talks to the Bloc/Cubit.
-- **Bloc/Cubit** = the ViewModel in MVVM. State is immutable (Freezed/Equatable).
+- **Bloc/Cubit** = the ViewModel in MVVM. State is immutable — hand-written classes with `equatable` (**no `freezed` / no codegen**; the unused codegen packages were removed on 2026-09-01).
 - **Domain** is pure Dart, testable, imports no packages (even the crypto interface is abstract here).
 - **Data** holds the Supabase + secure storage + libsodium implementations.
-- Dependency injection: `get_it` + `injectable` (or a hand-written composition root).
+- Dependency injection: a **hand-written `get_it` composition root** (`lib/core/di/locator.dart`, `configureDependencies()`). `injectable` codegen was evaluated and dropped — it was never used.
 
 ---
 
@@ -449,7 +457,7 @@ carry a secret/masterKey). The server schema DID NOT CHANGE. None are in Realtim
 ## 8. Test Strategy
 - **Crypto & OTP:** RFC test vectors + golden-file tests (encrypt→decrypt round-trip, password change, recovery).
 - **Domain/UseCase:** pure unit tests (mock repository).
-- **Bloc:** `bloc_test`.
+- **Bloc:** plain `flutter_test` + `mocktail` over the cubit's `stream`/`state` (`bloc_test` was removed on 2026-09-01 — unused).
 - **Data:** integration against Supabase (test project) + mock.
 - **E2E security test:** a test verifying that the payloads sent to the server are genuinely opaque.
 - **RLS tests:** User A **cannot read/write** B's `tokens`/`key_attributes` rows (cross-user isolation). The test must fail when RLS is off (regression protection).

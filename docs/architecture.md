@@ -152,7 +152,20 @@ Key transitions: `bootstrap`, `beginSetup`, `commitSetup`, `cancelSetup`, `unloc
 
 ## 8. Dependencies
 
-`flutter_bloc` · `go_router 17.x` (custom `CubitRefreshNotifier` — no `GoRouterRefreshStream`) · `get_it`/`injectable` · `supabase_flutter` (PKCE) · `sodium`/`sodium_libs` (libsodium — Argon2id/XChaCha20) · `flutter_secure_storage` · `mobile_scanner` · `local_auth` + `device_info_plus` · `flutter_svg` (issuer SVG) · `equatable` · `uuid` · `crypto`. Design: embedded Geist/GeistMono (NO google_fonts), simple-icons CC0.
+`flutter_bloc` · `go_router 17.x` (custom `CubitRefreshNotifier` — no `GoRouterRefreshStream`) · `get_it` (**hand-written composition root — no `injectable`/codegen**) · `supabase_flutter` (PKCE) · `sodium`/`sodium_libs` (libsodium — Argon2id/XChaCha20) · `flutter_secure_storage` · `mobile_scanner` · `local_auth` + `device_info_plus` · `flutter_svg` (issuer SVG) · `equatable` · `uuid` · `crypto`. Design: embedded Geist/GeistMono (NO google_fonts), simple-icons CC0. Tests: `flutter_test` + `mocktail`.
+
+**No code generation anywhere.** JSON (`fromJson`/`toJson`) and state classes are hand-written; on 2026-09-01
+`injectable`, `injectable_generator`, `freezed`, `freezed_annotation`, `json_annotation`, `json_serializable`,
+`build_runner` and `bloc_test` were removed from `pubspec.yaml` because nothing imported them and no generated
+`*.g.dart` / `*.freezed.dart` / `*.config.dart` file exists.
+
+**Config:** `SupabaseConfig` reads the URL/publishable key **only** from `--dart-define`; `ensureConfigured()` runs in
+`main.dart` before `Supabase.initialize` and throws in debug and release alike. Run with
+`--dart-define-from-file=env/dev.json` (see the README).
+
+**Screen-capture protection:** sensitive pages wrap their `build` in `SecureScreenScope`
+(vault, unlock, setup_password, recovery_unlock, recovery_show, recovery_verify). The ref count lives in Dart because
+the native flag is last-caller-wins — see [CRYPTO.md §15](CRYPTO.md).
 
 ## 9. Document Map
 - This file: client UI/state architecture.

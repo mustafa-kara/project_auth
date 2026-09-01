@@ -5,7 +5,8 @@
 > encrypted vault store + migration; **Patch 4: setup/unlock/recovery UI + session
 > lock (`VaultLockCubit`, lifecycle lock) + `KeyAttributesStore` + reset + UI
 > redesign** (the design system is kept local); **Patch 5: biometric unlock
-> shortcut (3rd wrap + OS-keystore access control)** — see §11.
+> shortcut (3rd wrap + OS-keystore access control)** — see §11. Phase 3 sync envelopes: §12–14.
+> Screen-capture protection (`SecureScreenScope`, ref-counted): §15.
 
 ## 1. Package decision — `sodium 3.4.6` + `sodium_libs 3.4.6+4`
 
@@ -86,11 +87,19 @@ context (e.g. a masterKey-wrap blob cannot be opened as a token).
 
 ## 7. Domain password policy
 
-Because `KeyManager` is a security boundary, a minimum rule is enforced here in addition to the
-UI validator (`WeakPasswordException`):
+Because `KeyManager` is a security boundary, the minimum rule is enforced here in addition to the
+UI validator (`WeakPasswordException`). `KeyManager` is the **single source of truth**
+(`minPasswordLength`, `minPasswordClasses`, `passwordClassCount`, `meetsPolicy`) — the setup screen's
+strength meter reads the same constants:
 - empty after trim → reject
-- `< KeyManager.minPasswordLength` (8) → reject
+- `< KeyManager.minPasswordLength` (**12**, raised from 8 on 2026-06-19) → reject
+- fewer than `KeyManager.minPasswordClasses` (**3**) distinct character classes
+  (upper / lower / digit / symbol) → reject
 - The policy check is trimmed, but **the actual KEK derivation uses the password verbatim**.
+
+The setup screen shows a strength meter that is **not color-only** (bar + icon + text label +
+`Semantics`), so the signal survives color-blindness and screen readers. Length alone is not
+enough: a long single-class passphrase is rejected — that case has its own integration test.
 
 ## 8. Strict metadata/blob validation (early detection of corrupt/future schemas)
 
@@ -290,3 +299,64 @@ reads (no write grant). Contains no secret/crypto. **`catalog_services.logo_url`
 "NO runtime logo fetching (offline/privacy)" decision is preserved (no network image is downloaded; the catalog is only for issuer
 NAME/slug canonicalization). The `token_sync_enabled` flag gates ONLY the token transfer; **`key_attributes`
 (identity/recovery) is OUTSIDE the flag — it always works.**
+
+## 15. Screen-capture protection (`SecureScreen` / `SecureScreenScope`)
+
+Not part of the crypto model — a **shoulder-surfing / screenshot-malware** mitigation for the screens
+where plaintext secrets are on glass. `lib/core/platform/secure_screen.dart` + a MethodChannel
+(`dev.mustafakara.project_auth/secure_screen`).
+
+| Platform | Mechanism | What it actually stops |
+|---|---|---|
+| Android | `WindowManager.LayoutParams.FLAG_SECURE` | screenshots, screen recording, recents preview |
+| iOS | opaque overlay on resign-active | **only** the recents/background snapshot |
+| test / desktop | silent no-op (`MissingPluginException`/`PlatformException` swallowed) | — |
+
+**⚠️ iOS limitation (accepted, documented):** iOS has no FLAG_SECURE equivalent, so **screenshots and
+screen recording are NOT blocked on iOS.** Only the app-switcher snapshot is hidden. Do not describe
+this feature as "screenshot blocking" without that caveat.
+
+### Protected screens and why
+
+| Screen | Why |
+|---|---|
+| `VaultPage` | live OTP codes on screen |
+| `UnlockPage` | master password typed |
+| `SetupPasswordPage` | master password typed (+ strength meter) |
+| `RecoveryUnlockPage` | 24 recovery words + a new master password |
+| `RecoveryShowPage` | the recovery key is displayed |
+| `RecoveryVerifyPage` | recovery words re-entered |
+
+**Deliberately NOT protected:** `/auth-integrity` (shows no secret); scan/settings (reached from a
+mounted `VaultPage`, whose scope is still held); **login/register** — those take the *Supabase account*
+password, not the master password, which is a separate decision and is still **OPEN**.
+
+### Why the ref count lives in Dart
+
+The native side does **not** count: Android `addFlags`/`clearFlags` and the iOS bool flag are
+**last-caller-wins**. Sensitive screens nest (recovery pushed above the vault), so the naive
+`initState`→enable / `dispose`→disable pattern turned protection **off too early** — the recovery
+screen's `dispose` cleared FLAG_SECURE while the vault below was still visible and still showing live
+codes, and the vault never re-enabled it because it was never disposed.
+
+So the counter is kept in Dart: native `enable` fires **only on 0→1**, native `disable` **only on
+1→0**. `enable`/`disable` are not public — `acquire()`/`release()` are the only way in. An unmatched
+extra `release()` is ignored so the counter can never go negative (a negative counter would swallow
+the next `acquire()`'s 0→1 transition and leave protection off entirely). The native code
+(`MainActivity.kt` / `AppDelegate.swift`) is unchanged by this design.
+
+### How to use it
+
+Wrap the **outermost** widget of the page's `build` in `SecureScreenScope` — acquire/release are then
+bound to the widget lifecycle and protection stays on for the page's whole lifetime, even when another
+route is pushed on top:
+
+```dart
+@override
+Widget build(BuildContext context) => SecureScreenScope(
+      child: Scaffold(/* ... */),
+    );
+```
+
+**Never call enable/disable (or `acquire`/`release`) by hand** — manual pairing is exactly the bug the
+scope exists to prevent.

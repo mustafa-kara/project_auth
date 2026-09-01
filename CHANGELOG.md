@@ -2,6 +2,112 @@
 
 Project progress log. Newest at the top.
 
+## 2026-09-01 (Phase 3.5 — CI, dependency cleanup, screen-capture protection, config fail-fast)
+
+Three infrastructure/hardening changes on top of Phase 3. **NO crypto routine, NO server schema, NO sync-protocol change.**
+host **436/436 → 454/454**, `flutter analyze --fatal-infos` clean.
+
+### Dependency cleanup + minor upgrades + GitHub Actions CI (`467a63a`)
+
+- **8 unused packages removed** (verified with grep over `lib/`, `test/`, `integration_test/`: zero imports, no generated
+  `*.g.dart` / `*.freezed.dart` / `*.config.dart`, no `build.yaml`): dependencies `injectable`, `freezed_annotation`,
+  `json_annotation`; dev_dependencies `build_runner`, `freezed`, `bloc_test`, `json_serializable`, `injectable_generator`.
+  **DI stays a HAND-WRITTEN `get_it` composition root** (`lib/core/di/locator.dart`) and **JSON stays hand-written**
+  (`fromJson`/`toJson` with type-safe helpers) — that was already the reality; the codegen packages were dead weight.
+  `mocktail` is KEPT (the only mock library in use).
+- **Minor/patch upgrades only:** `supabase_flutter` ^2.14.1 → ^2.17.2, `mobile_scanner` ^7.2.0 → ^7.4.0,
+  `local_auth` ^3.0.1 → ^3.0.2, `equatable` ^2.0.8 → ^2.1.0, `uuid` ^4.5.3 → ^4.6.0.
+  **Deliberately untouched:** `sodium`/`sodium_libs` (3.x **pin** — 4.x needs Dart 3.11+), and `go_router` 18,
+  `flutter_secure_storage` 11, `device_info_plus` 13 (major bumps **deferred**, not pinned — each needs its own migration).
+- **`.github/workflows/ci.yml` added:** `push` on `main` + `pull_request`, `ubuntu-latest`,
+  `subosito/flutter-action@v2` pinned to Flutter **3.38.6** stable with cache → `flutter pub get`,
+  `flutter analyze --fatal-infos`, `flutter test`. A concurrency group cancels superseded runs.
+  **Deliberately excluded:** integration tests (need a device/simulator — `sodium_libs` is not registered in the plain
+  `flutter test` VM host) and a `dart format` gate (**known debt:** most of the tree is not `dart format`-clean, so
+  turning the gate on today would be a repo-wide reformat commit).
+
+### Supabase config fail-fast — embedded fallbacks removed (`ccc5a8f`)
+
+- **`SupabaseConfig` no longer embeds the live `authenticator-dev` URL/publishable key** as a debug fallback. This
+  contradicted PROJECT_INFO.md ("do not hardcode the key into the code") and let a mis-built app silently talk to the
+  dev project. `url`/`publishableKey` now come ONLY from `--dart-define`.
+- **`SupabaseConfig.validate({url, publishableKey})`** (pure, testable) + **`ensureConfigured()`**, called in `main.dart`
+  **before `Supabase.initialize`** → a missing/invalid define throws a developer-facing `StateError` **in debug AND
+  release alike** (previously release fell back silently, then — after `3b3653f` — to an empty string).
+  Rejects empty/non-https URLs and empty/wrong-prefix keys; accepts both `sb_publishable_...` and a legacy `eyJ...` anon JWT.
+- **`env/dev.example.json` is committed** (placeholders only); **`env/*.json` is gitignored** so the real `env/dev.json`
+  never lands in git. Run with `flutter run --dart-define-from-file=env/dev.json`.
+  **`flutter test` needs no defines** (it does not initialize Supabase). Android Studio / IntelliJ:
+  Run → Edit Configurations → *Additional run args* (`.idea/` is ignored, so the arg is per-developer).
+
+### Screen-capture protection — ref-counted `SecureScreen` + `SecureScreenScope` (`3a982d0`)
+
+- **The native side does not count.** Android `addFlags`/`clearFlags` and the iOS bool flag are **last-caller-wins**, so
+  the naive `initState`→enable / `dispose`→disable pattern turned protection **OFF too early**: a recovery screen opened
+  above the vault disabled FLAG_SECURE on its own dispose while the vault was still visible and showing live OTP codes.
+- **The counter now lives in Dart:** `SecureScreen.acquire()`/`release()` call native `enable` **only on 0→1** and
+  `disable` **only on 1→0**. `enable`/`disable` are no longer public — there is exactly one way in. An unmatched extra
+  `release()` is ignored (the counter cannot go negative; otherwise the next `acquire()` would miss its 0→1 transition).
+  **Native (`MainActivity.kt` / `AppDelegate.swift`) is UNCHANGED.**
+- **`SecureScreenScope`** binds acquire/release to the widget lifecycle (wrap the outermost widget of the page's `build`)
+  → no manual pairing mistakes. **Do not call enable/disable by hand.**
+- **Protected screens:** `VaultPage` (live OTP codes; migrated off the raw enable/disable it got in `3b3653f`),
+  `UnlockPage` and `SetupPasswordPage` (master password typed), `RecoveryUnlockPage` (24 words + new master password),
+  `RecoveryShowPage` and `RecoveryVerifyPage` (migrated to the scope).
+  **Deliberately NOT protected:** `/auth-integrity` (shows no secret), scan/settings (reached from a mounted vault, which
+  already holds the scope), and login/register — those take the **Supabase account** password, not the master password;
+  a separate decision, left OPEN.
+- **⚠️ Known limitation:** iOS has no FLAG_SECURE equivalent. Only the background/recents snapshot is hidden (opaque
+  overlay on resign-active) — **screenshots and screen recording are NOT blocked on iOS.** Android blocks both.
+- Tests: ref-count units (nested acquire, early-disable regression, negative guard, scope mount/unmount) + per-page widget tests.
+
+## 2026-06-19 (security review round 1–2 + Vault/Cipher v2.0 UI refresh)
+
+Two security review rounds and a visual refresh, none of which touch the crypto model or the server schema.
+host **413/413 → 425/425 → 436/436**.
+
+### Release manifest, password policy, recovery secrecy (`7876504`)
+
+- **Android manifest:** `INTERNET` permission added to the MAIN manifest (it existed only in debug/profile) — **release
+  builds could not reach Supabase at all.** Auto Backup disabled (`allowBackup=false`, `fullBackupContent=false`):
+  `flutter_secure_storage`'s `EncryptedSharedPreferences` must not be backed up (privacy + a new-device Keystore mismatch
+  would corrupt the vault).
+- **Master password policy raised: min 8 → min 12 characters AND ≥3 character classes** (upper/lower/digit/symbol).
+  Single source of truth in `KeyManager` (`minPasswordLength`, `minPasswordClasses`, `passwordClassCount`, `meetsPolicy`);
+  the setup screen gained a **color-is-not-the-only-signal** strength meter (bar + icon + label + `Semantics`).
+  *(This supersedes the "min 8" policy recorded under 2026-06-07.)*
+- **Recovery key clipboard:** conditional auto-clear ~60 s after copy — it wipes **only if the clipboard still holds our
+  value**, so a later copy by the user is never overwritten — plus a warning in the UI.
+- **Screenshot/recents protection** introduced on the recovery show + verify screens via a `SecureScreen` MethodChannel
+  (Android `FLAG_SECURE`; iOS resign-active opaque overlay). Scoped to sensitive screens only.
+
+### Vault/Cipher v2.0 visual refresh (`de30aa6`)
+
+- **`AppSurfaces` `ThemeExtension`** (graphite surface ramp) + the Vault/Cipher v2.0 theme, so surface colors stop being
+  hardcoded per widget.
+- **5 new shared components:** `status_badge`, `app_banner`, `empty_state`, `skeleton_loader`, `staggered_entrance`.
+- Docs upkeep: `docs/architecture.md` translated to English, `docs/CRYPTO.md` rewritten.
+
+### Vault reset remote cleanup, clipboard hygiene, prod config, OTP JSON (`3b3653f`)
+
+Four review findings, each verified at the source before fixing. **host 425 → 436.**
+
+- **[High] `resetVault` left the server vault state behind** → after a fresh setup the new masterKey could not decrypt the
+  old remote rows (corruption/integrity loop). `resetVault` now **soft-deletes (tombstones)** this uid's server token rows,
+  and the next `commitSetup` overwrites the stale `key_attributes` wrap (update-if-exists). **No hard DELETE / no migration**
+  — the soft-delete sync model and the existing UPDATE grant are preserved. An offline/RLS failure records a timestamped
+  retry marker (**`ResetPendingStore`**); the next signed-in unlock retries, tombstoning **only pre-reset rows** so a fresh
+  vault's newer tokens are spared (race-safe).
+- **[High] The recovery key could linger in the clipboard** — `dispose` cancelled the 60 s clear timer. `dispose` no longer
+  cancels it (the wipe must outlive the screen); the callback is disposed-safe.
+- **[Med] Release builds could silently fall back to the dev Supabase project.** The dev URL/key fallbacks became empty in
+  `kReleaseMode` → a forgotten `--dart-define` fails loudly. *(Superseded on 2026-09-01 by `ccc5a8f`: the fallbacks are
+  gone entirely and validation now fails fast in debug too.)*
+- **[Low] `OtpAccount.fromJson` silently truncated fractional numbers** (`digits: 6.9` → 6). A fractional `num` is now
+  rejected (`FormatException`), matching the strict `KeyAttributes` policy; integer-valued doubles are still accepted.
+- Also: `OtpCard` copies the OTP with a **30 s conditional clipboard wipe**; `VaultPage` enables SecureScreen.
+  `.fvmrc` committed, `.fvm/` gitignored.
+
 ## 2026-06-10 (Phase 3 Patch 4 — devices registration + catalog/feature_flags/announcements + token_sync kill-switch)
 
 Three additional server capabilities OUTSIDE identity/sync — **WITHOUT TOUCHING the E2E surface** (NO new crypto; none of
@@ -449,7 +555,7 @@ the installed package source)** (standing rule) — some plausible-but-wrong cla
   all Future, intermediate keys disposed/zero-filled in `finally`). The `KeyAttributes` value object.
   **Our own BIP39 impl** (the canonical package is unmaintained → not brought into the trust boundary): the official 2048
   words (MIT, SHA-256 confirmed), 256-bit, checksum-verified; tested with the official Trezor vectors.
-  A domain password policy (`WeakPasswordException`, min 8).
+  A domain password policy (`WeakPasswordException`, min 8) — *superseded 2026-06-19: min 12 + ≥3 character classes*.
 - **Patch 3 — encrypted vault + migration:** `EncryptedVaultRepository` (a token-based record
   `{id,v,n,c,updatedAt,deleted}`, AAD `token|1|<id>`, **unchanged-blob protection**,
   **corrupted-record protection** — including scalar/null, **with an integrity exception** so no silent
