@@ -291,6 +291,16 @@ class _VaultPageState extends State<VaultPage> {
                 _showManualSheet(context);
               },
             ),
+            // Faz 5 Patch 1 — toplu aktarım da bir "ekleme" yolu; kullanıcı onu
+            // Ayarlar'da aramak zorunda kalmasın (plan §5).
+            ListTile(
+              leading: const Icon(Icons.file_download_outlined),
+              title: const Text('Başka uygulamadan içe aktar'),
+              onTap: () {
+                Navigator.of(sheetCtx).pop();
+                context.push(Routes.importData);
+              },
+            ),
           ],
         ),
       ),

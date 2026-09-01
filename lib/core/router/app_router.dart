@@ -29,6 +29,8 @@ import '../../features/auth/presentation/pages/recovery_unlock_page.dart';
 import '../../features/auth/presentation/pages/recovery_verify_page.dart';
 import '../../features/auth/presentation/pages/setup_password_page.dart';
 import '../../features/auth/presentation/pages/unlock_page.dart';
+import '../../features/import_export/presentation/pages/export_page.dart';
+import '../../features/import_export/presentation/pages/import_page.dart';
 import '../../features/scan/presentation/scan_page.dart';
 import '../../features/settings/presentation/settings_page.dart';
 import '../../features/vault/data/live_sync_pref_store.dart';
@@ -58,6 +60,13 @@ abstract final class Routes {
 
   /// Faz 3 Patch 2 — bulut restore (`key_attributes` fetch) AĞ/RLS hatası ekranı.
   static const authRestoreFailed = '/auth/restore-failed';
+
+  /// Faz 5 Patch 1 — başka uygulamadan/kendi yedeğinden içe aktarma. Vault
+  /// ShellRoute'un ALTINDA (VaultCubit gerekir) → yalnız `unlocked`'ta açılır.
+  static const importData = '/import';
+
+  /// Faz 5 Patch 1 — parola ile şifrelenmiş yedek dışa aktarma (unlocked-only).
+  static const exportData = '/export';
 }
 
 /// Router + ona bağlı refresh notifier'ları birlikte taşıyan paket. Kök widget bunu
@@ -181,6 +190,18 @@ AppRouterBundle createAppRouter(
                 name: 'settings',
                 builder: (context, state) => const SettingsPage(),
               ),
+              // Faz 5 Patch 1 — import/export vault alt rotaları: VaultCubit
+              // (ShellRoute) gerekir ve unlocked-only'dir (guard beyaz listesi).
+              GoRoute(
+                path: 'import',
+                name: 'importData',
+                builder: (context, state) => const ImportPage(),
+              ),
+              GoRoute(
+                path: 'export',
+                name: 'exportData',
+                builder: (context, state) => const ExportPage(),
+              ),
             ],
           ),
         ],
@@ -298,10 +319,13 @@ String? guardRedirect(VaultLockState lock, String location) {
       if (location == Routes.unlock || location == Routes.recovery) return null;
       return Routes.unlock;
     case VaultLockStatus.unlocked:
-      // unlocked iken vault + scan + settings'e izin; auth ekranlarından vault'a dön.
+      // unlocked iken vault + scan + settings + import/export'a izin; auth
+      // ekranlarından vault'a dön.
       if (location == Routes.vault ||
           location == Routes.scan ||
-          location == Routes.settings) {
+          location == Routes.settings ||
+          location == Routes.importData ||
+          location == Routes.exportData) {
         return null;
       }
       return Routes.vault;
