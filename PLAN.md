@@ -81,7 +81,7 @@
 - [x] **8 unused packages dropped** (`injectable`, `injectable_generator`, `freezed`, `freezed_annotation`, `json_annotation`, `json_serializable`, `build_runner`, `bloc_test`) — zero imports, no generated files, no `build.yaml`. DI stays hand-written `get_it`; JSON stays hand-written; `mocktail` kept. Minor/patch upgrades applied; `sodium` 3.x pin and the deferred go_router/secure_storage/device_info_plus majors untouched. ✅
 - [x] **Supabase config fail-fast:** embedded URL/publishable-key fallbacks REMOVED from `SupabaseConfig`; `validate()` + `ensureConfigured()` run in `main.dart` before `Supabase.initialize` → a missing/invalid `--dart-define` throws a `StateError` in debug **and** release. `env/dev.example.json` committed, `env/*.json` gitignored; run with `--dart-define-from-file=env/dev.json`. ✅
 - [x] **Ref-counted screen-capture protection:** `SecureScreen.acquire()/release()` (Dart-side counter — the native side is last-caller-wins, so nested sensitive screens used to disable protection too early) + `SecureScreenScope` widget. Protected: vault, unlock, setup_password, recovery_unlock, recovery_show, recovery_verify. ✅
-- [ ] **Open:** login/register screens are NOT capture-protected (they take the Supabase **account** password, not the master password) — separate decision. iOS still cannot block screenshots/recording (only the background snapshot is hidden). A `dart format` CI gate is still off (repo not format-clean).
+- [ ] **Open:** iOS still cannot block screenshots/recording (only the background snapshot is hidden). A `dart format` CI gate is still off (repo not format-clean).
 
 ## Phase 4 — Social sign-in + push *(once developer accounts are ready)*
 - [ ] Google Sign-In + Apple Sign-In (added to `AuthRepository`, core unchanged).
@@ -108,7 +108,7 @@
 - [ ] Service catalog CRUD; `feature_flags` management; audit log viewing.
 
 ## Phase 7 — Hardening & release
-- [~] Security review (key lifecycle, memory wiping, screenshot blocking) — **screenshot blocking partially done 2026-09-01** (see [CHANGELOG](CHANGELOG.md)): ref-counted `SecureScreen` on the 6 sensitive screens. **Still open:** iOS has no FLAG_SECURE equivalent → screenshots/recording are NOT blocked there (only the recents/background snapshot is hidden), and login/register are deliberately unprotected pending a decision. Key lifecycle + memory wiping review not yet done.
+- [~] Security review (key lifecycle, memory wiping, screenshot blocking) — **screenshot blocking partially done 2026-09-01** (see [CHANGELOG](CHANGELOG.md)): ref-counted `SecureScreen` on the 8 sensitive screens (login/register added in the review follow-ups). **Still open:** iOS has no FLAG_SECURE equivalent → screenshots/recording are NOT blocked there (only the recents/background snapshot is hidden). Key lifecycle + memory wiping review not yet done.
 - [ ] Accessibility, language support, store materials.
 - [ ] App Store / Play Store release (Apple developer account required).
 

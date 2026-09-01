@@ -41,8 +41,15 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // Fail fast (debug + release) when the Supabase dart-defines are missing or
   // malformed — no embedded fallback, so a misconfigured build must not connect
-  // to an unintended project. Developer configuration error → throw is enough.
-  SupabaseConfig.ensureConfigured();
+  // to an unintended project. Letting the error escape an async `main()` would
+  // surface as an unhandled zone error and leave a BLACK SCREEN with no hint,
+  // so render the reason instead (review [P2]).
+  try {
+    SupabaseConfig.ensureConfigured();
+  } catch (e) {
+    runApp(ConfigErrorApp(details: e.toString()));
+    return;
+  }
   // Faz 3 Patch 1: kimlik katmanı. PKCE → e-posta onay deep-link'ini güvenli tamamlar.
   await Supabase.initialize(
     url: SupabaseConfig.url,
@@ -64,6 +71,49 @@ Future<void> main() async {
     }
   } catch (_) {/* fall back to legacy ''; _onSession re-derives on signedIn */}
   runApp(AuthenticatorApp(initialPrefix: initialPrefix));
+}
+
+/// Rendered instead of the app when the Supabase dart-defines are missing or
+/// malformed. Deliberately dependency-free (no DI, no theme, no Supabase): it
+/// must be able to boot when nothing else could. The body is the raw validator
+/// message — this screen only ever appears on a misconfigured BUILD, so it is
+/// addressed to the developer packaging it, not to an end user.
+class ConfigErrorApp extends StatelessWidget {
+  const ConfigErrorApp({super.key, required this.details});
+
+  /// Developer-facing reason (`StateError.toString()`), shown verbatim.
+  final String details;
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        body: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.error_outline, size: 48),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Yapılandırma hatası',
+                    style: TextStyle(
+                        fontSize: 22, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(details, style: const TextStyle(fontSize: 13)),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class AuthenticatorApp extends StatefulWidget {

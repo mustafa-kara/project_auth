@@ -83,6 +83,39 @@ void main() {
         reason: '0→1 geçişi kaçmamalı');
   });
 
+  test('native enable HATA verirse sonraki acquire yeniden dener (review [P2])',
+      () async {
+    // İlk `enable` PlatformException ile düşer → sayaç 1'de kalır. Naif kodda
+    // 0→1 geçişi bir daha olmadığı için koruma sessizce KAPALI kalırdı.
+    var failNext = true;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      calls.add(call.method);
+      if (failNext && call.method == 'enable') {
+        failNext = false;
+        throw PlatformException(code: 'ERR', message: 'native reddetti');
+      }
+      return null;
+    });
+
+    SecureScreen.acquire(); // ör. vault
+    await flush();
+    expect(calls, ['enable']);
+    expect(SecureScreen.nativeOn, isFalse, reason: 'native açılmadı');
+
+    SecureScreen.acquire(); // ör. üstüne açılan hassas ekran → RETRY
+    await flush();
+    expect(calls, ['enable', 'enable'], reason: 'başarısız enable tekrarlanmalı');
+    expect(SecureScreen.nativeOn, isTrue);
+    expect(SecureScreen.holderCount, 2);
+
+    SecureScreen.acquire(); // artık native AÇIK → tekrar çağrı YOK
+    await flush();
+    expect(calls, ['enable', 'enable'],
+        reason: 'başarılı enable sonrası gereksiz çağrı olmamalı');
+    expect(SecureScreen.holderCount, 3);
+  });
+
   testWidgets('SecureScreenScope: mount → enable, unmount → disable',
       (tester) async {
     await tester.pumpWidget(

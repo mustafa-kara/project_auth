@@ -61,6 +61,34 @@ host **436/436 → 454/454**, `flutter analyze --fatal-infos` clean.
   overlay on resign-active) — **screenshots and screen recording are NOT blocked on iOS.** Android blocks both.
 - Tests: ref-count units (nested acquire, early-disable regression, negative guard, scope mount/unmount) + per-page widget tests.
 
+### Review follow-ups
+
+Fixes for the findings of the Phase 3.5 code review; same scope rules (no crypto routine, no server schema, no
+sync-protocol change).
+
+- **Legacy `eyJ...` JWT keys are now REJECTED by `SupabaseConfig.validate`** — only `sb_publishable_...` passes. The
+  shape check (`eyJ` + three dot-separated segments) is identical for an anon key and an all-powerful `service_role`
+  key, so the legacy branch would have accepted a **secret** key into a client build. This project is publishable-key
+  based (`supabase/PROJECT_INFO.md`), so the branch had no user left. The unit test flipped from "legacy accepted" to
+  "legacy anon AND service_role rejected".
+- **CI hardening** (`.github/workflows/ci.yml`): explicit least-privilege `permissions: contents: read`; both actions
+  pinned to a full 40-char commit SHA with the tag in a comment (`actions/checkout` **v4.4.0**,
+  `subosito/flutter-action` **v2.23.0**) so a moved tag cannot swap the action out; `flutter pub get` →
+  `flutter pub get --enforce-lockfile` (CI must build exactly the resolution in `pubspec.lock`).
+- **`SecureScreen` survives a native failure:** a `PlatformException` from `enable` used to be swallowed *while the
+  counter had already advanced*, so the 0→1 edge never came back and protection stayed silently off for the rest of the
+  session. A `_nativeOn` flag now tracks the believed native state and `acquire()` **retries `enable` when protection is
+  not on**, even without a 0→1 edge. `MissingPluginException` (test/desktop) behaviour is unchanged, and `debugReset()`
+  is debug-only. New unit test: failed first enable → next acquire retries → no redundant call after success.
+- **Configuration error screen instead of a black screen:** `ensureConfigured()` throwing inside the async `main()`
+  surfaced as an unhandled zone error with nothing on glass. It is now caught and `ConfigErrorApp` (a dependency-free
+  `MaterialApp`) renders "Yapılandırma hatası" plus the validator message for the developer. Widget test added.
+- **`LoginPage` / `RegisterPage` are now capture-protected** (`SecureScreenScope`): they contain `obscure: true`
+  password fields, and while the *account* password is not the master password, it is still a secret on glass. This
+  closes the item PLAN.md left OPEN. Per-page mount/unmount tests added, plus a **router-level regression test**
+  (`test/core/router/secure_screen_router_test.dart`): pushing `/settings` above the vault with the real
+  `createAppRouter` must not emit `disable`.
+
 ## 2026-06-19 (security review round 1–2 + Vault/Cipher v2.0 UI refresh)
 
 Two security review rounds and a visual refresh, none of which touch the crypto model or the server schema.

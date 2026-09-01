@@ -8,6 +8,9 @@ const _validKey = 'sb_publishable_AbCdEf0123456789_xYz';
 // Legacy anon JWT (imza gerçek değil; yalnız şekil doğrulanır).
 const _legacyAnonJwt =
     'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiJ9.c2lnbmF0dXJl';
+// Legacy service_role JWT — anon JWT ile ŞEKLEN aynı (eyJ + 3 segment).
+const _legacyServiceRoleJwt =
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIn0.c2ln';
 
 void main() {
   group('SupabaseConfig.validate', () {
@@ -18,11 +21,19 @@ void main() {
       );
     });
 
-    test('legacy eyJ... anon JWT kabul edilir', () {
+    test('legacy eyJ... JWT reddedilir (anon ve service_role ayırt edilemez)',
+        () {
+      // Şekil kontrolü (eyJ + 3 segment) service_role anahtarını da geçirirdi →
+      // istemci build'ine tam yetkili sır sızabilirdi. Yalnız publishable geçerli.
       expect(
         () => SupabaseConfig.validate(
             url: _validUrl, publishableKey: _legacyAnonJwt),
-        returnsNormally,
+        throwsA(isA<StateError>()),
+      );
+      expect(
+        () => SupabaseConfig.validate(
+            url: _validUrl, publishableKey: _legacyServiceRoleJwt),
+        throwsA(isA<StateError>()),
       );
     });
 
@@ -77,15 +88,20 @@ void main() {
   });
 
   group('SupabaseConfig defaults', () {
-    // `flutter test` normalde define'sız koşar → sabitler boş olmalı (kaynağa
-    // gömülü fallback YOK). Define ile koşulursa (CI seçeneği) doğrulama geçer.
-    test('define yoksa boş kalır ve ensureConfigured fırlatır', () {
-      if (SupabaseConfig.url.isEmpty) {
+    // Kaynağa gömülü fallback YOK: define'sız koşuda sabitler BOŞ kalmalı ve
+    // ensureConfigured fail-fast etmeli. Suite define ile koşulursa (opsiyonel
+    // mod) iddia geçersizleşir → dallanma yerine testi atla.
+    const definesPresent = bool.hasEnvironment('SUPABASE_URL');
+    test(
+      'kaynağa gömülü fallback yok: sabitler boş, ensureConfigured fırlatır',
+      () {
+        expect(SupabaseConfig.url, isEmpty);
         expect(SupabaseConfig.publishableKey, isEmpty);
         expect(SupabaseConfig.ensureConfigured, throwsA(isA<StateError>()));
-      } else {
-        expect(SupabaseConfig.ensureConfigured, returnsNormally);
-      }
-    });
+      },
+      skip: definesPresent
+          ? 'SUPABASE_* dart-define ile koşuluyor → boşluk iddiası geçersiz'
+          : null,
+    );
   });
 }

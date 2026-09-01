@@ -24,6 +24,7 @@ library;
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
@@ -34,18 +35,45 @@ abstract final class SecureScreen {
   /// Şu an korumayı tutan aktif hassas ekran sayısı.
   static int _holders = 0;
 
+  /// Native korumanın AÇIK olduğuna inandığımız durum. `enable` gönderilirken
+  /// iyimser biçimde true yapılır; native çağrı [PlatformException] ile
+  /// başarısız olursa false'a düşer. Sayaçtan ayrı tutulur çünkü tek başına
+  /// sayaç 0→1 geçişi başarısız bir `enable`'dan sonra bir daha OLUŞMAZ →
+  /// koruma sessizce kapalı kalırdı (review [P2]).
+  static bool _nativeOn = false;
+
   /// Aktif tutucu sayısı (yalnız test/doğrulama için).
   @visibleForTesting
   static int get holderCount => _holders;
 
-  /// Test izolasyonu: sayacı sıfırla (native çağrısı YAPMAZ).
+  /// Native korumanın açık kabul edilip edilmediği (yalnız test için).
   @visibleForTesting
-  static void debugReset() => _holders = 0;
+  static bool get nativeOn => _nativeOn;
+
+  /// Test izolasyonu: sayaçları sıfırla (native çağrısı YAPMAZ).
+  ///
+  /// Yalnız debug: release build'de koruma muhasebesi dışarıdan sıfırlanamaz.
+  @visibleForTesting
+  static void debugReset() {
+    assert(kDebugMode, 'SecureScreen.debugReset() yalnız debug içindir');
+    if (!kDebugMode) return;
+    _holders = 0;
+    _nativeOn = false;
+  }
 
   /// Hassas ekran açıldı. İlk tutucuda (0→1) native koruma açılır.
+  ///
+  /// Ayrıca koruma AÇIK DEĞİLSE (önceki `enable` native tarafta hata aldı)
+  /// sayaç 0→1 geçişi olmasa bile yeniden denenir — aksi hâlde ilk hata
+  /// korumayı ekran ömrü boyunca kapalı bırakırdı.
   static void acquire() {
     _holders++;
-    if (_holders == 1) unawaited(_invoke('enable'));
+    if (_holders == 1 || !_nativeOn) {
+      // İyimser: aynı mikro-görevde arka arkaya gelen acquire'lar gereksiz
+      // ikinci bir `enable` göndermesin (çağrı asenkron tamamlanır).
+      _nativeOn = true;
+      unawaited(_invoke('enable'));
+    }
   }
 
   /// Hassas ekran kapandı. Son tutucu çıkınca (1→0) native koruma kapanır.
@@ -55,16 +83,22 @@ abstract final class SecureScreen {
   static void release() {
     if (_holders == 0) return;
     _holders--;
-    if (_holders == 0) unawaited(_invoke('disable'));
+    if (_holders == 0) {
+      _nativeOn = false;
+      unawaited(_invoke('disable'));
+    }
   }
 
   static Future<void> _invoke(String method) async {
     try {
       await _channel.invokeMethod<void>(method);
     } on MissingPluginException {
-      // Test ortamı / desteklenmeyen platform → no-op.
+      // Test ortamı / desteklenmeyen platform → no-op. Kanal HİÇ yok; iyimser
+      // durum korunur, yoksa her acquire boşuna yeniden denerdi.
     } on PlatformException {
-      // Native taraf reddetti (ör. desktop) → koruma yoksa ekran yine çalışsın.
+      // Native taraf reddetti → koruma yoksa ekran yine çalışsın, ama durumu
+      // "kapalı" işaretle ki sonraki acquire yeniden denesin.
+      if (method == 'enable') _nativeOn = false;
     }
   }
 }

@@ -52,8 +52,12 @@ abstract final class SupabaseConfig {
   /// Pure validator — no static state, so it is unit-testable.
   ///
   /// Throws a developer-facing [StateError] when a value is missing or
-  /// malformed. Accepts both the current `sb_publishable_...` key and a legacy
-  /// `eyJ...` anon JWT (older projects); new projects use the publishable key.
+  /// malformed. ONLY the current `sb_publishable_...` key is accepted: legacy
+  /// `eyJ...` JWTs are rejected because their shape (`eyJ` + three dot-separated
+  /// segments) is identical for the anon key and the all-powerful `service_role`
+  /// key — accepting it would let a service_role secret be shipped inside a
+  /// client build. This project is publishable-key based (see
+  /// `supabase/PROJECT_INFO.md`).
   static void validate({
     required String url,
     required String publishableKey,
@@ -69,21 +73,16 @@ abstract final class SupabaseConfig {
     if (publishableKey.isEmpty) {
       throw StateError(_message('SUPABASE_PUBLISHABLE_KEY is missing'));
     }
-    if (!publishableKey.startsWith(publishableKeyPrefix) &&
-        !_isLegacyAnonJwt(publishableKey)) {
+    if (!publishableKey.startsWith(publishableKeyPrefix)) {
       throw StateError(
         _message(
           'SUPABASE_PUBLISHABLE_KEY must start with "$publishableKeyPrefix" '
-          '(or be a legacy "eyJ..." anon JWT)',
+          '(legacy "eyJ..." JWT keys are rejected: an anon JWT and a '
+          'service_role JWT are indistinguishable by shape)',
         ),
       );
     }
   }
-
-  /// Legacy anon key: an unsigned-prefix JWT (`{"alg"...` base64url → `eyJ`)
-  /// with the three dot-separated segments.
-  static bool _isLegacyAnonJwt(String key) =>
-      key.startsWith('eyJ') && key.split('.').length == 3;
 
   static String _message(String reason) =>
       'Supabase configuration error: $reason.\n'

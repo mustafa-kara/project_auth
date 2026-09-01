@@ -310,7 +310,7 @@ where plaintext secrets are on glass. `lib/core/platform/secure_screen.dart` + a
 |---|---|---|
 | Android | `WindowManager.LayoutParams.FLAG_SECURE` | screenshots, screen recording, recents preview |
 | iOS | opaque overlay on resign-active | **only** the recents/background snapshot |
-| test / desktop | silent no-op (`MissingPluginException`/`PlatformException` swallowed) | — |
+| test / desktop | silent no-op (`MissingPluginException` swallowed) | — |
 
 **⚠️ iOS limitation (accepted, documented):** iOS has no FLAG_SECURE equivalent, so **screenshots and
 screen recording are NOT blocked on iOS.** Only the app-switcher snapshot is hidden. Do not describe
@@ -326,10 +326,12 @@ this feature as "screenshot blocking" without that caveat.
 | `RecoveryUnlockPage` | 24 recovery words + a new master password |
 | `RecoveryShowPage` | the recovery key is displayed |
 | `RecoveryVerifyPage` | recovery words re-entered |
+| `LoginPage` | Supabase account password typed |
+| `RegisterPage` | Supabase account password typed (twice) |
 
 **Deliberately NOT protected:** `/auth-integrity` (shows no secret); scan/settings (reached from a
-mounted `VaultPage`, whose scope is still held); **login/register** — those take the *Supabase account*
-password, not the master password, which is a separate decision and is still **OPEN**.
+mounted `VaultPage`, whose scope is still held — see the router regression test in
+`test/core/router/secure_screen_router_test.dart`).
 
 ### Why the ref count lives in Dart
 
@@ -340,7 +342,10 @@ screen's `dispose` cleared FLAG_SECURE while the vault below was still visible a
 codes, and the vault never re-enabled it because it was never disposed.
 
 So the counter is kept in Dart: native `enable` fires **only on 0→1**, native `disable` **only on
-1→0**. `enable`/`disable` are not public — `acquire()`/`release()` are the only way in. An unmatched
+1→0**. One exception guards against a *failed* native call: a `PlatformException` from `enable` is
+swallowed (the screen must still work) but marks the protection as off, and the **next `acquire()`
+retries `enable` even without a 0→1 edge** — otherwise a single native failure would leave the
+protection silently off for the rest of the session, because that edge never comes back. `enable`/`disable` are not public — `acquire()`/`release()` are the only way in. An unmatched
 extra `release()` is ignored so the counter can never go negative (a negative counter would swallow
 the next `acquire()`'s 0→1 transition and leave protection off entirely). The native code
 (`MainActivity.kt` / `AppDelegate.swift`) is unchanged by this design.

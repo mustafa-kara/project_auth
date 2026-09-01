@@ -1,8 +1,9 @@
 /// Hassas auth ekranları SecureScreen korumasını AÇAR/KAPATIR.
 ///
-/// Master parola (unlock/setup) ve recovery key (show/verify/unlock) ekranları
-/// [SecureScreenScope] ile sarılıdır → mount'ta native `enable`, unmount'ta
-/// `disable`. libsodium GEREKMEZ (fake cubit + mock MethodChannel).
+/// Master parola (unlock/setup), recovery key (show/verify/unlock) ve hesap
+/// parolası (login/register) ekranları [SecureScreenScope] ile sarılıdır →
+/// mount'ta native `enable`, unmount'ta `disable`. libsodium GEREKMEZ (fake
+/// cubit + mock MethodChannel).
 library;
 
 import 'package:flutter/material.dart';
@@ -10,6 +11,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:project_auth/core/platform/secure_screen.dart';
+import 'package:project_auth/features/account/presentation/bloc/session_cubit.dart';
+import 'package:project_auth/features/account/presentation/bloc/session_state.dart';
+import 'package:project_auth/features/account/presentation/pages/login_page.dart';
+import 'package:project_auth/features/account/presentation/pages/register_page.dart';
 import 'package:project_auth/features/auth/presentation/bloc/vault_lock_cubit.dart';
 import 'package:project_auth/features/auth/presentation/bloc/vault_lock_state.dart';
 import 'package:project_auth/features/auth/presentation/pages/recovery_show_page.dart';
@@ -21,6 +26,13 @@ import 'package:project_auth/features/auth/presentation/pages/unlock_page.dart';
 /// Sahte cubit — state sabit, aksiyonlar no-op.
 class _FakeLock extends Cubit<VaultLockState> implements VaultLockCubit {
   _FakeLock(super.state);
+  @override
+  noSuchMethod(Invocation i) {}
+}
+
+/// Sahte oturum cubit'i — login/register yalnız `state`'i okur.
+class _FakeSession extends Cubit<SessionState> implements SessionCubit {
+  _FakeSession(super.state);
   @override
   noSuchMethod(Invocation i) {}
 }
@@ -114,5 +126,34 @@ void main() {
       lockState: VaultLockState.setupPending(
           mnemonic: List.generate(24, (i) => 'word$i')),
     );
+  });
+
+  /// Login/register (hesap parolası) — SessionCubit bağımlılığı ile aynı kontrol.
+  Future<void> expectSessionPageProtected(
+    WidgetTester tester, {
+    required Widget page,
+  }) async {
+    final session = _FakeSession(const SessionState());
+    addTearDown(session.close);
+
+    await tester.pumpWidget(MaterialApp(
+      home: BlocProvider<SessionCubit>.value(value: session, child: page),
+    ));
+    await tester.pump();
+    expect(calls, ['enable'], reason: 'mount → koruma açılmalı');
+    expect(SecureScreen.holderCount, 1);
+
+    await tester.pumpWidget(const MaterialApp(home: SizedBox.shrink()));
+    await tester.pump();
+    expect(calls, ['enable', 'disable'], reason: 'unmount → koruma kapanmalı');
+    expect(SecureScreen.holderCount, 0);
+  }
+
+  testWidgets('LoginPage (hesap parolası girişi) korunur', (tester) async {
+    await expectSessionPageProtected(tester, page: const LoginPage());
+  });
+
+  testWidgets('RegisterPage (hesap parolası + tekrar) korunur', (tester) async {
+    await expectSessionPageProtected(tester, page: const RegisterPage());
   });
 }
