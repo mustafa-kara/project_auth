@@ -39,6 +39,10 @@ import 'features/vault/presentation/bloc/vault_cubit.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Fail fast (debug + release) when the Supabase dart-defines are missing or
+  // malformed — no embedded fallback, so a misconfigured build must not connect
+  // to an unintended project. Developer configuration error → throw is enough.
+  SupabaseConfig.ensureConfigured();
   // Faz 3 Patch 1: kimlik katmanı. PKCE → e-posta onay deep-link'ini güvenli tamamlar.
   await Supabase.initialize(
     url: SupabaseConfig.url,

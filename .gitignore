@@ -56,6 +56,12 @@ app.*.map.json
 !.env.example
 *.local.env
 secrets.json
+
+# --dart-define-from-file dosyaları (yerel Supabase URL/publishable key).
+# Örnek şablon (env/dev.example.json) COMMIT edilir; gerçek değerler edilmez.
+env/*.json
+!env/dev.example.json
+
 **/signing_keys.json          # Supabase JWT signing key (config.toml: "DO NOT commit")
 *.pem
 *.p12
