@@ -1,0 +1,98 @@
+{
+  "version": 1,
+  "header": {
+    "slots": null,
+    "params": null
+  },
+  "db": {
+    "version": 3,
+    "entries": [
+      {
+        "type": "totp",
+        "uuid": "3f1a6c2e-0b41-4a9d-9d1e-8f0b2c7a5d10",
+        "name": "alice@example.com",
+        "issuer": "GitHub",
+        "note": "",
+        "favorite": false,
+        "icon": null,
+        "info": {
+          "secret": "JBSWY3DPEHPK3PXP",
+          "algo": "SHA1",
+          "digits": 6,
+          "period": 30
+        },
+        "groups": []
+      },
+      {
+        "type": "totp",
+        "uuid": "5c8d1b47-2e93-4c5b-8a77-1d4e6f9b0c21",
+        "name": "  alice@example.com ",
+        "issuer": "github",
+        "note": "same token re-exported with different secret formatting",
+        "favorite": false,
+        "icon": null,
+        "info": {
+          "secret": "jbswy3dp ehpk3pxp=",
+          "algo": "SHA1",
+          "digits": 6,
+          "period": 30
+        },
+        "groups": []
+      },
+      {
+        "type": "totp",
+        "uuid": "9a2b3c4d-5e6f-4071-8293-a4b5c6d7e8f9",
+        "name": "bob@example.com",
+        "issuer": "",
+        "note": "",
+        "favorite": true,
+        "icon": null,
+        "info": {
+          "secret": "GEZDGNBVGY3TQOJQ",
+          "algo": "SHA256",
+          "digits": 8,
+          "period": 60
+        },
+        "groups": []
+      },
+      {
+        "type": "totp",
+        "uuid": "b7e4f2a1-6c38-4d5e-9f0a-2b3c4d5e6f70",
+        "name": "",
+        "issuer": "ACME",
+        "note": "",
+        "favorite": false,
+        "icon": null,
+        "info": {
+          "secret": "KRSXG5CTMVRXEZLU",
+          "algo": "SHA1",
+          "digits": 6,
+          "period": 30
+        },
+        "groups": []
+      },
+      {
+        "type": "totp",
+        "uuid": "c1d2e3f4-a5b6-4708-9910-1a2b3c4d5e6f",
+        "name": "",
+        "issuer": "",
+        "note": "",
+        "favorite": false,
+        "icon": null,
+        "info": {
+          "secret": "MFRGGZDFMZTWQ2LK",
+          "algo": "SHA1",
+          "digits": 6,
+          "period": 30
+        },
+        "groups": []
+      }
+    ],
+    "groups": [
+      {
+        "uuid": "0d1c2b3a-4958-4677-8695-a4b3c2d1e0f9",
+        "name": "Work"
+      }
+    ]
+  }
+}
