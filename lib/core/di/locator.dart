@@ -31,6 +31,10 @@ import '../../features/auth/data/biometric_service_impl.dart';
 import '../../features/auth/data/key_attributes_store.dart';
 import '../../features/auth/domain/biometric_service.dart';
 import '../../features/auth/domain/key_manager.dart';
+import '../../features/import_export/data/file_picker_document_port.dart';
+import '../../features/import_export/domain/backup_service.dart';
+import '../../features/import_export/domain/file_port.dart';
+import '../../features/import_export/domain/import_service.dart';
 import '../../features/vault/data/catalog_cache_store.dart';
 import '../../features/vault/data/supabase_catalog_repository.dart';
 import '../../features/vault/data/supabase_token_repository.dart';
@@ -139,4 +143,22 @@ Future<void> configureDependencies() async {
       () => SupabaseAnnouncementsRepository(locator<SupabaseClient>()));
   locator.registerLazySingleton<AnnouncementsCacheStore>(
       () => AnnouncementsCacheStore(storage: locator<FlutterSecureStorage>()));
+
+  // Faz 5 Patch 1 — import / şifreli export. YENİ kripto primitifi YOK:
+  // BackupService aynı `CryptoService` (Argon2id + XChaCha20-Poly1305) üstünde
+  // çalışır, KDF maliyetleri `defaultKdfParams()` tek kaynağından gelir.
+  locator.registerLazySingleton<BackupService>(
+      () => BackupService(locator<CryptoService>()));
+
+  // Sistem dosya seçici portu (file_picker). Picker app'i arka plana attığı için
+  // ÇAĞIRAN, VaultLockCubit.beginSystemFileFlow/endSystemFileFlow ile sarmalar.
+  locator.registerLazySingleton<DocumentPort>(
+      () => const FilePickerDocumentPort());
+
+  // TODO(integration): wire parsers — `parsers: [AegisParser(), TwoFasParser()]`
+  // (W1'in parser sınıfları entegrasyon adımında eklenecek). Şimdilik yalnız
+  // kendi şifreli yedek biçimimiz çözülür; Aegis/2FAS dosyaları desteklenmeyen
+  // biçim olarak reddedilir.
+  locator.registerLazySingleton<ImportService>(
+      () => ImportService(backup: locator<BackupService>()));
 }

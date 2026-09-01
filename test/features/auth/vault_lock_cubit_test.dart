@@ -239,6 +239,7 @@ VaultLockCubit _build(
   String? uid,
   AttrsDirtyStore? attrsDirtyStore,
   ResetPendingStore? resetPendingStore,
+  DateTime Function()? now,
 }) {
   final mig = migrated ?? <String>[];
   return VaultLockCubit(
@@ -260,6 +261,7 @@ VaultLockCubit _build(
     uid: uid,
     attrsDirtyStore: attrsDirtyStore,
     resetPendingStore: resetPendingStore,
+    now: now,
   );
 }
 
@@ -1051,6 +1053,85 @@ void main() {
       expect(cubit.state.status, VaultLockStatus.unlocked,
           reason: 'prompt-in-flight inactive abort etmemeli');
       expect(km.issued.single.disposed, isFalse);
+    });
+  });
+
+  // --- Faz 5 Patch 1: sistem dosya seçici akışı kilit muafiyeti (plan §3.2) ---
+  group('system file flow exemption', () {
+    /// Testin kontrol ettiği saat — bütçe aşımı beklemeden simüle edilir.
+    late DateTime clock;
+    DateTime now() => clock;
+
+    setUp(() => clock = DateTime.utc(2026, 9, 2, 10));
+
+    Future<VaultLockCubit> unlockedCubit(FakeKeyManager km) async {
+      await store.write(_fakeAttrs());
+      final cubit = _build(km, store, now: now);
+      await cubit.bootstrap();
+      await cubit.unlock('parola123');
+      expect(cubit.state.status, VaultLockStatus.unlocked);
+      return cubit;
+    }
+
+    test('beginSystemFileFlow sonrası PAUSED kilitlemez (picker arka plan üretir)',
+        () async {
+      final km = FakeKeyManager();
+      final cubit = await unlockedCubit(km);
+
+      cubit.beginSystemFileFlow();
+      cubit.onAppBackgrounded(paused: true); // Android SAF picker'ın paused'ı
+
+      expect(cubit.state.status, VaultLockStatus.unlocked);
+      expect(km.issued.single.disposed, isFalse);
+      expect(cubit.systemFileFlowActive, isTrue);
+    });
+
+    test('endSystemFileFlow sonrası PAUSED yeniden kilitler', () async {
+      final km = FakeKeyManager();
+      final cubit = await unlockedCubit(km);
+
+      cubit.beginSystemFileFlow();
+      cubit.endSystemFileFlow();
+      expect(cubit.systemFileFlowActive, isFalse);
+
+      cubit.onAppBackgrounded(paused: true);
+      expect(cubit.state.status, VaultLockStatus.locked);
+      expect(km.issued.single.disposed, isTrue);
+    });
+
+    test('bütçe aşılınca muafiyet biter → PAUSED yine kilitler', () async {
+      final km = FakeKeyManager();
+      final cubit = await unlockedCubit(km);
+
+      cubit.beginSystemFileFlow(budget: const Duration(minutes: 2));
+      clock = clock.add(const Duration(minutes: 3)); // bütçe doldu
+
+      expect(cubit.systemFileFlowActive, isFalse);
+      expect(cubit.systemFileFlowExpired, isTrue,
+          reason: 'resume\'da main.dart bunu görüp hemen kilitler');
+
+      cubit.onAppBackgrounded(paused: true);
+      expect(cubit.state.status, VaultLockStatus.locked);
+      expect(km.issued.single.disposed, isTrue);
+    });
+
+    test('akış YOKKEN systemFileFlowExpired false (resume no-op)', () async {
+      final km = FakeKeyManager();
+      final cubit = await unlockedCubit(km);
+      expect(cubit.systemFileFlowExpired, isFalse);
+      expect(cubit.systemFileFlowActive, isFalse);
+    });
+
+    test('muafiyet onAuthSignedOut\'u ETKİLEMEZ (kimlik kapısı kapandıysa kilit)',
+        () async {
+      final km = FakeKeyManager();
+      final cubit = await unlockedCubit(km);
+
+      cubit.beginSystemFileFlow();
+      cubit.onAuthSignedOut();
+
+      expect(cubit.state.status, VaultLockStatus.locked);
+      expect(km.issued.single.disposed, isTrue);
     });
   });
 

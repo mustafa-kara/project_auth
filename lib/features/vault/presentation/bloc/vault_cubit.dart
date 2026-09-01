@@ -292,6 +292,28 @@ class VaultCubit extends Cubit<VaultState> {
     });
   }
 
+  /// Faz 5 Patch 1 — toplu ekleme (import). Listenin TAMAMI tek `save` ve tek
+  /// push ile yazılır.
+  ///
+  /// **[add]'e DELEGE EDİLMEZ (plan §3.6 / D7):** `add` her çağrıda tüm listeyi
+  /// diske yazar ve ayrı bir push tetikler → N token'lık bir import N kez şifreleme
+  /// + N push demek olurdu. Burada tek kritik bölümde tek `_emitAndPersist` +
+  /// tek `_pushAfterMutation` var.
+  ///
+  /// Dedupe ÇAĞIRANIN işi (`ImportService.preview` vault'a karşı zaten eler) —
+  /// bu metot aldığı listeyi olduğu gibi, SIRASINI koruyarak ekler.
+  Future<void> addAll(List<OtpAccount> accounts) async {
+    await _awaitLoaded();
+    if (accounts.isEmpty) return; // no-op: yazma da push da yok
+    // Adım E ile aynı kanonikleştirme (katalog yoksa no-op).
+    final normalized = accounts.map(_canonicalize).toList(growable: false);
+    return _sequence(() async {
+      _guardIntegrity();
+      await _emitAndPersist([...state.accounts, ...normalized]);
+      _pushAfterMutation();
+    });
+  }
+
   /// Stabil token id'sine göre siler (index değil). Faz 3 Patch 3: sync'li yolda
   /// **soft-delete** (tombstone push edilebilsin); legacy yolda eski hard-remove.
   Future<void> removeById(String id) async {

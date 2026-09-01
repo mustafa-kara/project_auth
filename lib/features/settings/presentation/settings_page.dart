@@ -12,7 +12,9 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../../core/router/app_router.dart';
 import '../../../core/ui/tokens.dart';
 import '../../../core/ui/widgets/status_badge.dart';
 import '../../account/data/announcements_cache_store.dart';
@@ -204,6 +206,7 @@ class _SettingsPageState extends State<SettingsPage> {
             // İki-katman güvenlik notu (info ikon + ikincil metin — design.md §11).
             if (enrolled) _twoLayerNote(context),
             _buildLiveSyncTile(context),
+            ..._buildBackupSection(context),
             ..._buildAnnouncements(context),
           ],
         ),
@@ -233,6 +236,37 @@ class _SettingsPageState extends State<SettingsPage> {
         ],
       ),
     );
+  }
+
+  /// Faz 5 Patch 1 — yedekleme ve aktarım bölümü (plan §5.2). Duyurulardan ÖNCE
+  /// gelir: bunlar kullanıcının kendi verisiyle ilgili aksiyonlar, duyurular ise
+  /// salt-okunur bilgi. Her iki rota da unlocked-only (guard beyaz listesi).
+  List<Widget> _buildBackupSection(BuildContext context) {
+    final theme = Theme.of(context);
+    return [
+      const Divider(height: 1),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(Gap.lg, Gap.lg, Gap.lg, Gap.sm),
+        child: Text(
+          'YEDEKLEME VE AKTARIM',
+          style: theme.textTheme.labelLarge
+              ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+        ),
+      ),
+      ListTile(
+        leading: const Icon(Icons.file_download_outlined),
+        title: const Text('İçe aktar'),
+        subtitle: const Text('Aegis veya 2FAS yedeğinden token aktar'),
+        onTap: () => context.push(Routes.importData),
+      ),
+      ListTile(
+        leading: const Icon(Icons.lock_outline),
+        title: const Text('Şifreli yedek al'),
+        subtitle: const Text(
+            'Tokenlarını ayrı bir parolayla şifrelenmiş dosyaya aktar'),
+        onTap: () => context.push(Routes.exportData),
+      ),
+    ];
   }
 
   /// Faz 3 Patch 4 — duyurular salt-okunur bölüm. Boş/servis yoksa hiçbir şey göstermez.
