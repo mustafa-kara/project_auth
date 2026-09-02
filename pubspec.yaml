@@ -62,6 +62,14 @@ dependencies:
   # device_info_plus ^12.1.0 (Patch 5 Android SDK gate'i) win32 ^5.11.0 istiyor →
   # 12.x sürüm çözümü ÇAKIŞIR. 11.0.3 aynı API'yi (withData/saveFile bytes) sunar.
   file_picker: ^11.0.3
+  # Zaten `file_picker`'ın transitive bağımlılığıydı; DOĞRUDAN bağımlılığa
+  # yükseltildi çünkü `FilePickerDocumentPort` iOS'ta artık dosyayı temizlemek
+  # için `getApplicationDocumentsDirectory()`'yi kendisi çağırır: file_picker
+  # 11.0.3 `saveFile`'ı iOS'ta önce `NSDocumentDirectory/<fileName>` altına
+  # yazıp oradan dışa aktarır ve o nüshayı HİÇBİR yolda silmez
+  # (`ios/.../FilePickerPlugin.m` `saveFileWithName:`) → şifreli yedek iCloud
+  # yedeğine sızardı. Bkz. `file_picker_document_port.dart`.
+  path_provider: ^2.1.5
 
 dev_dependencies:
   flutter_test:

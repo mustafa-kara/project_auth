@@ -32,13 +32,20 @@ class PasswordStrengthBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final score = _score;
+    // Sabit `Colors.orange`/`Colors.green` yerine şema rolleri: koyu temada ve
+    // yüksek kontrast ayarında tema ile birlikte hareket ederler ve `on*`
+    // eşleri tanımlı olduğu için kontrast garantisi şemadan gelir.
     final (label, color, icon) = switch (score) {
       0 => ('Zayıf', scheme.error, Icons.warning_amber_rounded),
-      1 => ('Orta', Colors.orange, Icons.shield_outlined),
-      _ => ('Güçlü', Colors.green, Icons.verified_user_outlined),
+      1 => ('Orta', scheme.tertiary, Icons.shield_outlined),
+      _ => ('Güçlü', scheme.primary, Icons.verified_user_outlined),
     };
     return Semantics(
       label: 'Parola gücü: $label',
+      // Çubuk + ikon + metin TEK bir bilgiyi üç kez anlatıyor; alt düğümler
+      // dışlanmazsa ekran okuyucu etiketi ("Parola gücü: Orta") hemen ardından
+      // aynı metni ("Orta") ve ilerleme çubuğunun yüzdesini tekrar okur.
+      excludeSemantics: true,
       child: Row(
         children: [
           Expanded(

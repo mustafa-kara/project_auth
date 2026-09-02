@@ -18,6 +18,13 @@
 /// tarafında tutulur: yalnız 0→1 geçişinde native `enable`, yalnız 1→0
 /// geçişinde native `disable` çağrılır. Native taraf değişmez.
 ///
+/// ## Native hata durumu
+/// `enable` native tarafta reddedilirse koruma sessizce kapalı kalmasın diye
+/// (a) durum "kapalı" işaretlenir → sonraki `acquire` yeniden dener,
+/// (b) tek seferlik gecikmeli bir deneme kurulur → TEK hassas ekran açıkken de
+/// düzelme şansı olur. `disable` reddedilirse native koruma AÇIK kalmıştır ve
+/// muhasebe bunu yansıtır (bkz. [SecureScreen._invoke]).
+///
 /// Kullanım: sayfa ağacını [SecureScreenScope] ile sar — acquire/release
 /// widget yaşam döngüsüne bağlanır, elle eşleştirme hatası olmaz.
 library;
@@ -42,6 +49,21 @@ abstract final class SecureScreen {
   /// koruma sessizce kapalı kalırdı (review [P2]).
   static bool _nativeOn = false;
 
+  /// Başarısız bir `enable`'dan sonra tek seferlik yeniden deneme gecikmesi.
+  ///
+  /// Neden gecikme: native reddin tipik sebebi geçici — Android'de aktivite
+  /// pencereye henüz iliştirilmemiş, iOS'ta sahne aktif değil. Aynı mikro
+  /// görevde tekrar denemek aynı hatayı alır; sonraki `acquire`'ı beklemek ise
+  /// TEK hassas ekranda hiç gelmeyebilir (koruma sessizce kapalı kalır).
+  static const Duration _enableRetryDelay = Duration(milliseconds: 500);
+
+  /// Gecikmeli yeniden deneme kuyrukta mı (aynı anda birden çok kurulmasın).
+  static bool _retryPending = false;
+
+  /// [debugReset] sayacı: sıfırlamadan ÖNCE kurulmuş gecikmeli denemeler
+  /// sonraki testin muhasebesine karışmasın diye etkisizleştirilir.
+  static int _resetGeneration = 0;
+
   /// Aktif tutucu sayısı (yalnız test/doğrulama için).
   @visibleForTesting
   static int get holderCount => _holders;
@@ -59,6 +81,8 @@ abstract final class SecureScreen {
     if (!kDebugMode) return;
     _holders = 0;
     _nativeOn = false;
+    _retryPending = false;
+    _resetGeneration++; // uçuştaki gecikmeli denemeyi etkisizleştir
   }
 
   /// Hassas ekran açıldı. İlk tutucuda (0→1) native koruma açılır.
@@ -72,7 +96,7 @@ abstract final class SecureScreen {
       // İyimser: aynı mikro-görevde arka arkaya gelen acquire'lar gereksiz
       // ikinci bir `enable` göndermesin (çağrı asenkron tamamlanır).
       _nativeOn = true;
-      unawaited(_invoke('enable'));
+      unawaited(_invoke('enable', retryOnFailure: true));
     }
   }
 
@@ -89,17 +113,46 @@ abstract final class SecureScreen {
     }
   }
 
-  static Future<void> _invoke(String method) async {
+  /// [retryOnFailure] yalnız [acquire]'ın gönderdiği `enable` için true olur;
+  /// yeniden deneme kendisi false ile çağırır → deneme TEK seferliktir, sonsuz
+  /// döngü yok. O da başarısız olursa [_nativeOn] false kalır, yani sonraki
+  /// [acquire] yine dener (mevcut davranış korunur).
+  static Future<void> _invoke(String method, {bool retryOnFailure = false}) async {
     try {
       await _channel.invokeMethod<void>(method);
     } on MissingPluginException {
       // Test ortamı / desteklenmeyen platform → no-op. Kanal HİÇ yok; iyimser
       // durum korunur, yoksa her acquire boşuna yeniden denerdi.
     } on PlatformException {
-      // Native taraf reddetti → koruma yoksa ekran yine çalışsın, ama durumu
-      // "kapalı" işaretle ki sonraki acquire yeniden denesin.
-      if (method == 'enable') _nativeOn = false;
+      if (method == 'enable') {
+        // Native taraf reddetti → koruma yoksa ekran yine çalışsın, ama durumu
+        // "kapalı" işaretle ki sonraki acquire yeniden denesin.
+        _nativeOn = false;
+        if (retryOnFailure) _scheduleEnableRetry();
+      } else {
+        // `disable` REDDEDİLDİ → native koruma AÇIK kaldı. [release] durumu
+        // iyimser biçimde false'a çekmişti; geri al, yoksa muhasebe native ile
+        // ayrışır ve bir sonraki [acquire] açık olan korumayı yeniden açmaya
+        // çalışır (ya da kapalı sanılan koruma kapalı raporlanır).
+        _nativeOn = true;
+      }
     }
+  }
+
+  /// Başarısız `enable`'ı bir kez, kısa gecikmeyle yeniden dener — ekran hâlâ
+  /// açıksa (`_holders > 0`) ve bu arada başka bir yol korumayı açmadıysa.
+  static void _scheduleEnableRetry() {
+    if (_retryPending) return;
+    _retryPending = true;
+    final generation = _resetGeneration;
+    unawaited(Future<void>.delayed(_enableRetryDelay, () {
+      _retryPending = false;
+      // Test izolasyonu ([debugReset]) ya da bu arada düzelen durum → dokunma.
+      if (generation != _resetGeneration) return null;
+      if (_holders == 0 || _nativeOn) return null;
+      _nativeOn = true;
+      return _invoke('enable');
+    }));
   }
 }
 

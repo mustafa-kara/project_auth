@@ -12,6 +12,9 @@
 ///   (iOS copies it into `NSTemporaryDirectory()`, Android into
 ///   `cacheDir/file_picker/`) and never removes it, so [pickJson] shreds that
 ///   copy itself — see [_clearPickerCache].
+/// - `saveFile` leaves a leftover of its own on iOS, in a directory
+///   `clearTemporaryFiles()` does NOT touch, so [saveJson] shreds that one —
+///   see [FilePickerDocumentPort._shredIosSaveLeftover].
 /// - The size ceiling is enforced BEFORE the bytes are handed on, so a huge pick
 ///   cannot be decoded into a String.
 ///
@@ -20,15 +23,33 @@
 /// `VaultLockCubit.beginSystemFileFlow()` / `endSystemFileFlow()` (plan §3.2).
 library;
 
-import 'dart:typed_data';
+import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
+// `Uint8List` dahil: `dart:typed_data`'yı da re-export eder.
+import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../domain/file_port.dart';
 import '../domain/import_exceptions.dart';
 
 class FilePickerDocumentPort implements DocumentPort {
-  const FilePickerDocumentPort();
+  /// [documentsDir] and [isIOS] are seams for [_shredIosSaveLeftover]: the
+  /// shredder must be exercised against a real directory in tests, where
+  /// `path_provider`'s platform channel is absent and `Platform.isIOS` is
+  /// false. Production leaves both null.
+  const FilePickerDocumentPort({
+    @visibleForTesting Future<Directory> Function()? documentsDir,
+    @visibleForTesting bool Function()? isIOS,
+  })  : _documentsDir = documentsDir,
+        _isIOS = isIOS;
+
+  final Future<Directory> Function()? _documentsDir;
+  final bool Function()? _isIOS;
+
+  /// Zero-fill block size: a backup is bounded, but there is no reason to
+  /// allocate the whole thing at once.
+  static const int _shredChunk = 64 * 1024;
 
   /// Picks one document and returns its bytes.
   ///
@@ -98,12 +119,92 @@ class FilePickerDocumentPort implements DocumentPort {
   }) async {
     // `bytes` is mandatory on Android/iOS (the plugin writes the file itself) and
     // is written at the chosen path on desktop — one call covers every platform,
-    // so no share_plus/path_provider fallback and no temp file to shred.
-    final path = await FilePicker.saveFile(
-      fileName: fileName,
-      type: FileType.any,
-      bytes: bytes,
-    );
-    return path != null; // null = user cancelled the save dialog
+    // so no share_plus fallback is needed. It is NOT copy-free on iOS, though;
+    // see [_shredIosSaveLeftover].
+    String? path;
+    try {
+      path = await FilePicker.saveFile(
+        fileName: fileName,
+        type: FileType.any,
+        bytes: bytes,
+      );
+      return path != null; // null = user cancelled the save dialog
+    } finally {
+      await _shredIosSaveLeftover(fileName: fileName, savedPath: path);
+    }
+  }
+
+  /// Shreds the copy `saveFile` leaves in the app's iOS Documents directory.
+  ///
+  /// Verified against file_picker 11.0.3
+  /// (`ios/file_picker/Sources/file_picker/FilePickerPlugin.m`): the `save`
+  /// channel call lands in `saveFileWithName:fileType:initialDirectory:bytes:`,
+  /// which builds its destination as
+  /// `URLsForDirectory:NSDocumentDirectory ...[0]` +
+  /// `URLByAppendingPathComponent:fileName` — the caller's [fileName]
+  /// verbatim — writes the payload there, and only THEN presents
+  /// `UIDocumentPickerViewController` in `UIDocumentPickerModeExportToService`,
+  /// i.e. the picker COPIES it to wherever the user chose. Neither
+  /// `documentPicker:didPickDocumentsAtURLs:` (which just returns
+  /// `urls[0].path`) nor `documentPickerWasCancelled:` removes the source, and
+  /// `FilePickerUtils.clearTemporaryFiles` only walks `NSTemporaryDirectory()`
+  /// — so on iOS the whole backup file survives in Documents, which is part of
+  /// the iCloud/iTunes device backup.
+  ///
+  /// Best effort by design: overwrite in place with zeros, then unlink, and
+  /// swallow every failure — housekeeping must not turn a completed export into
+  /// a user-facing error, and this is defence in depth on top of the backup
+  /// being encrypted already.
+  ///
+  /// No-op off iOS: Android writes through the SAF stream and desktop writes
+  /// straight to the chosen path, so nothing is left behind there.
+  Future<void> _shredIosSaveLeftover({
+    required String fileName,
+    required String? savedPath,
+  }) async {
+    final onIOS = _isIOS ?? _defaultIsIOS;
+    if (!onIOS()) return;
+    try {
+      final dir = await (_documentsDir ?? getApplicationDocumentsDirectory)();
+      final leftover =
+          File('${dir.path}${Platform.pathSeparator}$fileName');
+      // Paranoia: the app declares neither `UIFileSharingEnabled` nor
+      // `LSSupportsOpeningDocumentsInPlace`, so its Documents directory is not
+      // browsable in Files and the chosen destination can never BE the
+      // leftover — but if that ever changes, do not delete the user's export.
+      if (savedPath != null && savedPath == leftover.path) return;
+      if (!await leftover.exists()) return;
+      await _zeroFill(leftover);
+      await leftover.delete();
+    } catch (_) {
+      // Best effort; see doc comment.
+    }
+  }
+
+  static bool _defaultIsIOS() => !kIsWeb && Platform.isIOS;
+
+  /// Overwrites [file] with zeros without truncating it first, so the existing
+  /// bytes are rewritten wherever the filesystem lets them be.
+  static Future<void> _zeroFill(File file) async {
+    final length = await file.length();
+    if (length <= 0) return;
+    // `writeOnlyAppend` opens without truncating; the position is then reset to
+    // 0 so the bytes are overwritten rather than appended to.
+    final raf = await file.open(mode: FileMode.writeOnlyAppend);
+    try {
+      await raf.setPosition(0);
+      final zeros =
+          Uint8List(length < _shredChunk ? length : _shredChunk);
+      var written = 0;
+      while (written < length) {
+        final remaining = length - written;
+        final take = remaining < zeros.length ? remaining : zeros.length;
+        await raf.writeFrom(zeros, 0, take);
+        written += take;
+      }
+      await raf.flush();
+    } finally {
+      await raf.close();
+    }
   }
 }

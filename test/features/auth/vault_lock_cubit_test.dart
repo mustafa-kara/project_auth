@@ -1162,6 +1162,66 @@ void main() {
       expect(cubit.state.status, VaultLockStatus.locked);
       expect(km.issued.single.disposed, isTrue);
     });
+
+    // --- Denetim C10: yenileme serbest, ama MUTLAK tavan var ---
+
+    test('yenileme bütçeyi uzatır (bulut klasörlerinde gezinen kullanıcı)',
+        () async {
+      final km = FakeKeyManager();
+      final cubit = await unlockedCubit(km);
+
+      cubit.beginSystemFileFlow(); // 2 dk
+      clock = clock.add(const Duration(minutes: 1, seconds: 50));
+      expect(cubit.systemFileFlowActive, isTrue);
+
+      cubit.beginSystemFileFlow(); // yenile → +2 dk
+      clock = clock.add(const Duration(minutes: 1));
+
+      expect(cubit.systemFileFlowActive, isTrue,
+          reason: 'yenileme olmasaydı bütçe dolmuştu');
+    });
+
+    test('10 dakikalık MUTLAK tavan aşılınca yenileme REDDEDİLİR', () async {
+      final km = FakeKeyManager();
+      final cubit = await unlockedCubit(km);
+
+      // İlk begin'den itibaren 2 dakikada bir yenile: tavan gelene kadar sürer.
+      cubit.beginSystemFileFlow();
+      for (var i = 0; i < 4; i++) {
+        clock = clock.add(const Duration(minutes: 2));
+        cubit.beginSystemFileFlow();
+        expect(cubit.systemFileFlowActive, isTrue,
+            reason: 'tavana kadar (t=${(i + 1) * 2}dk) yenileme geçerli');
+      }
+      // t = 8 dk, son yenileme t=10 dk'ya kadar geçerli.
+      clock = clock.add(const Duration(minutes: 2)); // t = 10 dk → tavan
+      cubit.beginSystemFileFlow(); // REDDEDİLİR (deadline uzatılmaz)
+
+      expect(cubit.systemFileFlowActive, isFalse);
+      expect(cubit.systemFileFlowExpired, isTrue,
+          reason: 'main.dart resume kontrolü kilitleyebilsin');
+
+      // Ve arka plana düşen uygulama artık KİLİTLENİR.
+      cubit.onAppBackgrounded(paused: true);
+      expect(cubit.state.status, VaultLockStatus.locked);
+      expect(km.issued.single.disposed, isTrue);
+    });
+
+    test('tavan endSystemFileFlow ile SIFIRLANIR (sonraki akış tam bütçeli)',
+        () async {
+      final km = FakeKeyManager();
+      final cubit = await unlockedCubit(km);
+
+      cubit.beginSystemFileFlow();
+      clock = clock.add(VaultLockCubit.systemFileFlowMaxTotal);
+      cubit.endSystemFileFlow(); // bütçe dolmuştu → kilit uygulanır
+      expect(cubit.state.status, VaultLockStatus.locked);
+
+      await cubit.unlock('parola123');
+      cubit.beginSystemFileFlow(); // yeni akış → yeni mutlak saat
+
+      expect(cubit.systemFileFlowActive, isTrue);
+    });
   });
 
   // --- Faz 3 Patch 1: onAuthSignedOut (kimlik kapısı kapanınca volatile temizlik) ---

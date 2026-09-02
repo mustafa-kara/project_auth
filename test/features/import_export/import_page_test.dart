@@ -558,4 +558,138 @@ void main() {
     expect(find.text('Dosya okunamadı — geçerli bir JSON yedeği değil.'),
         findsOneWidget);
   });
+
+  testWidgets('C3: atlananlar 50 satırla sınırlı, kalanı "+k tane daha"',
+      (tester) async {
+    // 1024 tavanına yakın bir dosya: eager `ExpansionTile` hepsini tek karede
+    // inşa ederdi. Sayılar (üstteki satırlar) TAM kalmalı, liste kısalmalı.
+    final skipped = [
+      for (var i = 0; i < 130; i++)
+        SkippedEntry(reason: SkipReason.invalidFields, label: 'kayıt$i'),
+    ];
+    await _pumpPage(
+      tester,
+      service: _FakeImportService(
+        result: ImportPreview(
+          source: ImportSource.aegis,
+          toAdd: [_acc('a')],
+          skipped: skipped,
+        ),
+      ),
+      documents: _FakeDocuments(document: _doc()),
+      lock: lock,
+    );
+    await tester.tap(find.text('Dosya seç'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('130 desteklenmiyor'), findsOneWidget,
+        reason: 'sayılar kısaltmadan ETKİLENMEZ');
+    await tester.tap(find.text('Atlananlar (130)'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('kayıt0'), findsOneWidget);
+    expect(find.text('kayıt49'), findsOneWidget);
+    expect(find.text('kayıt50'), findsNothing, reason: 'tavan 50 satır');
+    expect(find.text('+80 tane daha'), findsOneWidget);
+  });
+
+  testWidgets('C3: 50 ve altında "daha" satırı YOK', (tester) async {
+    await _pumpPage(
+      tester,
+      service: _FakeImportService(
+        result: ImportPreview(
+          source: ImportSource.aegis,
+          toAdd: [_acc('a')],
+          skipped: const [
+            SkippedEntry(reason: SkipReason.invalidSecret, label: 'tek'),
+          ],
+        ),
+      ),
+      documents: _FakeDocuments(document: _doc()),
+      lock: lock,
+    );
+    await tester.tap(find.text('Dosya seç'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Atlananlar (1)'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('tek'), findsOneWidget);
+    expect(find.textContaining('tane daha'), findsNothing);
+  });
+
+  testWidgets('C6: parola adımında "Başka dosya seç" → pick adımına döner',
+      (tester) async {
+    final docs = _FakeDocuments(document: _doc());
+    await _pumpPage(
+      tester,
+      service: _FakeImportService(
+        detected: ImportSource.projectauthBackup,
+        result: ImportPreview(source: ImportSource.projectauthBackup, toAdd: [
+          _acc('a'),
+        ]),
+      ),
+      documents: docs,
+      lock: lock,
+    );
+    await tester.tap(find.text('Dosya seç'));
+    await tester.pumpAndSettle();
+    expect(find.text('Bu dosya şifreli bir yedek'), findsOneWidget);
+
+    await tester.tap(find.text('Başka dosya seç'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Yedek dosyası seç'), findsOneWidget);
+    expect(find.text('Başka dosya seç'), findsNothing,
+        reason: 'pick adımında ikincil aksiyon gösterilmez');
+
+    // Ve gerçekten yeniden seçilebiliyor.
+    await tester.tap(find.text('Dosya seç'));
+    await tester.pumpAndSettle();
+    expect(docs.pickCount, 2);
+  });
+
+  testWidgets('C6: önizleme adımından da dosya seçimine dönülür',
+      (tester) async {
+    await _pumpPage(
+      tester,
+      service: _FakeImportService(
+        result: ImportPreview(source: ImportSource.aegis, toAdd: [_acc('a')]),
+      ),
+      documents: _FakeDocuments(document: _doc()),
+      lock: lock,
+    );
+    await tester.tap(find.text('Dosya seç'));
+    await tester.pumpAndSettle();
+    expect(find.text('1 token içe aktarılacak'), findsOneWidget);
+
+    await tester.tap(find.text('Başka dosya seç'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Yedek dosyası seç'), findsOneWidget);
+    expect(find.text('1 token içe aktarılacak'), findsNothing);
+  });
+
+  testWidgets('C4: onaydan sonra tüketilmiş önizleme EKRANDA KALMAZ',
+      (tester) async {
+    // GoRouter yok → `maybePop` false döner ve sayfa açık kalır: eski kodda
+    // kullanıcı zaten uygulanmış bir önizlemeye tekrar basabilirdi.
+    final repo = _FakeRepo();
+    await _pumpPage(
+      tester,
+      service: _FakeImportService(
+        result: ImportPreview(source: ImportSource.aegis, toAdd: [_acc('a')]),
+      ),
+      documents: _FakeDocuments(document: _doc()),
+      lock: lock,
+      repo: repo,
+    );
+    await tester.tap(find.text('Dosya seç'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'İçe aktar'));
+    await tester.pumpAndSettle();
+
+    expect(repo.stored, hasLength(1));
+    expect(find.text('1 token içe aktarılacak'), findsNothing);
+    expect(find.text('Yedek dosyası seç'), findsOneWidget);
+  });
 }
