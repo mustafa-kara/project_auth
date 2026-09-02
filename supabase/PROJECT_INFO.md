@@ -1,7 +1,7 @@
 # Supabase Project Info — authenticator-dev
 
 > Development project. The three 2026-06-06 migrations are applied + security scan CLEAN (2026-06-06).
-> ⏳ The Phase 6 migration `20260902120000_admin_backend_role.sql` is committed but **NOT applied yet** —
+> ⏳ The Phase 6 migration `20260902201638_admin_backend_role.sql` is committed but **NOT applied yet** —
 > see the deployment checklist below.
 
 | Field | Value |
@@ -64,7 +64,7 @@ await Supabase.initialize(
 - `20260606152227_init_authenticator` — tables + RLS + hook + grant + trigger + publication + private aggregate
 - `20260606152553_rls_initplan_optimization` — `auth.uid()` → `(select auth.uid())` (init-plan optimization; the audit FK index `idx_audit_logs_actor` was moved into the init migration, so it was removed from this file)
 - `20260606162359_least_privilege_revoke` — revoke redundant `anon`/`authenticated` table privileges (defense in depth)
-- ⏳ `20260902120000_admin_backend_role` — **NOT APPLIED YET** (Phase 6): `admin_backend` NOLOGIN role + `private` USAGE + `admin_global_stats()` EXECUTE, with a defensive re-revoke from `public`/`anon`/`authenticated`. See the deployment checklist below
+- ⏳ `20260902201638_admin_backend_role` — **NOT APPLIED YET** (Phase 6): `admin_backend` NOLOGIN role + `private` USAGE + `admin_global_stats()` EXECUTE, with a defensive re-revoke from `public`/`anon`/`authenticated`. See the deployment checklist below
 
 ## Security scan (get_advisors) — latest: 2026-06-06 (after 0003)
 - **security: 0 warnings** ✅
@@ -85,7 +85,7 @@ Write/privileged operations are reserved for `service_role` only (backend secret
 `admin_users`, `audit_logs`, `announcements`, `catalog_services` and `feature_flags` — so the panel's
 secret-key path (`auth.admin` + all writes + the `audit_logs` insert) works against this project **today**,
 with no migration needed. Only the direct-Postgres aggregate path is blocked on the pending
-`20260902120000_admin_backend_role.sql`.
+`20260902201638_admin_backend_role.sql`.
 
 ## Tables (all with RLS enabled)
 admin_users · key_attributes · tokens · devices · announcements · catalog_services · feature_flags · audit_logs
@@ -96,7 +96,7 @@ admin_users · key_attributes · tokens · devices · announcements · catalog_s
 - [x] Hook verified: admin→`{admin:true}`, normal→`{admin:false}` (see tests/TEST_REPORT.md) ✅
 - [ ] Do NOT add the `private` schema to "Exposed schemas" (default; must not be added — just verify)
 - [~] **Backend DB role + `private` USAGE + function EXECUTE grant** (ARCHITECTURE §6, Pattern B) —
-  **migration in repo (`20260902120000_admin_backend_role.sql`), NOT yet applied to this project.**
+  **migration in repo (`20260902201638_admin_backend_role.sql`), NOT yet applied to this project.**
   The migration creates only the NOLOGIN privilege carrier and its grants; it contains **no password**.
   1. Apply it: `supabase db push`, or paste the file into Dashboard → SQL Editor.
   2. Then create the login role by hand (take the password from a secure generator; do not paste it anywhere else):

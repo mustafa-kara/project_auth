@@ -51,7 +51,7 @@ sunucuya özel yarısı `src/lib/env.server.ts` (`import 'server-only'`). İkisi
 > kartı gösterir; panelin geri kalanı (secret key yolu) çalışır. Ayrıca `public.admin_users` içinde en az
 > bir satır olmalıdır, yoksa kimse `/login`'i geçemez.
 
-`supabase/migrations/20260902120000_admin_backend_role.sql` migration'ı **yalnızca**
+`supabase/migrations/20260902201638_admin_backend_role.sql` migration'ı **yalnızca**
 NOLOGIN yetki taşıyıcı rolü (`admin_backend`) oluşturur ve ona `private` şemasında
 `usage` + `private.admin_global_stats()` üzerinde `execute` verir (Desen B —
 init migration'daki yorum bloğu). Login rolü ve parolası **migration'a/transcript'e

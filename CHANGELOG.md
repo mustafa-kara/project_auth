@@ -101,7 +101,7 @@ of v16.0.0); the exported function must be named `proxy`, and it runs on the Nod
 
 ### Operator prerequisites — required before the dashboard shows numbers
 
-The migration `supabase/migrations/20260902120000_admin_backend_role.sql` **is in the repo but has NOT been
+The migration `supabase/migrations/20260902201638_admin_backend_role.sql` **is in the repo but has NOT been
 applied to the live project** (`authenticator-dev`). It creates only the NOLOGIN privilege carrier
 `admin_backend` and grants it `usage` on `private` + `execute` on `private.admin_global_stats()`, and it
 re-revokes both from `public`/`anon`/`authenticated`. It contains **no password**.

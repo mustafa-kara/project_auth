@@ -135,7 +135,7 @@
 ## Phase 6 — Admin panel (Next.js) (can start in parallel, once the tables are ready in Phase 3) — MVP DONE (2026-09-02)
 > Standalone npm package under `admin/`: own lockfile, own CI workflow (`.github/workflows/admin-ci.yml`), **not**
 > part of the Flutter `analyze`/`test` pipeline. **NO Dart change, NO crypto change, NO server schema change** —
-> the one SQL file added (`20260902120000_admin_backend_role.sql`) only creates a DB role and its grants.
+> the one SQL file added (`20260902201638_admin_backend_role.sql`) only creates a DB role and its grants.
 > admin **153/153** (vitest), Flutter host **1188/1188** unchanged. Details:
 > [CHANGELOG 2026-09-02](CHANGELOG.md) and [admin/README.md](admin/README.md).
 - [x] **Next.js + Supabase SDK + shadcn/ui + admin claim middleware (`app_metadata.admin`)** ✅ (2026-09-02) —
@@ -145,7 +145,7 @@
   verifies the JWT against the project's JWKS via `auth.getClaims()` and demands a literal
   `app_metadata.admin === true`.
 - [x] **Prerequisite — backend DB role** ✅ **in the repo, ⏳ NOT yet applied to the live project.**
-  `supabase/migrations/20260902120000_admin_backend_role.sql` creates the NOLOGIN privilege carrier
+  `supabase/migrations/20260902201638_admin_backend_role.sql` creates the NOLOGIN privilege carrier
   `admin_backend` with `usage` on `private` + `execute` on `private.admin_global_stats()` (Pattern B), and
   re-revokes both from `public`/`anon`/`authenticated`. It contains **no password**: the operator applies it
   (`supabase db push` or Dashboard SQL) and then creates the login role by hand —
@@ -213,7 +213,7 @@ Phase 4 (social+push) ── plugs in at any point once developer accounts are r
 - [x] **Open a Supabase project** ✅ — `authenticator-dev` created, migration applied, hook enabled.
 - [ ] Google Play + Apple Developer accounts (for Phase 4 and release — Phases 0–3 progress while waiting).
 - [ ] Firebase project (for Phase 4 push).
-- [~] (Before Phase 6) Backend DB role + `private` schema grant (for the admin aggregate call) — **migration written and committed** (`supabase/migrations/20260902120000_admin_backend_role.sql`, 2026-09-02) but **NOT yet applied to `authenticator-dev`**. Operator: apply it, then `create role admin_app login password '…'; grant admin_backend to admin_app;` and set `DATABASE_URL`. Until then the admin dashboard's stats cards show an error card.
+- [~] (Before Phase 6) Backend DB role + `private` schema grant (for the admin aggregate call) — **migration written and committed** (`supabase/migrations/20260902201638_admin_backend_role.sql`, 2026-09-02) but **NOT yet applied to `authenticator-dev`**. Operator: apply it, then `create role admin_app login password '…'; grant admin_backend to admin_app;` and set `DATABASE_URL`. Until then the admin dashboard's stats cards show an error card.
 
 ## Open design decisions (to be clarified later)
 - Conflict resolution starts with **arrival-order LWW** (the last to reach the server wins; see ARCHITECTURE §5); for heavy multi-device usage a move to CRDT/true-modified-time can be evaluated.

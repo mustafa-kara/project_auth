@@ -12,7 +12,7 @@ import { getServerEnv } from '@/lib/env.server'
  * cannot be reached over PostgREST/`.rpc()`. It is called here, server-side, over a
  * plain Postgres connection.
  *
- * Role model (Pattern B, see `supabase/migrations/20260902120000_admin_backend_role.sql`):
+ * Role model (Pattern B, see `supabase/migrations/20260902201638_admin_backend_role.sql`):
  * `admin_backend` is a NOLOGIN privilege carrier; the panel connects as the
  * operator-created login role `admin_app` (`grant admin_backend to admin_app`) and
  * does `set local role admin_backend` inside the transaction. The panel NEVER
