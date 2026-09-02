@@ -1,6 +1,8 @@
 # Supabase Project Info — authenticator-dev
 
-> Development project. Migrations applied + security scan CLEAN (2026-06-06).
+> Development project. The three 2026-06-06 migrations are applied + security scan CLEAN (2026-06-06).
+> ⏳ The Phase 6 migration `20260902120000_admin_backend_role.sql` is committed but **NOT applied yet** —
+> see the deployment checklist below.
 
 | Field | Value |
 |---|---|
@@ -58,10 +60,11 @@ await Supabase.initialize(
 > - The secret key (`sb_secret_...`) is NOT written here — it belongs only to the backend (Next.js admin / Edge Function). Obtain it from Dashboard > Settings > API Keys and keep it in env.
 > - Do not hardcode the key into the code; pass it via `--dart-define` / env (good practice even though the publishable key is low-privilege).
 
-## Applied migrations (aligned one-to-one with live — see migrations/README.md)
+## Migrations (the applied ones align one-to-one with live — see migrations/README.md)
 - `20260606152227_init_authenticator` — tables + RLS + hook + grant + trigger + publication + private aggregate
 - `20260606152553_rls_initplan_optimization` — `auth.uid()` → `(select auth.uid())` (init-plan optimization; the audit FK index `idx_audit_logs_actor` was moved into the init migration, so it was removed from this file)
 - `20260606162359_least_privilege_revoke` — revoke redundant `anon`/`authenticated` table privileges (defense in depth)
+- ⏳ `20260902120000_admin_backend_role` — **NOT APPLIED YET** (Phase 6): `admin_backend` NOLOGIN role + `private` USAGE + `admin_global_stats()` EXECUTE, with a defensive re-revoke from `public`/`anon`/`authenticated`. See the deployment checklist below
 
 ## Security scan (get_advisors) — latest: 2026-06-06 (after 0003)
 - **security: 0 warnings** ✅
@@ -78,6 +81,12 @@ The `anon`/`authenticated` roles hold only the table privileges they need:
 | admin_users | — | — |
 Write/privileged operations are reserved for `service_role` only (backend secret key, RLS bypass). RLS + table grant = two layers.
 
+**Verified live (2026-09-02, for the Phase 6 admin panel):** `service_role` holds full grants on
+`admin_users`, `audit_logs`, `announcements`, `catalog_services` and `feature_flags` — so the panel's
+secret-key path (`auth.admin` + all writes + the `audit_logs` insert) works against this project **today**,
+with no migration needed. Only the direct-Postgres aggregate path is blocked on the pending
+`20260902120000_admin_backend_role.sql`.
+
 ## Tables (all with RLS enabled)
 admin_users · key_attributes · tokens · devices · announcements · catalog_services · feature_flags · audit_logs
 + `private.admin_global_stats()` (security definer, not exposed to the Data API)
@@ -86,8 +95,21 @@ admin_users · key_attributes · tokens · devices · announcements · catalog_s
 - [x] Custom Access Token Hook enabled: Dashboard > Auth Hooks > "Customize Access Token (JWT) Claims" → Postgres → `public.custom_access_token_hook` ✅
 - [x] Hook verified: admin→`{admin:true}`, normal→`{admin:false}` (see tests/TEST_REPORT.md) ✅
 - [ ] Do NOT add the `private` schema to "Exposed schemas" (default; must not be added — just verify)
-- [ ] Backend DB role + `private` USAGE + function EXECUTE grant (ARCHITECTURE §6, migration Pattern A/B) — before Phase 6
-- [ ] First **real** admin: `insert into public.admin_users (user_id) values ('<auth-user-uuid>');` (secure channel) — once a real user exists
+- [~] **Backend DB role + `private` USAGE + function EXECUTE grant** (ARCHITECTURE §6, Pattern B) —
+  **migration in repo (`20260902120000_admin_backend_role.sql`), NOT yet applied to this project.**
+  The migration creates only the NOLOGIN privilege carrier and its grants; it contains **no password**.
+  1. Apply it: `supabase db push`, or paste the file into Dashboard → SQL Editor.
+  2. Then create the login role by hand (take the password from a secure generator; do not paste it anywhere else):
+     ```sql
+     create role admin_app login password '<güçlü-parola>';
+     grant admin_backend to admin_app;
+     ```
+  3. That role becomes `DATABASE_URL` in `admin/.env.local`. **The panel never connects as `postgres`**; it
+     does `set local role admin_backend` inside the transaction ([admin/README.md](../admin/README.md) §1).
+  Until step 1+2 are done, the admin dashboard's global-stats cards render an error card; every other page
+  works. **Verified live (2026-09-02, before applying):** `execute` on `private.admin_global_stats()` is held
+  by `postgres` **only** — `anon`/`authenticated` have none, as designed.
+- [ ] First **real** admin: `insert into public.admin_users (user_id) values ('<auth-user-uuid>');` (secure channel) — once a real user exists. **Required for the Phase 6 admin panel:** without a row here nobody gets past `/login`, and the panel deliberately offers no UI for granting admin (see [admin/README.md](../admin/README.md) §6).
 - [ ] **Phase 3 Patch 1 — Email confirmation:** Dashboard > Auth > Providers > Email → "Confirm email" ON (confirmation email after signup).
 - [ ] **Phase 3 Patch 1 — Redirect URL:** Dashboard > Auth > URL Configuration > Redirect URLs → add `dev.mustafakara.projectauth://login-callback` (PKCE deep-link callback; matches the native intent-filter/URL scheme).
 - [ ] **Phase 3 Patch 2 — bytea format confirmation (manual, schema unchanged):** `key_attributes` upload/restore must be tested on-device against real Supabase — does the `insert` via `ByteaCodec` (`\x`+hex) match PostgREST's bytea acceptance, is the `select` round-trip lossless, is RLS owner-only? If the format differs, it is fixed in a single place at `lib/features/account/data/bytea_codec.dart` (NO DB migration REQUIRED).
