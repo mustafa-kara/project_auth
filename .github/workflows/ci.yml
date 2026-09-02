@@ -41,6 +41,11 @@ jobs:
         # a drifting transitive dependency fails the job instead of being picked up.
         run: flutter pub get --enforce-lockfile
 
+      # The tree was reformatted once in 7a88a0b; this gate keeps it that way. It runs before
+      # analyze so a formatting-only failure is reported as formatting, not as a lint failure.
+      - name: Format
+        run: dart format --output=none --set-exit-if-changed .
+
       # No native libsodium package is installed on purpose: the sodium_libs Flutter plugin
       # is not registered in the plain `flutter test` VM host, and no test under test/ imports
       # package:sodium or package:sodium_libs (crypto round-trips live in integration_test/,

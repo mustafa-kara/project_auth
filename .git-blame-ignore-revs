@@ -1,0 +1,5 @@
+# Revisions ignored by `git blame`. Enable once with:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# style: one-time repo-wide `dart format` reformat (+ curly-braces lint fixes) — whitespace only, no semantic change.
+7a88a0b6e8d69ad0c6048f4a35dabe850a73a94e
