@@ -359,7 +359,8 @@ class _ImportPageState extends State<ImportPage> {
               Text(
                 'Google Authenticator → ⋮ → Hesapları aktar → Hesapları dışa '
                 'aktar → QR\'ı bu kameraya göster. Birden fazla QR çıkarsa '
-                'hepsini sırayla okut.',
+                'hepsini sırayla okut. QR yerine bağlantıyı kopyaladıysan: '
+                'Ekle → Manuel otpauth:// gir ekranına yapıştır.',
                 style: Theme.of(sheetCtx).textTheme.bodyMedium?.copyWith(
                       color: Theme.of(sheetCtx).colorScheme.onSurfaceVariant,
                     ),

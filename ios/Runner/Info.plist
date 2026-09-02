@@ -43,6 +43,13 @@
 	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>QR kodlarını tarayarak doğrulama (2FA) kodu eklemek için kameraya erişilir.</string>
+	<!-- Faz 5 Patch 3: "Görüntüden oku". file_picker 12'nin iOS tarafı PHPicker
+	     kullanır, yani sistem izin istemi ÇIKMAZ (uygulama kütüphaneye değil,
+	     kullanıcının seçtiği tek fotoğrafa erişir). Metin yine de bırakılır:
+	     App Review görüntü seçen bir uygulamada bunu arar ve eklentinin ileride
+	     eski seçiciye düşmesi hâlinde istem metinsiz kalmaz. -->
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Kaydettiğin QR kod görüntüsünden doğrulama (2FA) kodu eklemek için fotoğraflarına erişilir. Seçtiğin görüntü cihazından çıkmaz.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Vault'u Face ID ile hızlıca açmak için kullanılır. Master parolan her zaman çalışmaya devam eder.</string>
 	<!-- Faz 3 Patch 1: Supabase e-posta onayı PKCE deep-link custom scheme.
