@@ -1,14 +1,19 @@
 /// Minimal hand-written protobuf wire reader — just enough for Google
 /// Authenticator's `MigrationPayload` (plan §1).
 ///
-/// Filled by W1. No codegen and no `protobuf` package on purpose: the project
-/// carries no generated code anywhere, and proto3 field *presence* for the HOTP
-/// `counter` (absent vs. explicit 0) is only observable with a reader that
-/// reports which tags actually appeared — a generated message would hand us a
-/// default 0 and we would silently desynchronize the token.
+/// No codegen and no `protobuf` package on purpose: the project carries no
+/// generated code anywhere, and proto3 field *presence* for the HOTP `counter`
+/// (absent vs. explicit 0) is only observable with a reader that reports which
+/// tags actually appeared — a generated message would hand us a default 0 and
+/// we would silently desynchronize the token.
 ///
 /// Pure Dart: no Flutter, no IO, no plugins, so it runs on the host VM and
 /// inside `Isolate.run`.
+///
+/// Varints are decoded into Dart's native 64-bit two's-complement `int`, which
+/// is what makes a sign-extended negative `batch_id` (10 bytes, bit 63 set)
+/// come back as the negative number Google wrote. This reader is consequently
+/// VM/AOT only — the app has no web target.
 ///
 /// SECURITY: every byte that flows through here is secret material. Exception
 /// messages describe the *structure* that failed (offset, tag, length) and must
@@ -49,33 +54,114 @@ abstract final class ProtobufLimits {
 /// second reader over the sub-range returned by [readLengthDelimited]. There is
 /// therefore no depth to blow a stack with.
 class ProtobufReader {
+  final Uint8List _bytes;
+  final int _end;
+  int _pos = 0;
+
   /// Reads [bytes] from offset 0 up to [end] (defaults to `bytes.length`).
   /// [end] lets a caller scope a reader to a nested message without copying.
-  ProtobufReader(Uint8List bytes, {int? end}) {
-    throw UnimplementedError('W1 fills this');
+  ProtobufReader(Uint8List bytes, {int? end})
+      : _bytes = bytes,
+        _end = end ?? bytes.length {
+    if (_end < 0 || _end > _bytes.length) {
+      throw FormatException(
+          'protobuf: end $_end outside buffer of ${_bytes.length} bytes');
+    }
   }
 
   /// Whether any unread byte remains before the end of this reader's range.
-  bool get hasMore => throw UnimplementedError('W1 fills this');
+  bool get hasMore => _pos < _end;
 
   /// Reads a tag byte group. Field number 0 is illegal in protobuf →
   /// `FormatException`.
-  ({int field, int wireType}) readTag() =>
-      throw UnimplementedError('W1 fills this');
+  ({int field, int wireType}) readTag() {
+    final tag = readVarint();
+    // A tag is a 32-bit unsigned value; anything wider (or sign-extended
+    // negative) is corruption, and `tag >> 3` on a negative would hand back a
+    // nonsense field number instead of failing.
+    if (tag < 0 || tag > 0xFFFFFFFF) {
+      throw FormatException('protobuf: tag out of range before offset $_pos');
+    }
+    final field = tag >> 3;
+    if (field == 0) {
+      throw FormatException(
+          'protobuf: field number 0 is illegal before offset $_pos');
+    }
+    return (field: field, wireType: tag & 0x07);
+  }
 
   /// Reads a base-128 varint as a 64-bit signed value. More than
   /// [ProtobufLimits.maxVarintBytes] bytes, or a truncated buffer →
   /// `FormatException`.
-  int readVarint() => throw UnimplementedError('W1 fills this');
+  int readVarint() {
+    var result = 0;
+    var shift = 0;
+    for (var i = 0; i < ProtobufLimits.maxVarintBytes; i++) {
+      if (_pos >= _end) {
+        throw FormatException('protobuf: truncated varint at offset $_pos');
+      }
+      final byte = _bytes[_pos++];
+      // On the 10th byte `shift` is 63, so only bit 63 (the sign bit) can be
+      // contributed — exactly how proto3 sign-extends a negative int32.
+      result |= (byte & 0x7F) << shift;
+      if ((byte & 0x80) == 0) return result;
+      shift += 7;
+    }
+    throw FormatException(
+        'protobuf: varint longer than ${ProtobufLimits.maxVarintBytes} bytes '
+        'at offset $_pos');
+  }
 
   /// Reads a length-delimited field and returns a **view** onto the backing
   /// buffer (`Uint8List.sublistView`, no copy). A negative length or one that
   /// runs past the end of the range → `FormatException`.
-  Uint8List readLengthDelimited() => throw UnimplementedError('W1 fills this');
+  Uint8List readLengthDelimited() {
+    final length = readVarint();
+    if (length < 0) {
+      throw FormatException(
+          'protobuf: negative length-delimited size at offset $_pos');
+    }
+    if (length > _end - _pos) {
+      throw FormatException(
+          'protobuf: length $length runs past the end of the message '
+          '(${_end - _pos} bytes left at offset $_pos)');
+    }
+    final view = Uint8List.sublistView(_bytes, _pos, _pos + length);
+    _pos += length;
+    return view;
+  }
 
   /// Skips an unknown field of [wireType]. Supports 0 (varint), 1 (64-bit),
   /// 2 (length-delimited) and 5 (32-bit); the deprecated group types 3 and 4
   /// are rejected with `FormatException` instead of being skipped, because
   /// their end is only findable by recursive scanning.
-  void skipField(int wireType) => throw UnimplementedError('W1 fills this');
+  void skipField(int wireType) {
+    switch (wireType) {
+      case 0:
+        readVarint();
+      case 1:
+        _skip(8);
+      case 2:
+        readLengthDelimited();
+      case 5:
+        _skip(4);
+      case 3:
+      case 4:
+        throw FormatException(
+            'protobuf: group wire type $wireType is not supported '
+            '(offset $_pos)');
+      default:
+        throw FormatException(
+            'protobuf: unknown wire type $wireType at offset $_pos');
+    }
+  }
+
+  /// Advances past [count] fixed-width bytes, or fails if they are not there.
+  void _skip(int count) {
+    if (count > _end - _pos) {
+      throw FormatException(
+          'protobuf: truncated $count-byte field at offset $_pos');
+    }
+    _pos += count;
+  }
 }
