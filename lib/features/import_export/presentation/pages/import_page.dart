@@ -80,7 +80,12 @@ class ImportPage extends StatefulWidget {
   /// Servisler testte sahtelenebilsin diye opsiyonel; prod'da DI'dan çözülür.
   const ImportPage({super.key, this.service, this.documents});
 
+  /// Test tohumu: prod'da `null` → DI'dan çözülür.
+  @visibleForTesting
   final ImportService? service;
+
+  /// Test tohumu: prod'da `null` → DI'dan çözülür.
+  @visibleForTesting
   final DocumentPort? documents;
 
   @override
@@ -225,7 +230,11 @@ class _ImportPageState extends State<ImportPage> {
     });
     try {
       await vault.addAll(preview.toAdd);
-      _raw = null; // düz metin artık gereksiz → bellekte tutma
+      // Düz metin ve tüketilmiş önizleme artık gereksiz → bellekte TUTMA.
+      // `_preview` de secret taşır (`toAdd` canlı `OtpAccount`'lar): pop
+      // başarısız olup kullanıcı sayfada kalırsa da elde kalmasın.
+      _raw = null;
+      _preview = null;
       messenger.showSnackBar(
         SnackBar(content: Text('${preview.addCount} token eklendi')),
       );
@@ -245,15 +254,44 @@ class _ImportPageState extends State<ImportPage> {
     }
   }
 
+  /// Dosya seçimi adımına döner ve seçilen dosyanın izlerini düşürür.
+  void _restartPick() {
+    _passwordCtrl.clear();
+    setState(() {
+      _step = _Step.pick;
+      _raw = null; // düz metin (secret taşıyordu)
+      _fileName = null;
+      _source = null;
+      _preview = null;
+      _error = null;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final page = Scaffold(
-      appBar: AppBar(title: const Text('İçe aktar')),
+      appBar: AppBar(
+        title: const Text('İçe aktar'),
+        // Yanlış dosyayı seçen kullanıcının tek çıkışı geri tuşuyla ekranı
+        // TERK ETMEK olmasın: parola ve önizleme adımlarından dosya seçimine
+        // dönülebilir (seçilen dosyanın düz metni de böylece düşer).
+        actions: _step == _Step.pick
+            ? null
+            : [
+                TextButton(
+                  onPressed: _busy ? null : _restartPick,
+                  child: const Text('Başka dosya seç'),
+                ),
+              ],
+      ),
       body: SafeArea(
         child: switch (_step) {
-          _Step.pick => _buildPick(context),
+          // `_preview` onaydan sonra boşaltılır ([_confirmImport]); pop'un
+          // tamamlanmasını bekleyen karede eski önizlemeyi değil boş bir
+          // gövdeyi göster.
+          _Step.preview when _preview != null => _buildPreview(context),
+          _Step.pick || _Step.preview => _buildPick(context),
           _Step.password => _buildPassword(context),
-          _Step.preview => _buildPreview(context),
         },
       ),
     );

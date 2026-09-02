@@ -72,6 +72,16 @@ class ImportPreviewView extends StatelessWidget {
   /// Confirm button label; overridden only when a flow needs different wording.
   final String confirmLabel;
 
+  /// How many skipped entries the audit list renders at most.
+  ///
+  /// The list is EAGER (an [ExpansionTile]'s children are all built when it
+  /// expands), and the import path admits up to 1024 entries, so an unbounded
+  /// list would build a thousand [ListTile]s in one frame on a phone. The
+  /// remainder is summarised by a count instead: the list is an audit aid, not
+  /// something anyone reads to the end — and the counts above it are already
+  /// the authoritative totals.
+  static const int maxSkippedShown = 50;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -120,24 +130,7 @@ class ImportPreviewView extends StatelessWidget {
               ),
               if (preview.skipped.isNotEmpty) ...[
                 const SizedBox(height: Gap.md),
-                ExpansionTile(
-                  title: Text('Atlananlar (${preview.skipped.length})'),
-                  childrenPadding:
-                      const EdgeInsets.only(left: Gap.sm, right: Gap.sm),
-                  children: [
-                    for (final s in preview.skipped)
-                      ListTile(
-                        dense: true,
-                        leading: const Icon(Icons.remove_circle_outline),
-                        title: Text(s.label ?? '(isimsiz)'),
-                        subtitle: Text(
-                          s.detail == null
-                              ? skipReasonLabel(s.reason)
-                              : '${skipReasonLabel(s.reason)} — ${s.detail}',
-                        ),
-                      ),
-                  ],
-                ),
+                _skippedTile(context),
               ],
               if (error != null) ...[
                 const SizedBox(height: Gap.md),
@@ -153,6 +146,40 @@ class ImportPreviewView extends StatelessWidget {
             child: busy ? const BtnSpinner() : Text(confirmLabel),
           ),
         ),
+      ],
+    );
+  }
+
+  /// Atlanan girdilerin denetim listesi — en çok [maxSkippedShown] satır.
+  Widget _skippedTile(BuildContext context) {
+    final total = preview.skipped.length;
+    final shown = total < maxSkippedShown ? total : maxSkippedShown;
+    final rest = total - shown;
+    return ExpansionTile(
+      title: Text('Atlananlar ($total)'),
+      childrenPadding: const EdgeInsets.only(left: Gap.sm, right: Gap.sm),
+      children: [
+        for (final s in preview.skipped.take(shown))
+          ListTile(
+            dense: true,
+            leading: const Icon(Icons.remove_circle_outline),
+            title: Text(s.label ?? '(isimsiz)'),
+            subtitle: Text(
+              s.detail == null
+                  ? skipReasonLabel(s.reason)
+                  : '${skipReasonLabel(s.reason)} — ${s.detail}',
+            ),
+          ),
+        if (rest > 0)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(Gap.md, Gap.xs, Gap.md, Gap.md),
+            child: Text(
+              '+$rest tane daha',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+            ),
+          ),
       ],
     );
   }

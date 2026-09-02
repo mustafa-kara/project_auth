@@ -128,4 +128,86 @@ void main() {
     expect(calls, ['enable', 'disable']);
     expect(SecureScreen.holderCount, 0);
   });
+
+  testWidgets(
+      'enable hatası → 500ms sonra TEK seferlik yeniden deneme (denetim C9)',
+      (tester) async {
+    // Önceki test sonraki `acquire`'ın kurtardığı hâli doğruluyor; TEK hassas
+    // ekran açıkken ise ikinci bir acquire hiç gelmez → gecikmeli deneme.
+    var failEnable = true;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      calls.add(call.method);
+      if (failEnable && call.method == 'enable') {
+        throw PlatformException(code: 'ERR', message: 'pencere hazır değil');
+      }
+      return null;
+    });
+
+    SecureScreen.acquire();
+    await tester.pump();
+    expect(calls, ['enable']);
+    expect(SecureScreen.nativeOn, isFalse);
+
+    failEnable = false; // geçici sebep ortadan kalktı
+    await tester.pump(const Duration(milliseconds: 600));
+
+    expect(calls, ['enable', 'enable'], reason: 'gecikmeli deneme gelmeli');
+    expect(SecureScreen.nativeOn, isTrue);
+
+    // Ekstra bekleme YENİ çağrı üretmez (deneme tek seferlik).
+    await tester.pump(const Duration(seconds: 2));
+    expect(calls, ['enable', 'enable']);
+
+    SecureScreen.release();
+    await tester.pump();
+    expect(calls, ['enable', 'enable', 'disable']);
+  });
+
+  testWidgets('yeniden deneme sırasında ekran kapandıysa enable GÖNDERİLMEZ',
+      (tester) async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      calls.add(call.method);
+      if (call.method == 'enable' && calls.length == 1) {
+        throw PlatformException(code: 'ERR');
+      }
+      return null;
+    });
+
+    SecureScreen.acquire();
+    await tester.pump();
+    SecureScreen.release(); // kullanıcı ekrandan çıktı
+    await tester.pump();
+    expect(calls, ['enable', 'disable']);
+
+    await tester.pump(const Duration(milliseconds: 600));
+
+    expect(calls, ['enable', 'disable'],
+        reason: 'kapalı ekran için koruma açılmamalı');
+    expect(SecureScreen.holderCount, 0);
+  });
+
+  test('disable REDDEDİLİRSE koruma açık kabul edilir (denetim C9)', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      calls.add(call.method);
+      if (call.method == 'disable') {
+        throw PlatformException(code: 'ERR', message: 'native reddetti');
+      }
+      return null;
+    });
+
+    SecureScreen.acquire();
+    await flush();
+    expect(SecureScreen.nativeOn, isTrue);
+
+    SecureScreen.release();
+    await flush();
+
+    expect(calls, ['enable', 'disable']);
+    expect(SecureScreen.nativeOn, isTrue,
+        reason: 'native FLAG_SECURE hâlâ açık — muhasebe yalan söylememeli');
+    expect(SecureScreen.holderCount, 0);
+  });
 }

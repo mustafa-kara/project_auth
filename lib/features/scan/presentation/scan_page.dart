@@ -17,11 +17,14 @@ library;
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:go_router/go_router.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../../core/di/locator.dart';
+import '../../../core/router/app_router.dart';
 import '../../../core/otp/otp_account.dart';
 import '../../../core/otp/otpauth_uri.dart';
 import '../../../core/platform/secure_screen.dart';
@@ -55,6 +58,7 @@ class ScanPage extends StatefulWidget {
     this.debugScannerBuilder,
     this.debugCamera,
     this.debugNow,
+    this.debugScannerState,
   });
 
   /// Aynı hata mesajının yeniden SnackBar'a dönmesi için geçmesi gereken süre
@@ -80,6 +84,12 @@ class ScanPage extends StatefulWidget {
   /// `null` → [DateTime.now].
   @visibleForTesting
   final DateTime Function()? debugNow;
+
+  /// Test tohumu: AppBar aksiyonlarının dinlediği kamera durumu. Prod'da
+  /// `null` → gerçek [MobileScannerController] (kendisi bir
+  /// `ValueNotifier<MobileScannerState>`).
+  @visibleForTesting
+  final ValueListenable<MobileScannerState>? debugScannerState;
 
   @override
   State<ScanPage> createState() => _ScanPageState();
@@ -177,9 +187,15 @@ class _ScanPageState extends State<ScanPage> {
     }
 
     // Migration yarıdayken araya giren tek-token QR'ı sessizce EKLEMEZ: aksi
-    // hâlde toplanan parçalar kaybolur ve ekran habersiz kapanırdı.
+    // hâlde toplanan parçalar kaybolur ve ekran habersiz kapanırdı. Geçerli bir
+    // `otpauth://` QR'ı ile bozuk/alakasız bir QR AYRI mesaj alır: ilkinde
+    // kullanıcı doğru bir kod göstermiştir, ona ne yapması gerektiği söylenir.
     if (_total > 0) {
-      _showError('Bu QR bir Google Authenticator aktarım kodu değil ya da bozuk.');
+      _showError(
+        _looksLikeOtpAuth(raw)
+            ? 'Aktarım sürüyor — önce kalan kodları okut ya da Baştan başla.'
+            : 'Bu QR bir Google Authenticator aktarım kodu değil ya da bozuk.',
+      );
       return;
     }
 
@@ -205,6 +221,14 @@ class _ScanPageState extends State<ScanPage> {
       _showError('Kaydedilemedi: $e');
     }
   }
+
+  /// Ham metin tek-token bir `otpauth://` QR'ı gibi mi duruyor?
+  ///
+  /// Yalnız şemaya bakar — [OtpAuthUri.parse] çağrılmaz, çünkü tek amaç hangi
+  /// UYARI metninin gösterileceğine karar vermek ve bunun için secret'ı
+  /// belleğe çıkarmaya gerek yok.
+  static bool _looksLikeOtpAuth(String raw) =>
+      raw.trimLeft().toLowerCase().startsWith('otpauth://');
 
   /// Migration QR'ı → controller olayı → UI. Ham metin burada tüketilir ve
   /// hiçbir alana yazılmaz.
@@ -232,7 +256,12 @@ class _ScanPageState extends State<ScanPage> {
   /// Başka bir dışa aktarmanın QR'ı okundu: birleştirme YAPILMAZ, kullanıcıya
   /// baştan başlamak isteyip istemediği sorulur.
   Future<void> _askRestart() async {
-    if (_dialogOpen) return;
+    if (_dialogOpen) {
+      // Diyalog zaten açık (iOS'ta aynı QR her karede yeniden gelir). Sessiz
+      // kalmak yerine kısa bir not: kullanıcı kodu tekrar tekrar göstermesin.
+      _showError('Bu kod için soru zaten açık.');
+      return;
+    }
     _dialogOpen = true;
     final bool? restart;
     try {
@@ -381,6 +410,8 @@ class _ScanPageState extends State<ScanPage> {
     final vault = context.read<VaultCubit>();
     final messenger = ScaffoldMessenger.of(context);
     final navigator = Navigator.of(context);
+    // null in widget tests, where the page is pumped without a GoRouter.
+    final router = GoRouter.maybeOf(context);
     setState(() {
       _busy = true;
       _importError = null;
@@ -391,7 +422,16 @@ class _ScanPageState extends State<ScanPage> {
       messenger.showSnackBar(
         SnackBar(content: Text('${preview.addCount} token eklendi')),
       );
-      if (mounted) navigator.pop();
+      if (mounted) {
+        // `ImportPage._confirmImport` ile SİMETRİK: `/scan`'e deep-link ile
+        // doğrudan girildiyse geri dönülecek kayıt yoktur → `maybePop` sessizce
+        // false döner ve kullanıcı tüketilmiş bir önizlemede kalırdı.
+        // [_preview] burada BOŞALTILMAZ (ImportPage'den tek farkı): sayfa
+        // kapanana kadar önizleme render edilmeye devam ediyor, boşaltmak
+        // pop'un bir karesinde kamerayı geri getirirdi. Sökülünce düşer.
+        final popped = await navigator.maybePop();
+        if (!popped) router?.go(Routes.vault);
+      }
     } catch (_) {
       // Kaydedilemedi → sayfa KAPANMAZ, kullanıcı tekrar deneyebilir.
       if (mounted) {
@@ -442,20 +482,8 @@ class _ScanPageState extends State<ScanPage> {
     final page = Scaffold(
       appBar: AppBar(
         title: Text(_total > 0 ? 'Google Authenticator kodunu tara' : 'QR Tara'),
-        actions: inPreview
-            ? null
-            : [
-                IconButton(
-                  tooltip: 'Flaş',
-                  icon: const Icon(Icons.flash_on),
-                  onPressed: () => _controller.toggleTorch(),
-                ),
-                IconButton(
-                  tooltip: 'Kamera değiştir',
-                  icon: const Icon(Icons.cameraswitch),
-                  onPressed: () => _controller.switchCamera(),
-                ),
-              ],
+        // Önizleme adımında kamera zaten durdurulmuştur → aksiyonlar gizlenir.
+        actions: inPreview ? null : [_cameraActions()],
       ),
       body: SafeArea(
         child: inPreview ? _buildPreview(context) : _buildCamera(context),
@@ -478,6 +506,55 @@ class _ScanPageState extends State<ScanPage> {
     // Kamera önizlemesi QR'ın kendisini (secret) gösterir, onay adımı da hesap
     // listesini → hassas ekran.
     return SecureScreenScope(child: page);
+  }
+
+  /// Flaş / kamera değiştir aksiyonları.
+  ///
+  /// Kamera hazır DEĞİLKEN devre dışı: `MobileScannerController.toggleTorch`
+  /// ve `switchCamera` ilk iş olarak `_throwIfNotInitialized()` çağırır
+  /// (mobile_scanner 7.4) → izin reddi ya da açılış hatasından sonra basılan
+  /// buton yakalanmamış bir [MobileScannerException] fırlatırdı. Flaşı olmayan
+  /// cihazda (`TorchState.unavailable`) düğme hiç gösterilmez: eklenti orada
+  /// sessizce hiçbir şey yapmıyor, yani buton yalanmış olurdu.
+  Widget _cameraActions() => ValueListenableBuilder<MobileScannerState>(
+        valueListenable: widget.debugScannerState ?? _controller,
+        builder: (context, state, _) {
+          final ready = state.isInitialized;
+          return Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (state.torchState != TorchState.unavailable)
+                IconButton(
+                  tooltip: 'Flaş',
+                  icon: const Icon(Icons.flash_on),
+                  onPressed: ready ? _toggleTorch : null,
+                ),
+              IconButton(
+                tooltip: 'Kamera değiştir',
+                icon: const Icon(Icons.cameraswitch),
+                onPressed: ready ? _switchCamera : null,
+              ),
+            ],
+          );
+        },
+      );
+
+  /// Kamera kontrolü çağrıları best-effort: hata kullanıcıya SnackBar olarak
+  /// döner, ekran çalışmaya devam eder (bkz. [_stopCamera]/[_startCamera]).
+  Future<void> _toggleTorch() async {
+    try {
+      await _controller.toggleTorch();
+    } on MobileScannerException {
+      _showError('Flaş açılamadı.');
+    }
+  }
+
+  Future<void> _switchCamera() async {
+    try {
+      await _controller.switchCamera();
+    } on MobileScannerException {
+      _showError('Kamera değiştirilemedi.');
+    }
   }
 
   Widget _buildPreview(BuildContext context) => ImportPreviewView(
