@@ -23,7 +23,9 @@
           "digits": 6,
           "period": 30
         },
-        "groups": []
+        "groups": [
+          "0d1c2b3a-4958-4677-8695-a4b3c2d1e0f9"
+        ]
       },
       {
         "type": "totp",
@@ -39,7 +41,9 @@
           "digits": 6,
           "period": 30
         },
-        "groups": []
+        "groups": [
+          "7e6d5c4b-3a29-4118-9007-f6e5d4c3b2a1"
+        ]
       },
       {
         "type": "totp",
@@ -55,7 +59,10 @@
           "digits": 8,
           "period": 60
         },
-        "groups": []
+        "groups": [
+          "0d1c2b3a-4958-4677-8695-a4b3c2d1e0f9",
+          "7e6d5c4b-3a29-4118-9007-f6e5d4c3b2a1"
+        ]
       },
       {
         "type": "totp",
@@ -71,7 +78,9 @@
           "digits": 6,
           "period": 30
         },
-        "groups": []
+        "groups": [
+          "ffffffff-0000-4000-8000-000000000000"
+        ]
       },
       {
         "type": "totp",
@@ -94,6 +103,10 @@
       {
         "uuid": "0d1c2b3a-4958-4677-8695-a4b3c2d1e0f9",
         "name": "Work"
+      },
+      {
+        "uuid": "7e6d5c4b-3a29-4118-9007-f6e5d4c3b2a1",
+        "name": "Kişisel"
       }
     ]
   }

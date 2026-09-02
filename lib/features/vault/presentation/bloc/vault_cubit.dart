@@ -414,8 +414,31 @@ class VaultCubit extends Cubit<VaultState> {
     String? issuer,
     String? accountName,
     List<String>? tags,
-  }) =>
-      throw UnimplementedError('W1 fills this');
+  }) async {
+    await _awaitLoaded();
+    return _sequence(() async {
+      _guardIntegrity();
+      final index = state.accounts.indexWhere((a) => a.id == id);
+      if (index < 0) return; // unknown id → no write, no push
+      final current = state.accounts[index];
+      // Canonicalization runs on the RESULT, exactly like `add`, so an edited
+      // record and an imported one reach `dedupeKey` in the same shape (A2).
+      final edited = _canonicalize(current.copyWith(
+        issuer: issuer,
+        accountName: accountName,
+        tags: tags,
+      ));
+      // Equality covers normalization: `['iş', 'iş ']` and `['iş']` build the
+      // same account, so re-saving the same chips is a no-op (R4). Note this
+      // leans on `tags` being in `OtpAccount.props` (K3) — without it a
+      // tags-only edit would compare equal here and be dropped.
+      if (edited == current) return; // nothing changed → no write, no push
+      final next = List<OtpAccount>.of(state.accounts);
+      next[index] = edited;
+      await _emitAndPersist(next);
+      _pushAfterMutation();
+    });
+  }
 
   /// Phase 5 Patch 3 — renames [from] to [to] across EVERY account carrying it.
   ///
@@ -434,16 +457,76 @@ class VaultCubit extends Cubit<VaultState> {
   /// R3 (documented): tokens are last-write-wins per record, so a rename that
   /// touches N accounts pushes N changed records; a concurrent edit of one of
   /// them on another device can lose that device's change for that record.
-  Future<void> renameTag(String from, String to) =>
-      throw UnimplementedError('W1 fills this');
+  Future<void> renameTag(String from, String to) async {
+    await _awaitLoaded();
+    // Both ends go through the model's own normalizer, so the sweep compares
+    // against the exact strings the accounts store (trimmed, clipped to
+    // `maxTagRunes`). An input that normalizes away is not a rename at all.
+    final source = _singleTag(from);
+    final target = _singleTag(to);
+    if (source == null || target == null || source == target) return;
+    return _sequence(() async {
+      _guardIntegrity();
+      var changed = false;
+      final next = <OtpAccount>[];
+      for (final account in state.accounts) {
+        if (!account.tags.contains(source)) {
+          next.add(account);
+          continue;
+        }
+        changed = true;
+        // Collision is a MERGE: the mapped list can hold `target` twice and
+        // `normalizeTags` keeps the FIRST occurrence, so an account that
+        // already carried `target` keeps it in its original position.
+        next.add(account.copyWith(tags: [
+          for (final tag in account.tags) tag == source ? target : tag,
+        ]));
+      }
+      if (!changed) return; // nobody carries it → no write, no push
+      await _emitAndPersist(next);
+      _pushAfterMutation();
+    });
+  }
 
   /// Phase 5 Patch 3 — removes [tag] from every account that carries it.
   ///
   /// Filled by W1. Same discipline as [renameTag]: single persist, single push,
   /// no-op when nothing carries [tag]. Deletes the LABEL only — no token is ever
   /// removed by this call.
-  Future<void> deleteTag(String tag) =>
-      throw UnimplementedError('W1 fills this');
+  Future<void> deleteTag(String tag) async {
+    await _awaitLoaded();
+    final target = _singleTag(tag);
+    if (target == null) return;
+    return _sequence(() async {
+      _guardIntegrity();
+      var changed = false;
+      final next = <OtpAccount>[];
+      for (final account in state.accounts) {
+        if (!account.tags.contains(target)) {
+          next.add(account);
+          continue;
+        }
+        changed = true;
+        // An empty list CLEARS the tags (`OtpAccount.copyWith` semantics); the
+        // account itself is untouched.
+        next.add(account.copyWith(tags: [
+          for (final t in account.tags)
+            if (t != target) t,
+        ]));
+      }
+      if (!changed) return; // nobody carries it → no write, no push
+      await _emitAndPersist(next);
+      _pushAfterMutation();
+    });
+  }
+
+  /// One user-supplied tag reduced to the exact form accounts store, or null
+  /// when it normalizes away (blank/whitespace-only). Keeps [renameTag] and
+  /// [deleteTag] from ever comparing against a string no account can hold.
+  static String? _singleTag(String raw) {
+    final normalized = OtpAccount.normalizeTags([raw]);
+    return normalized.isEmpty ? null : normalized.single;
+  }
 
   /// Every tag currently in use, ordered for the chip strip.
   ///

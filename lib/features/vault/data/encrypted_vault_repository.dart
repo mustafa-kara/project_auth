@@ -218,6 +218,13 @@ class EncryptedVaultRepository implements VaultRepository, RawTokenStore {
       final prev = _lastById[account.id];
       if (prev != null && prev.account == account) {
         // Değişmemiş → eski blob'u koru (yeniden şifreleme + updatedAt yenileme YOK).
+        //
+        // DİKKAT (Faz 5 Patch 3 / K3): bu kısayol tamamen `OtpAccount.props`'a
+        // dayanır — props'ta OLMAYAN bir alan burada "değişmemiş" sayılır, eski
+        // ciphertext geri yazılır ve o alan sessizce kaybolur (ne hata, ne push).
+        // `tags` bu yüzden props'a DAHİLDİR: yalnız etiketi değişen bir token
+        // buradan `else` dalına düşer, yeniden şifrelenir ve `updatedAt` tazelenir
+        // (bkz. otp_account.dart `props` notu; test: encrypted_vault_raw_store_test).
         records.add(_TokenRecord(
           id: account.id,
           blob: prev.blob,

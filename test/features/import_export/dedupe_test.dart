@@ -219,4 +219,36 @@ void main() {
           hasLength(parsed.accounts.length));
     });
   });
+
+  // --- Phase 5 Patch 3 / K5: tags are the user's organization, not identity ---
+  group('tags are NOT part of the key', () {
+    OtpAccount tagged(List<String> tags) => OtpAccount(
+          secret: 'JBSWY3DPEHPK3PXP',
+          type: OtpType.totp,
+          issuer: 'GitHub',
+          accountName: 'alice@example.com',
+          tags: tags,
+        );
+
+    test('same token, different tags → SAME key', () {
+      expect(dedupeKey(tagged(const [])), dedupeKey(tagged(const ['iş'])));
+      expect(dedupeKey(tagged(const ['iş'])), dedupeKey(tagged(const ['ev'])));
+      expect(dedupeKey(tagged(const ['iş', 'ev'])),
+          dedupeKey(tagged(const ['ev', 'iş'])));
+    });
+
+    test('the key text does not contain a tag at all', () {
+      expect(dedupeKey(tagged(const ['gizlietiket'])),
+          isNot(contains('gizlietiket')));
+    });
+
+    test('the Aegis fixture rows collapse even though their GROUPS differ', () {
+      // Rows 1 and 2 are the same token exported into "Work" and "Kişisel".
+      final parsed = const AegisParser().parse(_fixture('aegis_plain_v1.json'));
+      expect(parsed.accounts[0].tags, ['Work']);
+      expect(parsed.accounts[1].tags, ['Kişisel']);
+      expect(dedupeKey(parsed.accounts[0]), dedupeKey(parsed.accounts[1]),
+          reason: 'moving a token to another group must not make it look new');
+    });
+  });
 }
