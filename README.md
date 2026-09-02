@@ -135,6 +135,7 @@ In Android Studio / IntelliJ the same flag goes into Run → Edit Configurations
 
 ```bash
 flutter pub get
+dart format --output=none --set-exit-if-changed .   # formatting gate — CI runs the same command
 flutter analyze          # lint — currently clean (CI runs it with --fatal-infos)
 flutter test             # 1165/1165 host — no --dart-define needed (Supabase is not initialized in tests)
 flutter run --dart-define-from-file=env/dev.json   # run on a device/emulator
@@ -145,8 +146,16 @@ flutter run --dart-define-from-file=env/dev.json   # run on a device/emulator
 > `integration_test/` (**50 tests**: sodium service 8 + KeyManager 12 +
 > encrypted vault/migration 18 + backup service 12). Run: `flutter test integration_test/ -d <device>`.
 >
-> **CI:** `.github/workflows/ci.yml` runs `flutter analyze --fatal-infos` + `flutter test` on every push to `main` and
+> **CI:** `.github/workflows/ci.yml` runs `dart format --output=none --set-exit-if-changed .` +
+> `flutter analyze --fatal-infos` + `flutter test` on every push to `main` and
 > every pull request (Flutter 3.38.6, ubuntu-latest); the integration suite is excluded because it needs a device/simulator.
+>
+> **One-time local setup:** the tree was reformatted repo-wide in `7a88a0b` (whitespace only). So that this commit
+> does not bury real authorship, run once per clone:
+>
+> ```bash
+> git config blame.ignoreRevsFile .git-blame-ignore-revs
+> ```
 
 **Folder structure** (feature-first + layered):
 ```

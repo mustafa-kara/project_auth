@@ -17,7 +17,7 @@
   - [ ] l10n skeleton, Failure types, Supabase client wrapper *(before Phase 3)*.
 - [x] go_router base routes (`/`, `/scan`) + screens + redirect guard comment-skeleton. ✅
 - [x] CI: `.github/workflows/ci.yml` (2026-09-01) — `push` on `main` + `pull_request`, ubuntu-latest, Flutter 3.38.6 pinned, `flutter analyze --fatal-infos` + `flutter test`. Currently **host 992/992**, analyze clean; **integration 50/50** runs locally only (needs a device/simulator) — measured 2026-09-02 on the audit-follow-ups branch. ✅
-  - [ ] A `dart format` gate is deliberately NOT in CI yet — **known debt:** most of the tree is not format-clean, so enabling it means a repo-wide reformat commit first.
+  - [x] **DONE (2026-09-02):** the `dart format` gate is now in CI — the repo-wide reformat landed in `7a88a0b` (whitespace only, listed in `.git-blame-ignore-revs`) and a **Format** step (`dart format --output=none --set-exit-if-changed .`) runs before `analyze`. ✅
 
 ## Phase 1 — Core OTP engine (serverless, fully working) (weeks 1–2) — COMPLETE
 - [x] `core/otp/`: TOTP (RFC 6238), HOTP (RFC 4226), Steam Guard algorithms + Base32 (RFC 4648). ✅
@@ -82,7 +82,7 @@
 - [x] **8 unused packages dropped** (`injectable`, `injectable_generator`, `freezed`, `freezed_annotation`, `json_annotation`, `json_serializable`, `build_runner`, `bloc_test`) — zero imports, no generated files, no `build.yaml`. DI stays hand-written `get_it`; JSON stays hand-written; `mocktail` kept. Minor/patch upgrades applied; `sodium` 3.x pin and the deferred go_router/secure_storage/device_info_plus majors untouched. ✅
 - [x] **Supabase config fail-fast:** embedded URL/publishable-key fallbacks REMOVED from `SupabaseConfig`; `validate()` + `ensureConfigured()` run in `main.dart` before `Supabase.initialize` → a missing/invalid `--dart-define` throws a `StateError` in debug **and** release. `env/dev.example.json` committed, `env/*.json` gitignored; run with `--dart-define-from-file=env/dev.json`. ✅
 - [x] **Ref-counted screen-capture protection:** `SecureScreen.acquire()/release()` (Dart-side counter — the native side is last-caller-wins, so nested sensitive screens used to disable protection too early) + `SecureScreenScope` widget. Protected at the time: vault, unlock, setup_password, recovery_unlock, recovery_show, recovery_verify (login/register followed in the same review; scan/import/export in Phase 5 — see Phase 7). ✅
-- [ ] **Open:** iOS still cannot block screenshots/recording (only the background snapshot is hidden). A `dart format` CI gate is still off (repo not format-clean).
+- [ ] **Open:** iOS still cannot block screenshots/recording (only the background snapshot is hidden). *(The `dart format` CI gate — **DONE (2026-09-02):** repo reformatted in `7a88a0b`, blame-ignored via `.git-blame-ignore-revs`, and a **Format** step added to `ci.yml` before `analyze`.)*
 
 ## Phase 4 — Social sign-in + push *(once developer accounts are ready)*
 - [ ] Google Sign-In + Apple Sign-In (added to `AuthRepository`, core unchanged).

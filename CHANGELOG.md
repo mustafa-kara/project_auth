@@ -2,6 +2,23 @@
 
 Project progress log. Newest at the top.
 
+## 2026-09-02 (chore: repo-wide `dart format` + CI format gate)
+
+Phase 0's last open infrastructure item, and the one Phase 3.5 left as known debt: the tree was never
+`dart format`-clean, so the gate could not be turned on without a reformat first.
+
+- **The reformat** landed as its own commit, `7a88a0b` — `dart format` over the whole repo plus the
+  `curly_braces_in_flow_control_structures` fixes it exposed. **Whitespace and braces only: no behavioural
+  change**, no API touched, no crypto/AAD/schema touched; `flutter analyze --fatal-infos` stays clean and the
+  host suite is unaffected.
+- **`.git-blame-ignore-revs`** (new, repo root) lists that one revision so a repo-wide reformat does not bury
+  real authorship in `git blame`. It is opt-in per clone — run once: `git config blame.ignoreRevsFile
+  .git-blame-ignore-revs` (also noted in README → Development → Flutter).
+- **CI gate:** `.github/workflows/ci.yml` gained a **Format** step running
+  `dart format --output=none --set-exit-if-changed .`, placed before **Analyze** so a formatting-only failure
+  is reported as formatting rather than as a lint failure. All action SHA pins, `permissions: contents: read`
+  and the existing comments are unchanged.
+
 ## 2026-09-02 (Phase 5 Patch 3 — tags, pasted migration links, QR from image)
 
 The last three items on the Phase 5 list, which **completes Phase 5**: user **tags** (including the groups Aegis
