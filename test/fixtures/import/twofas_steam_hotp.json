@@ -56,7 +56,7 @@
         "digits": 6,
         "algorithm": "SHA1",
         "tokenType": "hotp",
-        "initialCounter": 3,
+        "counter": 3,
         "source": "Manual"
       },
       "order": {
@@ -131,10 +131,32 @@
         "color": "Default"
       },
       "groupId": null
+    },
+    {
+      "name": "Sha224",
+      "secret": "ONSWG4TFOQ======",
+      "updatedAt": 1699999999600,
+      "otp": {
+        "label": "Sha224",
+        "account": "user5",
+        "issuer": "Sha224",
+        "digits": 6,
+        "period": 30,
+        "algorithm": "SHA224",
+        "tokenType": "TOTP",
+        "source": "Manual"
+      },
+      "order": {
+        "position": 6
+      },
+      "badge": {
+        "color": "Default"
+      },
+      "groupId": null
     }
   ],
   "groups": [],
-  "updatedAt": 1699999999600,
+  "updatedAt": 1699999999700,
   "schemaVersion": 4,
   "appVersionCode": 50000,
   "appVersionName": "5.0.0",
