@@ -124,5 +124,71 @@ void main() {
     test('toString() etiketleri de BASMAZ (stringify kapalı)', () {
       expect(account().copyWith(tags: ['iş']).toString(), isNot(contains('iş')));
     });
+
+    test('normalizeTags çıktısı da DEĞİŞTİRİLEMEZ', () {
+      // Çağıran döneni saklayıp sonradan 9. etiketi itemesin.
+      expect(() => OtpAccount.normalizeTags(['iş']).add('ev'),
+          throwsUnsupportedError);
+    });
+
+    test('normalizeTags: kullanıcı SIRASI korunur (alfabetik sıralama YOK)', () {
+      expect(OtpAccount.normalizeTags(['zeta', 'alfa', 'beta']),
+          ['zeta', 'alfa', 'beta']);
+    });
+
+    test('normalizeTags: 8 tavanı DOLDUKTAN sonrası düşer, ilk 8 kalır', () {
+      final many = List.generate(12, (i) => 'e$i');
+      expect(OtpAccount.normalizeTags(many),
+          [for (var i = 0; i < OtpAccount.maxTags; i++) 'e$i']);
+    });
+
+    test('normalizeTags: tekrarlar tavana SAYILMAZ (8 FARKLI etiket geçer)', () {
+      // 'e0' üç kez yazılmış bir import dosyası 8 etiketin 6'sını harcamamalı.
+      final raw = <String>['e0', 'e0', 'e0', for (var i = 1; i < 8; i++) 'e$i'];
+      expect(OtpAccount.normalizeTags(raw), hasLength(OtpAccount.maxTags));
+    });
+
+    test('ctor: 40 karakterlik etiket 32 rune\'a kırpılır (import grup adı)', () {
+      final a = account().copyWith(tags: ['g' * 40]);
+      expect(a.tags.single, 'g' * OtpAccount.maxTagRunes);
+    });
+
+    test('ctor: emoji/birleşik karakter YARIDAN kesilmez (rune sayımı)', () {
+      // 33 emoji → 32 emoji; UTF-16 birimiyle sayılsaydı son çift bozulurdu.
+      final a = account().copyWith(tags: ['🔐' * 33]);
+      expect(a.tags.single.runes.length, OtpAccount.maxTagRunes);
+      expect(a.tags.single, '🔐' * OtpAccount.maxTagRunes);
+    });
+
+    test('fromJson: depodaki KİRLİ etiket listesi normalize edilir, atılmaz',
+        () {
+      // Eski/başka bir istemcinin yazdığı boşluklu-tekrarlı-uzun liste tek bir
+      // bozuk kayıt yüzünden token'ı düşürmemeli (K4).
+      final json = account().toJson()
+        ..['tags'] = ['  iş ', 'iş', '', 'ev', 'g' * 40];
+      final restored = OtpAccount.fromJson(json);
+      expect(restored.tags, ['iş', 'ev', 'g' * OtpAccount.maxTagRunes]);
+    });
+
+    test('toJson: etiket SIRASI yazıldığı gibi korunur', () {
+      final a = account().copyWith(tags: ['zeta', 'alfa']);
+      expect(a.toJson()['tags'], ['zeta', 'alfa']);
+      expect(OtpAccount.fromJson(a.toJson()).tags, ['zeta', 'alfa']);
+    });
+
+    test('props: etiket SIRASI da eşitliğe girer (liste derin karşılaştırma)',
+        () {
+      expect(account().copyWith(tags: ['iş', 'ev']),
+          isNot(account().copyWith(tags: ['ev', 'iş'])));
+    });
+
+    test('tags DIŞINDA hiçbir alan etkilenmez (copyWith izolasyonu)', () {
+      final tagged = account().copyWith(tags: ['iş']);
+      expect(tagged.id, account().id);
+      expect(tagged.secret, account().secret);
+      expect(tagged.issuer, account().issuer);
+      expect(tagged.accountName, account().accountName);
+      expect(tagged.counter, account().counter);
+    });
   });
 }

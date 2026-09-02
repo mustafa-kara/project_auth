@@ -363,5 +363,124 @@ void main() {
       expect(payload.exportedAt, isNull);
       expect(payload.accounts, hasLength(1));
     });
+
+    // --- Phase 5 Patch 3 (K1/K2): tags ride inside the payload only ---
+    test('a pre-Patch-3 payload (no "tags" key) restores with empty tags',
+        () async {
+      // Exactly what an older client wrote: the key is simply absent.
+      final legacy = _acc('legacy@example.com', issuer: 'GitHub').toJson()
+        ..remove('tags');
+      expect(legacy.containsKey('tags'), isFalse);
+      final serialized = await sealPayload({'accounts': [legacy]});
+
+      final payload =
+          await service.importDetailed(json: serialized, password: _password);
+      expect(payload.accounts.single.tags, isEmpty);
+      expect(payload.skipped, isEmpty);
+    });
+
+    test('a payload whose "tags" is the wrong type skips ONLY that record',
+        () async {
+      final serialized = await sealPayload({
+        'accounts': [
+          _acc('good@example.com', issuer: 'GitHub').toJson(),
+          _acc('bad@example.com', issuer: 'ACME').toJson()..['tags'] = 'iş',
+        ],
+      });
+
+      final payload =
+          await service.importDetailed(json: serialized, password: _password);
+      expect(payload.accounts.map((a) => a.accountName), ['good@example.com']);
+      expect(payload.skipped.single.reason, SkipReason.invalidFields);
+      expect(payload.skipped.single.label, 'ACME (bad@example.com)');
+    });
   });
+
+  group('tags round trip (Faz 5 Patch 3)', () {
+    test('tags survive export → import unchanged, in order', () async {
+      final accounts = <OtpAccount>[
+        _acc('alice@example.com', issuer: 'GitHub')
+            .copyWith(tags: ['iş', 'ev']),
+        _acc('bob@example.com', issuer: 'ACME'),
+      ];
+
+      final json =
+          await service.export(accounts: accounts, password: _password);
+      final restored =
+          await service.import(json: json, password: _password);
+
+      expect(restored, accounts, reason: 'props include tags → full equality');
+      expect(restored[0].tags, ['iş', 'ev']);
+      expect(restored[1].tags, isEmpty);
+    });
+
+    test('the envelope version stays 1 — tags do NOT bump it (K1)', () async {
+      final tagged = [
+        _acc('alice@example.com', issuer: 'GitHub').copyWith(tags: ['iş']),
+      ];
+      final json = await service.export(accounts: tagged, password: _password);
+
+      expect((jsonDecode(json) as Map<String, dynamic>)['version'], 1);
+      expect(BackupService.supportedVersion, 1);
+    });
+
+    test('an untagged export is byte-identical to a pre-Patch-3 one (K2)',
+        () async {
+      // The payload — not the envelope, whose salt/nonce are random — is what
+      // must not change: no "tags" key anywhere for an untagged vault.
+      final json = await service.export(
+          accounts: [_acc('alice@example.com', issuer: 'GitHub')],
+          password: _password);
+      final payload = await service.importDetailed(
+          json: json, password: _password);
+      expect(payload.accounts.single.toJson().containsKey('tags'), isFalse);
+    });
+
+    test('normalization is applied on the way back in', () async {
+      // A hand-edited/foreign backup can carry a dirty list; it is cleaned, not
+      // rejected (K4).
+      final serialized = await sealPayloadFor(crypto, {
+        'accounts': [
+          _acc('alice@example.com', issuer: 'GitHub').toJson()
+            ..['tags'] = ['  iş ', 'iş', '', 'g' * 40],
+        ],
+      });
+      final payload =
+          await service.importDetailed(json: serialized, password: _password);
+      expect(payload.accounts.single.tags,
+          ['iş', 'g' * OtpAccount.maxTagRunes]);
+    });
+  });
+}
+
+/// Same envelope-sealing helper as `importDetailed — malformed records`, hoisted
+/// so the tags group can inject a payload of its own.
+Future<String> sealPayloadFor(
+    FakeCrypto crypto, Map<String, dynamic> payload) async {
+  final params = crypto.defaultKdfParams();
+  final salt = crypto.randomBytes(params.saltBytes);
+  final kek = await crypto.deriveKek(
+    password: _password,
+    salt: salt,
+    opsLimit: params.opsLimit,
+    memLimit: params.memLimit,
+  );
+  final blob = crypto.encrypt(
+    plaintext: Uint8List.fromList(utf8.encode(jsonEncode(payload))),
+    key: kek,
+    aad: BackupEnvelope.aadFor(
+      kdfAlg: BackupEnvelope.kdfAlgArgon2id,
+      opsLimit: params.opsLimit,
+      memLimit: params.memLimit,
+      salt: salt,
+      cipherAlg: BackupEnvelope.cipherAlgXChaCha20,
+    ),
+  );
+  return jsonEncode(BackupEnvelope(
+    createdAt: DateTime.utc(2026, 9, 2),
+    opsLimit: params.opsLimit,
+    memLimit: params.memLimit,
+    salt: salt,
+    blob: blob,
+  ).toJson());
 }

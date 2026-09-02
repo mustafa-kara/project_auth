@@ -59,6 +59,46 @@ void main() {
       expect(restored, original);
     });
 
+    test('tags round-trip\'te sıra ve içerikle korunur (Faz 5 Patch 3)', () {
+      final original = OtpAccount(
+        secret: 'JBSWY3DPEHPK3PXP',
+        type: OtpType.totp,
+        issuer: 'GitHub',
+        accountName: 'alice@example.com',
+        tags: const ['iş', 'ev'],
+      );
+      final restored = OtpAccount.fromJson(
+          jsonDecode(jsonEncode(original.toJson())) as Map<String, dynamic>);
+      expect(restored.tags, ['iş', 'ev']);
+      expect(restored, original); // props'ta tags var → tam eşitlik
+    });
+
+    test('etiketsiz kayıt Patch 3 ÖNCESİYLE byte-aynı JSON üretir (K2)', () {
+      final untagged = OtpAccount(
+        secret: 'JBSWY3DPEHPK3PXP',
+        type: OtpType.totp,
+        issuer: 'GitHub',
+        accountName: 'alice@example.com',
+      );
+      // "tags" anahtarı HİÇ yazılmaz → yükseltmede re-encrypt/sync dalgası yok.
+      expect(jsonEncode(untagged.toJson()), isNot(contains('tags')));
+    });
+
+    test('eski (tags\'siz) depo kaydı sorunsuz yüklenir', () {
+      final legacy = {
+        'id': 'tok-1',
+        'secret': 'JBSWY3DPEHPK3PXP',
+        'type': 'totp',
+        'issuer': 'GitHub',
+        'accountName': 'alice@example.com',
+        'algorithm': 'sha1',
+        'digits': 6,
+        'period': 30,
+        'counter': 0,
+      };
+      expect(OtpAccount.fromJson(legacy).tags, isEmpty);
+    });
+
     test('id eksikse yeni id üretilir (geriye dönük güvenli)', () {
       final json = {
         'secret': 'JBSWY3DPEHPK3PXP',

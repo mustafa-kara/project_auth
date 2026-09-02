@@ -48,6 +48,13 @@ import '../../vault/domain/issuer_catalog.dart';
 /// key: re-importing the same token after the user edited its digits, or an
 /// HOTP counter that has since advanced, must still be recognized as "already
 /// in the vault" instead of silently creating a second copy.
+///
+/// `tags` (Phase 5 Patch 3, K5) are NOT part of the key either, for the same
+/// reason and more strongly: labels are the USER's organization of the vault,
+/// not an identity. Aegis and 2FAS both map their groups onto tags, so a token
+/// exported from a "Work" group and re-imported after the user moved it to
+/// "Personal" must still read as "already in the vault". Including them would
+/// make every group change look like a brand new token.
 String dedupeKey(OtpAccount account) {
   final issuer = IssuerAvatar.slugFor((account.issuer ?? '').trim());
   final name = account.accountName.trim().toLowerCase();

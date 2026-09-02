@@ -95,6 +95,172 @@ void main() {
       expect(ids, hasLength(result.accounts.length));
       expect(ids.contains('3f1a6c2e-0b41-4a9d-9d1e-8f0b2c7a5d10'), isFalse);
     });
+
+    test('db.groups uuids become tags, in file order', () {
+      expect(result.accounts[0].tags, ['Work']);
+      expect(result.accounts[1].tags, ['Kişisel']);
+      expect(result.accounts[2].tags, ['Work', 'Kişisel']);
+    });
+
+    test('an unknown group uuid yields no tag and NO skipped entry', () {
+      expect(result.accounts[3].tags, isEmpty);
+      expect(result.skipped, isEmpty);
+      expect(result.accounts, hasLength(5),
+          reason: 'a stale group reference must never drop a token');
+    });
+
+    test('an empty "groups" list yields no tags', () {
+      expect(result.accounts[4].tags, isEmpty);
+    });
+  });
+
+  // --- Phase 5 Patch 3 (K6): groups → tags ---
+  group('groups → tags', () {
+    /// An Aegis envelope with an explicit `db.groups` index.
+    Map<String, dynamic> vaultWithGroups(
+            List<Object?> groups, List<Object?> entries) =>
+        {
+          'version': 1,
+          'header': <String, dynamic>{'slots': null, 'params': null},
+          'db': <String, dynamic>{
+            'version': 3,
+            'entries': entries,
+            'groups': groups,
+          },
+        };
+
+    Map<String, dynamic> group(String uuid, String name) =>
+        {'uuid': uuid, 'name': name};
+
+    List<String> tagsOf(Map<String, dynamic> vault) =>
+        parser.parse(vault).accounts.single.tags;
+
+    test('the legacy singular "group" field carries the NAME verbatim', () {
+      // Pre-uuid Aegis exports wrote the group name straight onto the entry.
+      final vault = _vault([
+        {..._entry(), 'group': '  Work  '},
+      ]);
+      expect(tagsOf(vault), ['Work']);
+    });
+
+    test('uuid references and the legacy field can coexist', () {
+      final vault = vaultWithGroups([
+        group('g1', 'Work'),
+      ], [
+        {..._entry(), 'groups': ['g1'], 'group': 'Eski'},
+      ]);
+      expect(tagsOf(vault), ['Work', 'Eski']);
+    });
+
+    test('a 40-character group name is clipped to 32 runes', () {
+      final vault = vaultWithGroups([
+        group('g1', 'g' * 40),
+      ], [
+        {..._entry(), 'groups': ['g1']},
+      ]);
+      expect(tagsOf(vault).single, 'g' * OtpAccount.maxTagRunes);
+    });
+
+    test('12 groups on one entry become the first 8 tags', () {
+      final uuids = [for (var i = 0; i < 12; i++) 'g$i'];
+      final vault = vaultWithGroups(
+        [for (final u in uuids) group(u, 'ad-$u')],
+        [
+          {..._entry(), 'groups': uuids},
+        ],
+      );
+      expect(tagsOf(vault), [for (var i = 0; i < 8; i++) 'ad-g$i']);
+    });
+
+    test('duplicate references collapse into one tag', () {
+      final vault = vaultWithGroups([
+        group('g1', 'Work'),
+        group('g2', 'Work'),
+      ], [
+        {..._entry(), 'groups': ['g1', 'g2', 'g1']},
+      ]);
+      expect(tagsOf(vault), ['Work']);
+    });
+
+    test('a broken groups index never costs the entry its token', () {
+      // Every shape below is nonsense; each one must still import the token
+      // with zero tags and zero skipped entries.
+      final broken = <Map<String, dynamic>>[
+        vaultWithGroups(const [], [
+          {..._entry(), 'groups': ['nobody']},
+        ]),
+        // groups index is not a list
+        {
+          'version': 1,
+          'header': <String, dynamic>{'slots': null, 'params': null},
+          'db': <String, dynamic>{
+            'version': 3,
+            'groups': 'Work',
+            'entries': [
+              {..._entry(), 'groups': ['g1']},
+            ],
+          },
+        },
+        // entry.groups is not a list
+        vaultWithGroups([
+          group('g1', 'Work'),
+        ], [
+          {..._entry(), 'groups': 'g1'},
+        ]),
+        // references are not strings
+        vaultWithGroups([
+          group('g1', 'Work'),
+        ], [
+          {..._entry(), 'groups': [1, null, {'uuid': 'g1'}]},
+        ]),
+        // group rows are missing halves / wrongly typed
+        vaultWithGroups([
+          {'uuid': 'g1'},
+          {'name': 'Work'},
+          {'uuid': 'g2', 'name': '   '},
+          {'uuid': 3, 'name': 'Work'},
+          'not a map',
+        ], [
+          {..._entry(), 'groups': ['g1', 'g2']},
+        ]),
+        // legacy field is not a string
+        _vault([
+          {..._entry(), 'group': 42},
+        ]),
+      ];
+
+      for (final vault in broken) {
+        final result = parser.parse(vault);
+        expect(result.accounts, hasLength(1));
+        expect(result.accounts.single.tags, isEmpty);
+        expect(result.skipped, isEmpty,
+            reason: 'a group problem must never produce a SkippedEntry');
+      }
+    });
+
+    test('the first row wins a duplicated group uuid', () {
+      final vault = vaultWithGroups([
+        group('g1', 'Once'),
+        group('g1', 'Twice'),
+      ], [
+        {..._entry(), 'groups': ['g1']},
+      ]);
+      expect(tagsOf(vault), ['Once']);
+    });
+
+    test('a skipped entry stays skipped regardless of its group', () {
+      final vault = vaultWithGroups([
+        group('g1', 'Work'),
+      ], [
+        {
+          ..._entry(type: 'yandex'),
+          'groups': ['g1'],
+        },
+      ]);
+      final result = parser.parse(vault);
+      expect(result.accounts, isEmpty);
+      expect(result.skipped.single.reason, SkipReason.unsupportedType);
+    });
   });
 
   group('aegis_mixed_types.json — types, Steam and per-entry skips', () {
