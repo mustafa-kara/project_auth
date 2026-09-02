@@ -26,7 +26,8 @@ MigrationBatch _batch({int index = 0, int size = 1}) => MigrationBatch(
     );
 
 /// `GoogleMigrationCollector` somut bir sınıf; Dart'ta somut sınıf da
-/// `implements` edilebilir → W1'in gövdesi beklenmeden davranış sabitlenir.
+/// `implements` edilebilir → controller, collector'ın GERÇEK gövdesine değil
+/// sözleşmesine karşı sınanır (collector'ın kendi testleri ayrı dosyada).
 class _FakeCollector implements GoogleMigrationCollector {
   MigrationAddOutcome outcome = MigrationAddOutcome.added;
   int scanned = 0;

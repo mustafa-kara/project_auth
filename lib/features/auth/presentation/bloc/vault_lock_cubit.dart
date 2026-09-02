@@ -163,6 +163,11 @@ class VaultLockCubit extends Cubit<VaultLockState> {
   /// flow is active. See [beginSystemFileFlow].
   DateTime? _systemFileFlowUntil;
 
+  /// Instant of the FIRST [beginSystemFileFlow] of the current run, cleared by
+  /// [endSystemFileFlow]. Renewals are measured against this, not against
+  /// themselves — see [systemFileFlowMaxTotal].
+  DateTime? _systemFileFlowStartedAt;
+
   VaultLockCubit({
     required KeyManager keyManager,
     required KeyAttributesStore attrsStore,
@@ -560,9 +565,32 @@ class VaultLockCubit extends Cubit<VaultLockState> {
   /// Note this covers the LIFECYCLE lock only: [onAuthSignedOut] (identity gate
   /// closed) and interactive [lock] still take effect during a flow.
   /// Rationale is recorded in docs/CRYPTO.md §17.
+  ///
+  /// **Renewal and the absolute cap.** Calling this again while a flow is open
+  /// renews the [budget] — legitimate, because a real user may spend several
+  /// budgets walking through a cloud provider's folders in the picker. But an
+  /// unbounded chain of renewals turns a 2-minute exemption into an indefinite
+  /// one, so the FIRST begin of a run also starts an absolute clock: once
+  /// [systemFileFlowMaxTotal] has elapsed since it, a renewal is REFUSED (the
+  /// existing deadline is left untouched, so the running flow still expires on
+  /// its own schedule and [endSystemFileFlow]/`main.dart` still lock). The
+  /// clock is cleared by [endSystemFileFlow], i.e. the next flow starts fresh.
   void beginSystemFileFlow({Duration budget = const Duration(minutes: 2)}) {
-    _systemFileFlowUntil = _now().add(budget);
+    final now = _now();
+    final startedAt = _systemFileFlowStartedAt;
+    if (startedAt != null) {
+      if (now.difference(startedAt) >= systemFileFlowMaxTotal) return; // capped
+    } else {
+      _systemFileFlowStartedAt = now;
+    }
+    _systemFileFlowUntil = now.add(budget);
   }
+
+  /// Absolute ceiling on one run of the exemption, however often it is renewed.
+  ///
+  /// Ten minutes is well past any honest "find the file" detour and well short
+  /// of leaving an unlocked vault open on a device the user walked away from.
+  static const Duration systemFileFlowMaxTotal = Duration(minutes: 10);
 
   /// Ends the exemption. Idempotent — safe to call from a `finally` that may run
   /// after the budget already lapsed.
@@ -575,6 +603,7 @@ class VaultLockCubit extends Cubit<VaultLockState> {
   void endSystemFileFlow() {
     final until = _systemFileFlowUntil;
     _systemFileFlowUntil = null;
+    _systemFileFlowStartedAt = null; // next flow gets a fresh absolute clock
     if (until != null && !_now().isBefore(until)) {
       onAppBackgrounded(paused: true);
     }

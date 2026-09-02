@@ -82,7 +82,6 @@ Thumbs.db
 *.freezed.dart
 *.config.dart                  # injectable codegen (manuel DI'a geçilirse de zararsız)
 *.mocks.dart                   # mockito codegen
-coverage/
 .test_coverage.dart
 
 # Supabase CLI lokal state (supabase/.gitignore'a ek güvence — köke de yaz)

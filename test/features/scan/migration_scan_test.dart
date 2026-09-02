@@ -5,11 +5,13 @@
 /// `onDetect` geri çağrısı, gerçek bir kamera karesinin girdiği yolun ta
 /// kendisidir (`BarcodeCapture` → `_onDetect`).
 /// Migration beyni de (`debugMigration`) enjekte edilir; böylece bu testler
-/// W1'in protobuf gövdelerinden bağımsızdır.
+/// protobuf çözücünün gövdesinden bağımsız kalır — burada sınanan ekranın
+/// davranışı, `google_auth_parser`/`protobuf_wire` değil.
 library;
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -134,6 +136,7 @@ Future<VaultCubit> _pumpScan(
   Future<void> Function()? onStop,
   Future<void> Function()? onStart,
   DateTime Function()? now,
+  ValueListenable<MobileScannerState>? scannerState,
 }) async {
   final vault = VaultCubit(repo ?? _FakeRepo());
   await vault.load();
@@ -148,6 +151,7 @@ Future<VaultCubit> _pumpScan(
       start: onStart ?? () async {},
     ),
     debugNow: now,
+    debugScannerState: scannerState,
   );
 
   await tester.pumpWidget(
@@ -678,6 +682,150 @@ void main() {
       expect(SecureScreen.holderCount, 0);
       expect(migration.resets, 1,
           reason: 'dispose toplanan secret\'ları düşürmeli');
+    });
+  });
+
+  group('C2 — kamera aksiyonları', () {
+    /// `MobileScannerState` sadece durum taşıyan bir değer nesnesi → gerçek
+    /// kamera olmadan da AppBar aksiyonlarının gördüğü akış kurulabilir.
+    ValueNotifier<MobileScannerState> notifier({
+      required bool initialized,
+      TorchState torch = TorchState.off,
+    }) {
+      const base = MobileScannerState.uninitialized();
+      final n = ValueNotifier(
+        base.copyWith(isInitialized: initialized, torchState: torch),
+      );
+      addTearDown(n.dispose);
+      return n;
+    }
+
+    Finder torchBtn() => find.widgetWithIcon(IconButton, Icons.flash_on);
+    Finder swapBtn() => find.widgetWithIcon(IconButton, Icons.cameraswitch);
+
+    testWidgets('kamera hazır DEĞİLKEN aksiyonlar pasif', (tester) async {
+      // `toggleTorch`/`switchCamera` ilk iş olarak `_throwIfNotInitialized()`
+      // çağırır → aktif bir düğme yakalanmamış exception demekti.
+      await _pumpScan(
+        tester,
+        migration: _FakeMigration(),
+        scannerState: notifier(initialized: false),
+      );
+
+      expect(tester.widget<IconButton>(swapBtn()).onPressed, isNull);
+      expect(tester.widget<IconButton>(torchBtn()).onPressed, isNull);
+    });
+
+    testWidgets('kamera hazır olunca aksiyonlar aktifleşir', (tester) async {
+      final state = notifier(initialized: false);
+      await _pumpScan(
+        tester,
+        migration: _FakeMigration(),
+        scannerState: state,
+      );
+      expect(tester.widget<IconButton>(swapBtn()).onPressed, isNull);
+
+      state.value = state.value.copyWith(isInitialized: true);
+      await tester.pump();
+
+      expect(tester.widget<IconButton>(swapBtn()).onPressed, isNotNull);
+      expect(tester.widget<IconButton>(torchBtn()).onPressed, isNotNull);
+    });
+
+    testWidgets('flaşı olmayan cihazda flaş düğmesi GİZLENİR', (tester) async {
+      await _pumpScan(
+        tester,
+        migration: _FakeMigration(),
+        scannerState:
+            notifier(initialized: true, torch: TorchState.unavailable),
+      );
+
+      expect(torchBtn(), findsNothing);
+      expect(swapBtn(), findsOneWidget, reason: 'kamera değiştirme kalır');
+    });
+
+    testWidgets('önizleme adımında aksiyonlar hiç gösterilmez', (tester) async {
+      final migration = _FakeMigration(
+        script: const {_qrA: MigrationScanComplete(1, 1)},
+        previewResult: ImportPreview(
+            source: ImportSource.googleAuth, toAdd: [_acc('a')]),
+      );
+      await _pumpScan(
+        tester,
+        migration: migration,
+        scannerState: notifier(initialized: true),
+      );
+
+      await tester.tap(_scan('AAAA'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Devam'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('1 token içe aktarılacak'), findsOneWidget);
+      expect(torchBtn(), findsNothing);
+      expect(swapBtn(), findsNothing);
+    });
+  });
+
+  group('C5 — migration sırasındaki uyarılar', () {
+    testWidgets('araya giren tek-token QR\'ı kendi mesajını alır',
+        (tester) async {
+      final migration =
+          _FakeMigration(script: const {_qrA: MigrationBatchAdded(1, 3)});
+      await _pumpScan(tester, migration: migration);
+
+      await tester.tap(_scan('AAAA'));
+      await tester.pumpAndSettle();
+      await tester.tap(_scan('3PXP')); // geçerli tek-token otpauth:// QR'ı
+      await tester.pump();
+
+      expect(
+        find.text('Aktarım sürüyor — önce kalan kodları okut ya da Baştan '
+            'başla.'),
+        findsOneWidget,
+      );
+      expect(
+        find.text(
+            'Bu QR bir Google Authenticator aktarım kodu değil ya da bozuk.'),
+        findsNothing,
+        reason: 'geçerli bir kod "bozuk" diye etiketlenmemeli',
+      );
+      expect(find.text('1/3 kod tarandı'), findsOneWidget,
+          reason: 'toplananlar korunur');
+    });
+
+    testWidgets('diyalog AÇIKKEN gelen aynı QR sessiz kalmaz', (tester) async {
+      final migration = _FakeMigration(script: const {
+        _qrA: MigrationBatchAdded(1, 3),
+        _qrB: MigrationDifferentBatch(),
+      });
+      await _pumpScan(tester, migration: migration);
+
+      await tester.tap(_scan('AAAA'));
+      await tester.pumpAndSettle();
+      await tester.tap(_scan('BBBB'));
+      await tester.pumpAndSettle();
+      expect(
+          find.text('Bu QR farklı bir dışa aktarmaya ait. Baştan başlansın mı?'),
+          findsOneWidget);
+
+      // iOS'ta kadrajda duran QR her karede yeniden gelir → ikinci kare.
+      // Yer tutucu "kamera" diyalogun ALTINDA kaldığı için tap modal bariyere
+      // çarpar → kare gerçek kameradaki gibi doğrudan yayınlanır.
+      tester
+          .widget<TextButton>(find.widgetWithText(TextButton, 'scan:BBBB'))
+          .onPressed!();
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.text('Bu kod için soru zaten açık.'), findsOneWidget);
+      expect(
+          find.text('Bu QR farklı bir dışa aktarmaya ait. Baştan başlansın mı?'),
+          findsOneWidget,
+          reason: 'ikinci diyalog YIĞILMAZ');
+
+      await tester.tap(find.text('Vazgeç'));
+      await tester.pumpAndSettle();
     });
   });
 }

@@ -31,7 +31,10 @@ import 'package:project_auth/features/import_export/domain/backup_service.dart';
 import 'package:project_auth/features/import_export/domain/import_exceptions.dart';
 import 'package:project_auth/features/import_export/domain/import_models.dart';
 import 'package:project_auth/features/import_export/domain/import_service.dart';
+import 'package:project_auth/features/import_export/domain/dedupe.dart';
 import 'package:project_auth/features/scan/presentation/migration_scan_controller.dart';
+import 'package:project_auth/features/vault/domain/catalog_repository.dart';
+import 'package:project_auth/features/vault/domain/issuer_catalog.dart';
 
 import '../../support/fake_crypto.dart';
 import '../../support/protobuf_encoder.dart';
@@ -133,6 +136,90 @@ void main() {
       // issuer casing) collapse onto the vault entry.
       expect(_countOf(preview, SkipReason.alreadyInVault), 2);
       expect(preview.addCount, 3);
+    });
+  });
+
+  // --- Audit A2: the catalog rewrite the vault applies must also drive dedupe ---
+  group('issuer canonicalization end to end', () {
+    /// The production catalog shape: an alias row ("github.com") plus the
+    /// canonical row, both resolving to the name `VaultCubit` stores.
+    ImportService catalogService() => ImportService(
+          backup: backup,
+          parsers: const [AegisParser(), TwoFasParser()],
+          // Exactly `locator.dart`: a resolver returning the canonicalizer
+          // bound to the current catalog snapshot.
+          canonicalizeResolver: () => canonicalizerFor(IssuerCatalog(const [
+                CatalogService(
+                    id: '1', name: 'GitHub', issuer: 'github.com', logoUrl: null),
+                CatalogService(
+                    id: '2', name: 'GitHub', issuer: null, logoUrl: null),
+              ])),
+        );
+
+    /// A minimal but real Aegis v1 export whose issuer is the ALIAS form.
+    String aliasFile() => jsonEncode({
+          'version': 1,
+          'header': {'slots': null, 'params': null},
+          'db': {
+            'version': 3,
+            'entries': [
+              {
+                'type': 'totp',
+                'uuid': '3f1a6c2e-0b41-4a9d-9d1e-8f0b2c7a5d10',
+                'name': 'alice@example.com',
+                'issuer': 'github.com',
+                'info': {
+                  'secret': 'JBSWY3DPEHPK3PXP',
+                  'algo': 'SHA1',
+                  'digits': 6,
+                  'period': 30,
+                },
+              },
+            ],
+          },
+        });
+
+    OtpAccount inVault(String issuer) => OtpAccount(
+          secret: 'JBSWY3DPEHPK3PXP',
+          type: OtpType.totp,
+          issuer: issuer,
+          accountName: 'alice@example.com',
+        );
+
+    test('vault "GitHub" + file "github.com" → alreadyInVault', () async {
+      final preview = await catalogService()
+          .preview(raw: aliasFile(), existing: [inVault('GitHub')]);
+
+      expect(preview.addCount, 0);
+      expect(_countOf(preview, SkipReason.alreadyInVault), 1,
+          reason: 'VaultCubit stores "GitHub"; a re-import of the alias file '
+              'must not add a second copy');
+    });
+
+    test('the same file WITHOUT the catalog wiring duplicates the token '
+        '(the bug this guards)', () async {
+      final preview =
+          await service.preview(raw: aliasFile(), existing: [inVault('GitHub')]);
+      expect(preview.addCount, 1);
+    });
+
+    test('vault "github.com" + file "GitHub" → alreadyInVault (both sides are '
+        'canonicalized)', () async {
+      final preview = await catalogService().preview(
+          raw: _fixture('aegis_plain_v1.json'),
+          existing: [inVault('github.com')]);
+      expect(_countOf(preview, SkipReason.alreadyInVault), 2,
+          reason: 'both GitHub rows of the fixture collapse onto the vault row');
+    });
+
+    test('an entry the catalog does not know keeps its issuer verbatim',
+        () async {
+      final preview = await catalogService()
+          .preview(raw: _fixture('aegis_plain_v1.json'), existing: const []);
+      // "ACME" is absent from the catalog and a null issuer has nothing to
+      // match — both must come through exactly as the file wrote them.
+      expect(preview.toAdd.map((a) => a.issuer),
+          containsAll(<String?>['GitHub', 'ACME', null]));
     });
   });
 

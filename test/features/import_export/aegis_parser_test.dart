@@ -102,9 +102,9 @@ void main() {
 
     setUp(() => result = parser.parse(_fixture('aegis_mixed_types.json')));
 
-    test('four entries survive, six are skipped', () {
+    test('four entries survive, five are skipped', () {
       expect(result.accounts, hasLength(4));
-      expect(result.skipped, hasLength(6));
+      expect(result.skipped, hasLength(5));
     });
 
     test('HOTP keeps its counter', () {
@@ -126,12 +126,21 @@ void main() {
       expect(a.algorithm, OtpAlgorithm.sha1);
     });
 
-    test('D5 — totp entry with issuer "Steam" is promoted, digits forced to 5',
-        () {
+    test('B1 — a totp entry whose issuer reads "Steam" stays a TOTP', () {
+      // Aegis has a first-class "steam" type, so a file that says "totp" means
+      // TOTP. Promoting it would force digits to 5 and produce wrong codes.
       final a = result.accounts[3];
-      expect(a.type, OtpType.steam);
+      expect(a.type, OtpType.totp);
+      expect(a.issuer, 'Steam');
       expect(a.accountName, 'player');
-      expect(a.digits, 5); // file said 6
+      expect(a.digits, 6); // exactly what the file said
+      expect(a.period, 30);
+    });
+
+    test('icon, icon_mime and icon_hash are ignored, not mapped', () {
+      final a = result.accounts[0];
+      expect(a.issuer, 'GitHub');
+      expect(a.accountName, 'alice@example.com');
     });
 
     test('unsupported types are skipped with their type name as detail', () {
@@ -140,10 +149,13 @@ void main() {
       expect(yandex.label, 'Yandex (yandex-user)');
       expect(yandex.detail, contains('yandex'));
 
-      final motp = result.skipped[5];
+      // A realistic MOTP entry (MD5 / 10s / 6 digits / pin): rejected on its
+      // type, before its MD5 algo is ever looked at.
+      final motp = result.skipped[3];
       expect(motp.reason, SkipReason.unsupportedType);
       expect(motp.label, 'Legacy (motp-user)');
       expect(motp.detail, contains('motp'));
+      expect(motp.detail, isNot(contains('MD5')));
     });
 
     test('undecodable secret is skipped as invalidSecret', () {
@@ -158,13 +170,6 @@ void main() {
       expect(noCounter.reason, SkipReason.invalidFields);
       expect(noCounter.label, 'NoCounter (y)');
       expect(noCounter.detail, contains('counter'));
-    });
-
-    test('unknown algorithm is skipped', () {
-      final weird = result.skipped[3];
-      expect(weird.reason, SkipReason.invalidFields);
-      expect(weird.label, 'WeirdAlgo (z)');
-      expect(weird.detail, contains('MD5'));
     });
 
     test('out-of-range digits is skipped', () {
@@ -184,7 +189,6 @@ void main() {
         'ONSWG4TFOQ',
         'MZXW6YTBOI',
         'NB2W45DFOIZA',
-        'd1d2d3d4e5e6f7f8',
       ];
       for (final skip in result.skipped) {
         final text = '${skip.label ?? ''} ${skip.detail ?? ''}';
@@ -416,6 +420,68 @@ void main() {
         ),
       ]));
       expect(result.accounts.single.algorithm, OtpAlgorithm.sha1);
+    });
+
+    test('B3 — a known but uncomputable algorithm is unsupportedType', () {
+      // SHA224/SHA384 are in the 2FAS algorithm enum and MD5 is what Aegis
+      // writes for MOTP; none of them is something this app can compute. That
+      // is a capability gap, not a broken file, so the taxonomy differs from a
+      // name nobody writes.
+      for (final algo in const ['SHA224', 'sha-384', 'MD5']) {
+        final result = parser.parse(_vault([
+          _entry(info: {'secret': 'JBSWY3DPEHPK3PXP', 'algo': algo}),
+        ]));
+        expect(result.accounts, isEmpty);
+        expect(result.skipped.single.reason, SkipReason.unsupportedType);
+        expect(result.skipped.single.detail,
+            'algorithm=${algo.toUpperCase().replaceAll('-', '')}');
+      }
+    });
+
+    test('B3 — an algorithm no authenticator writes stays invalidFields', () {
+      final result = parser.parse(_vault([
+        _entry(info: const {'secret': 'JBSWY3DPEHPK3PXP', 'algo': 'BLAKE2B'}),
+      ]));
+      expect(result.skipped.single.reason, SkipReason.invalidFields);
+      expect(result.skipped.single.detail, contains('BLAKE2B'));
+    });
+
+    test('B4 — issuer over 512 UTF-8 bytes is rejected', () {
+      final result = parser.parse(_vault([
+        _entry(issuer: 'A' * 513),
+      ]));
+      expect(result.accounts, isEmpty);
+      expect(result.skipped.single.reason, SkipReason.invalidFields);
+      expect(result.skipped.single.detail, contains('issuer'));
+      expect(result.skipped.single.detail, contains('512'));
+    });
+
+    test('B4 — name over 512 UTF-8 bytes is rejected', () {
+      final result = parser.parse(_vault([
+        _entry(name: 'b' * 513),
+      ]));
+      expect(result.accounts, isEmpty);
+      expect(result.skipped.single.reason, SkipReason.invalidFields);
+      expect(result.skipped.single.detail, contains('name'));
+    });
+
+    test('B4 — the ceiling counts bytes, not code units', () {
+      // "ş" is two UTF-8 bytes: 300 of them are under 512 code units but over
+      // the byte ceiling.
+      final result = parser.parse(_vault([_entry(issuer: 'ş' * 300)]));
+      expect(result.accounts, isEmpty);
+      expect(result.skipped.single.reason, SkipReason.invalidFields);
+
+      final ok = parser.parse(_vault([_entry(issuer: 'ş' * 256)]));
+      expect(ok.accounts.single.issuer, 'ş' * 256);
+    });
+
+    test('B4 — an oversized label is clamped before it reaches the preview',
+        () {
+      final result = parser.parse(_vault([_entry(issuer: 'C' * 5000)]));
+      final label = result.skipped.single.label!;
+      expect(label.length, lessThan(200));
+      expect(label, contains('…'));
     });
 
     test('wrongly typed issuer/name do not crash label building', () {

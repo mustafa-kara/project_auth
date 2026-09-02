@@ -2,14 +2,185 @@
 
 Project progress log. Newest at the top.
 
+## 2026-09-02 (Audit follow-ups)
+
+A post-merge audit of Phase 5 (Patches 1–2) produced 23 findings across data integrity, parser fidelity,
+platform hygiene and documentation, plus two follow-ups uncovered while fixing them. All of them are addressed
+here. **No Supabase schema change, no new crypto
+primitive, no sync-protocol change**; one document *is* touched — docs/CRYPTO.md §15/§16/§17, which had drifted
+from the code. host **909/909 → 992/992**, integration unchanged (**50**, not run on a device this round),
+`flutter analyze --fatal-infos` clean.
+
+### Data integrity — vault, sync, dedupe (A1–A6)
+
+- **[P1] A live record could coexist with its own tombstone (A1).** `EncryptedVaultRepository._writeRecords`
+  wrote the tombstone loop without filtering ids that were live in the same save, so an id-preserving restore of
+  a previously deleted token put **two records for one id** on disk. The consequences were both silent and
+  permanent: the next `importRemote` let the tombstone win (the token vanished again with no error), and while
+  both were dirty `pushUpsert(onConflict: 'id')` failed with Postgres 21000 — wedging **every** later push, not
+  just that one. A live record now drops its own tombstone in `_writeRecords`, and `load`/`importRemote` prefer
+  the live record if a duplicate ever reaches them anyway (and rewrite the file to heal it). This is a
+  **deliberate resurrection**: restoring a backup that contains a deleted token *is* the user asking for it back,
+  so the record stays dirty (`sv == null`) and the next push flips the server row to `deleted = false`.
+- **[P1] Dedupe and the vault canonicalized issuers differently (A2).** `dedupe.dart` only trimmed and
+  lower-cased, while `VaultCubit` rewrote the issuer through the catalog on write (`github.com` → `GitHub`,
+  `AWS` → `Amazon Web Services`). Re-importing the same file therefore missed `alreadyInVault` and created
+  duplicate tokens. `canonicalizerFor(IssuerCatalog)` is now the single source both sides use — injected into
+  `ImportService` from the locator with the same catalog `VaultCubit` gets — and `dedupeKey` additionally reduces
+  the issuer to its `IssuerAvatar.slugFor` slug, which collapses `github.com`/`GitHub` on spelling alone. Aliases
+  still need the catalog; the slug cannot invent one. **Known limit, documented in the doc comment:** no Unicode
+  NFC/NFD normalization — a precomposed `é` and its decomposed twin still key differently, and fixing that needs
+  a package the project deliberately does not carry.
+- **[P2] The file import path had no entry ceiling (A3).** `ImportFileTooLargeException` bounded bytes, but a
+  small file packed with tiny entries sailed past it. `ImportService.maxEntries = 1024` (accounts + skipped, the
+  same ceiling the Google path already had) now rejects the file whole with `ImportTooManyEntriesException`
+  rather than truncating — importing the first 1024 of a 5000-entry file would leave the user believing it all
+  came across. The Turkish message is "Dosyada çok fazla kayıt var (en fazla 1024)."
+- **[P2] Push and merge could interleave and re-upload a stale blob (A4).** `pushChanged` ran outside any
+  sequencer, so an `applyRemoteMerge` arriving during a long import push wrote a newer blob to disk while the
+  in-flight push was still uploading the snapshot it had read beforehand — the server kept the stale one and
+  handed it back on the next pull. `TokenSyncService` now serializes `exportRaw + pushUpsert` against the merge
+  write with its own async mutex. Deliberately **not** `VaultCubit._opChain`: that queue guards UI mutations and
+  must not have a network round trip parked in it.
+- **[P3] Re-enabling the sync kill-switch did not catch up (A5).** While `token_sync_enabled` was false,
+  `syncOnce`, `pushChanged` and the Realtime trigger were all no-ops, so both server rows and local dirty records
+  piled up; restoring the subscription only announced what happened *next*. A false→true transition now runs a
+  catch-up `syncOnce` in the same subscribe-then-pull order as `start`.
+- **[P3] Final dedupe before `addAll` (A6)** — a token pulled in between preview and confirm no longer slips in
+  twice.
+- **[P1] On the FIRST sync, a dirty local record now beats a colliding remote row (A2 follow-up).** With
+  `pullCursorIso == null` this device has never completed a pull, so there is no reference point that could prove
+  a server row arrived *after* our unpushed record — yet the old rule handed the win to the server anyway. That
+  turned the A1 resurrection into a silent deletion in the exact case A1 exists for: restore an id-preserving
+  backup, resurrect a deleted token (live, `sv == null`), sync for the first time, and the server's tombstone
+  wiped it again. Ids with no local record are still always accepted, so a first pull still brings the whole
+  vault down; only records waiting to be pushed are left alone, and the collision is settled by server-side LWW
+  once the push lands. **Behaviour change**, deliberately: local wins that one race.
+- **[P1] `exportRaw` and `_pushDirty` return at most one record per id (A2 follow-up).** `_corruptedRaw` holds
+  records that are schema-valid but undecryptable, so one id could legitimately sit in both `_corruptedRaw` and
+  `_lastById` and reach the disk twice — and `pushUpsert(onConflict: 'id')` answers a batch carrying the same id
+  twice with Postgres 21000, which wedges **every** later push, not just that one. Both the store and the sync
+  service now collapse duplicates with the same rule used everywhere else: a live record beats its own tombstone
+  (deliberate resurrection), and between two of the same kind the first on disk wins. "Last wins" was not an
+  option — it could turn a resurrection back into a tombstone and lose the token silently. The service-side pass
+  is defence in depth: `RawTokenStore` is a port, and another implementation (or a hand-edited file) can hand it
+  duplicates.
+
+### Parser fidelity — Aegis / 2FAS (B1–B6)
+
+- **[P1] The Steam issuer heuristic is gone (B1).** Both parsers promoted an entry declared `totp` to
+  `OtpType.steam` when its issuer read "Steam", forcing 5 digits — which turns a working 6-digit TOTP the user
+  merely *named* Steam into a token that generates wrong codes. Both formats have a first-class Steam type
+  (`type: "steam"`, `tokenType: "STEAM"`), so the declared type is the only authority, exactly as on the Google
+  path. The digits/SHA-1 forcing stays, but only for an entry the file itself declares Steam. The two tests that
+  asserted the promotion now assert the opposite.
+  **One issuer-based inference deliberately survives**, in `core/otp/otpauth_uri.dart`: the `otpauth://` scheme
+  has no Steam host, so Steam Guard links are conventionally written as
+  `otpauth://totp/Steam:<account>?issuer=Steam` and the issuer really does carry the type there. Aegis, 2FAS and
+  Google all have (or lack) an explicit type field instead, which is exactly why the heuristic is wrong in those
+  three and right in this one. Noted in the parser's doc comment so the asymmetry does not read as an oversight.
+- **[P2] 2FAS encryption detection follows the official predicate (B2).** 2FAS's own `BackupContent.isEncrypted`
+  is "`reference` is not blank"; we only checked `servicesEncrypted`, so an encrypted export could reach the
+  parser and fail as "malformed" instead of telling the user to re-export unencrypted. Both are now checked, and
+  the fixture's `reference` carries a realistic three-part `data:salt:iv` base64 value.
+- **[P2] Known-but-unsupported algorithms are `unsupportedType`, not `invalidFields` (B3).** `SHA224`/`SHA384`
+  (both in the 2FAS enum) and `MD5` are recognized names we do not implement, so they are skipped with an
+  `algorithm=<NAME>` detail. A name we do not recognize at all remains `invalidFields` — the taxonomy now tracks
+  "we know it and won't" versus "this file is wrong".
+- **[P3] 512-byte ceiling on parsed strings (B4)** — issuer/name/account, the same `maxStringBytes` the Google
+  path uses; over it the entry is skipped as `invalidFields`.
+- **[P3] Fixtures now match what the apps actually export (B5).** `twofas_steam_hotp.json` lost the invented
+  `initialCounter` field (the parser's tolerance for it stays, re-labelled defensive rather than observed), the
+  impossible `totp` + `MD5` row in `aegis_mixed_types.json` became a realistic `motp` entry, and Aegis entries
+  carry the `icon_mime`/`icon_hash` fields the parser ignores. A fixture that cannot come out of the real app
+  proves nothing about the real app.
+- **[P3] 2FAS `[hidden]` secrets get a source-specific message (B6)** — "re-export without link" rather than a
+  generic parse failure. The secret string itself is never echoed.
+
+### Platform and UI (C1–C10)
+
+- **[P1] The iOS export left a full copy of the backup in Documents (C1).** file_picker 11.0.3 implements the iOS
+  `saveFile` by writing the bytes into `NSDocumentDirectory/<fileName>` and exporting *that*; nothing removes the
+  source, and `clearTemporaryFiles()` only walks `NSTemporaryDirectory()`, so it never sees the file. The app's
+  Documents directory is part of the iCloud/iTunes device backup — so a backup the user put on a USB stick also
+  rode silently to iCloud. `FilePickerDocumentPort.saveJson` now zero-fills and unlinks it in a `finally`
+  (best effort; a housekeeping failure must not turn a finished export into an error), `path_provider` was
+  promoted to a direct dependency for it, and the code comment claiming "no temp file to shred" is corrected.
+  The export screen's "Dosya cihazından çıkmaz" — which was simply false about a file the user is choosing where
+  to put — now reads "Dosya yalnız seçtiğin yere kaydedilir; geçici kopya silinir."
+- **[P2] Camera action guards on the scan screen (C2)** — flash and camera-switch are disabled until the
+  controller reports `isInitialized`, hidden while a migration preview is up, wrapped in try/catch, and the flash
+  button is not rendered at all where `torchState == unavailable`.
+- **[P2] The skipped-entries list is bounded (C3).** `ExpansionTile` builds all its children at once, and the
+  import path admits 1024 entries, so the audit list now renders at most 50 rows plus a "+k tane daha" line.
+- **[P3] Smaller UI follow-ups (C4–C8):** the consumed preview is cleared after confirm on both the import page
+  and `ScanPage` (which now falls back symmetrically, `maybePop` then `go(Routes.vault)`); a separate message for
+  a single-token QR scanned mid-migration, and a short snackbar for a different-batch code arriving while a
+  dialog is open; a "Başka dosya seç" secondary action on the password and preview steps; `PasswordStrengthBar`
+  colors bound to `ColorScheme` roles with `Semantics(excludeSemantics: true)` so the bar is not read three
+  times; `@visibleForTesting` on the pages' injected service seams.
+- **[P3] `SecureScreen` native-failure handling (C9).** A failed `enable` marked the protection off so the next
+  `acquire()` would retry — but with only one sensitive screen open, that next `acquire()` never comes. A failed
+  `enable` now also schedules a **single** 500 ms retry (one-shot, never a loop). And a failed `disable` no longer
+  records the protection as off: native protection is still ON in that case, and the bookkeeping must not drift
+  away from it.
+- **[P3] Absolute cap on the file-picker lock exemption (C10).** The 2-minute budget was renewable without limit,
+  which turned a bounded concession into an unbounded one. Renewal stays — a user really can spend more than two
+  minutes in a cloud provider's folders — but `VaultLockCubit.systemFileFlowMaxTotal` (10 minutes) now measures
+  from the **first** begin of a run and refuses renewals past it, leaving the running deadline to expire on its
+  own. `endSystemFileFlow()` clears the clock.
+
+### Documentation (D1–D7)
+
+- **docs/CRYPTO.md §15** — the protected-screen table was three screens out of date and still listed `scan`
+  under "deliberately NOT protected" after Patch 2 had given it its own scope. Import, export and scan are now in
+  the table (11 screens; `grep -rn "SecureScreenScope(" lib/` is named as the authoritative list), the
+  not-protected line is rewritten, and the native-failure paragraph documents the C9 behaviour.
+- **docs/CRYPTO.md §16.2** — records why `createdAt` is deliberately outside the AAD (it changes nothing about
+  how the ciphertext is opened, and an ISO-8601 timestamp has several valid spellings, so binding it would break
+  honest re-serialization for no security gain).
+- **docs/CRYPTO.md §16.5** — adds the `Isolate.run` copy as a second accepted memory-hygiene limit alongside the
+  unwipeable `String`, and the iOS Documents leftover with its shredder.
+- **docs/CRYPTO.md §17** — budget **renewal** was never written down at all; it is now, together with the
+  absolute cap.
+- **Screen lists** in ARCHITECTURE.md §2.1, docs/architecture.md §7 and PLAN.md (Phase 3.5 + Phase 7) said six or
+  eight screens; all now say 11 and point at the grep.
+- **Test counts** were stale everywhere they claimed to be current: README's `flutter test` line said 713,
+  PLAN.md's CI line said 454 host / 38 integration, README's Phase 2 row said the integration suite was 38
+  "today". Measured and corrected to **992 host / 50 integration**. The Patch 2 row's 899 was also inconsistent
+  with that patch's own changelog entry (909) and is fixed.
+- **`file_picker` pin rationale (pubspec.yaml, ARCHITECTURE.md §4.1, docs/architecture.md §8.1)** — the comment
+  explained the win32 conflict but neither cost of staying: `file_picker 12` cannot move without
+  `device_info_plus 13` (one coupled job, now a PLAN.md item), and 11.0.3's iOS podspec links
+  `DKImagePickerController/PhotoGallery` → `SDWebImage`/`SwiftyGif` into a document-only app unless
+  `PICKER_MEDIA=false` is set in `ios/Podfile`. `ios/Runner/Info.plist` has no `NSPhotoLibraryUsageDescription`,
+  so that is a release-review question — added to the Phase 7 checklist.
+- **Other doc corrections:** `/import` and `/export` added to docs/architecture.md's route matrix; the README
+  folder tree gained the five directories it never listed (`core/crypto`, `core/config`, `core/platform`,
+  `core/ui`, and the `account`/`auth`/`settings` features); ARCHITECTURE §5 gained the A1/A4/A5 sync-contract
+  rules and §4.1 the dedupe and entry-ceiling rules; a note that `postgrest 2.9` auto-retries GET/HEAD three
+  times on 503/520 by default (writes are never retried, so `pushUpsert` cannot be duplicated behind our back);
+  PLAN.md's "minor upgrades are kept current" softened to what it actually was, a point-in-time sweep; Supabase
+  leaked-password protection added to Phase 7; three stale test-file headers still referring to unwritten "W1/W2"
+  work rewritten; the duplicate `coverage/` line dropped from `.gitignore`; docs/README.md's "15 ekran" now says
+  which two screens have no spec file yet.
+- **Corrections to earlier entries in this file** are marked in place rather than rewritten — see the Patch 2 and
+  Patch 1 sections above for the superseded Steam passages and the "docs/CRYPTO.md is untouched" claim.
+
 ## 2026-09-02 (Phase 5 Patch 2 — Google Authenticator import)
 
 Import from a Google Authenticator **transfer QR** (`otpauth-migration://offline?data=…`), single- and
-multi-code exports alike. **NO Supabase schema change, NO new crypto primitive, NO sync-protocol change, and
-[docs/CRYPTO.md](docs/CRYPTO.md) is untouched** — the imported tokens travel the same
+multi-code exports alike. **NO Supabase schema change, NO new crypto primitive, NO sync-protocol change** — the
+imported tokens travel the same
 `VaultCubit.addAll → EncryptedVaultRepository → RawTokenStore → pushUpsert` path as Patch 1's.
 host **736/736 → 909/909**, integration unchanged (**50**, not run on a device this patch — see the manual
 checklist below), `flutter analyze --fatal-infos` clean.
+
+> **Correction (2026-09-02, audit follow-ups).** This entry originally also claimed
+> "[docs/CRYPTO.md](docs/CRYPTO.md) is untouched". That was wrong: this patch wrapped `ScanPage` in
+> `SecureScreenScope`, which contradicted §15's list of protected screens and its explicit "scan is deliberately
+> NOT protected" line. §15 has now been corrected. The crypto model itself was indeed untouched — the stale claim
+> was about the document, not the design.
 
 ### The payload format
 
@@ -78,6 +249,11 @@ purpose: Google Authenticator cannot hold a Steam token in the first place (Stea
 non-RFC), so an entry that merely *says* "Steam" is an ordinary 6-digit TOTP the user set up under that name.
 Promoting it would rewrite a working token into one that generates wrong codes — the exact failure the Patch 1
 review fixed in the 2FAS heuristic. The `period 30` default has the same shape of reasoning.
+
+> **Superseded 2026-09-02 (audit follow-ups).** The reasoning above outlived its exception: the Aegis/2FAS issuer
+> heuristic it contrasts itself with was **removed**, because the same argument applies there too. Both formats
+> have a first-class Steam type (`type: "steam"` / `tokenType: "STEAM"`), so an entry the file itself calls TOTP
+> is a TOTP whatever its issuer reads. No import path infers Steam from an issuer any more.
 
 ### Multi-QR exports — `GoogleMigrationCollector`
 
@@ -207,6 +383,9 @@ continues. Deliberate tolerance decisions:
 - **Steam promotion:** an entry declared `totp` whose issuer is `steam` is promoted to `OtpType.steam`, matching
   how the `otpauth://` parser already behaves. Steam entries then get `digits: 5` / SHA-1 forced, because the
   Steam codec is fixed and the file's values are cosmetic.
+  *(**Removed 2026-09-02**, audit B1: the promotion half was wrong — the declared type is the only authority, and
+  both formats have one. `digits: 5` / SHA-1 forcing survives, but only for an entry the file itself declares
+  Steam.)*
 - **Encrypted sources are recognized, not mangled:** an Aegis vault with populated `header.slots`, or a 2FAS file
   with `servicesEncrypted`, raises `EncryptedSourceException` with source-specific guidance instead of failing as
   "malformed".
@@ -343,6 +522,8 @@ schema change, no sync-protocol change). Host suite **713/713 → 736/736**, `fl
 - **[P2] 2FAS Steam heuristic read the wrong field.** It used the issuer-with-name fallback, so a service the user
   named "Steam" with an ordinary 6-digit TOTP was rewritten into a 5-digit Steam token. It now reads `otp.issuer`
   only; the `tokenType == steam` path is unchanged.
+  *(**Superseded 2026-09-02**, audit B1: narrowing the field was treating the symptom. The heuristic is gone from
+  both parsers — a token the file declares TOTP stays a TOTP regardless of its issuer.)*
 - **[P3] The lock exemption now also ends on screen `dispose`.** A page torn down while the OS dialog was up
   (router redirect, back gesture) left the exemption running until its budget lapsed. Both pages capture the cubit
   in `didChangeDependencies` and close an active flow in `dispose` — which is what docs/CRYPTO.md §17 already

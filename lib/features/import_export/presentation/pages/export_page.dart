@@ -49,7 +49,12 @@ class ExportPage extends StatefulWidget {
   /// Servisler testte sahtelenebilsin diye opsiyonel; prod'da DI'dan çözülür.
   const ExportPage({super.key, this.backup, this.documents});
 
+  /// Test tohumu: prod'da `null` → DI'dan çözülür.
+  @visibleForTesting
   final BackupService? backup;
+
+  /// Test tohumu: prod'da `null` → DI'dan çözülür.
+  @visibleForTesting
   final DocumentPort? documents;
 
   @override
@@ -204,8 +209,8 @@ class _ExportPageState extends State<ExportPage> {
         title: 'Şifreli yedek al',
         description:
             'Tüm tokenların burada belirleyeceğin AYRI bir parolayla '
-            'şifrelenip tek bir dosyaya yazılır. Dosya cihazından çıkmaz; '
-            'nereye kaydedeceğine sen karar verirsin.',
+            'şifrelenip tek bir dosyaya yazılır. Dosya yalnız seçtiğin yere '
+            'kaydedilir; geçici kopya silinir.',
         body: [
           AppTextField(
             controller: _passwordCtrl,

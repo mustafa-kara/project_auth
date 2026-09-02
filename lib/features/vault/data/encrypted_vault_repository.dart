@@ -154,6 +154,13 @@ class EncryptedVaultRepository implements VaultRepository, RawTokenStore {
         continue;
       }
       final id = parsed.id;
+      // A1 defence-in-depth: a well-formed store never holds two live records
+      // for one id, but a hand-edited/half-merged file could. Keep the FIRST
+      // one instead of emitting the account twice — a duplicated id would show
+      // up twice in the UI, be deleted twice by `removeById`, and make
+      // `pushUpsert`'s `onConflict: 'id'` fail with Postgres 21000, which
+      // wedges every later push.
+      if (_lastById.containsKey(id)) continue;
       try {
         final plaintext =
             _crypto.decrypt(blob: parsed.blob, key: _masterKey, aad: _aad(id));
@@ -174,6 +181,15 @@ class EncryptedVaultRepository implements VaultRepository, RawTokenStore {
         corrupted++;
       }
     }
+
+    // A1: a live record WINS over its own tombstone (deliberate resurrection).
+    // The pair can only exist after an id-preserving backup restore of a token
+    // the user had deleted; the user just asked for that token back. Dropping
+    // the tombstone here (instead of hiding the account) means the freshly
+    // written record is dirty (`sv == null`) and the next push flips the server
+    // row back to `deleted = false`. Keeping both would silently lose the token
+    // on the next `importRemote` and break push with a duplicate-id upsert.
+    _tombstones.removeWhere((id, _) => _lastById.containsKey(id));
 
     // Tüm kayıtlar fail (yanlış masterKey / toptan bozulma) → integrity error,
     // boş vault gösterme (review). NOT: tombstone-only vault (canlı 0 + corrupted 0)
@@ -231,6 +247,17 @@ class EncryptedVaultRepository implements VaultRepository, RawTokenStore {
       }
     }
 
+    // Bu save'de var olan id'ler — tombstone filtresi ve `_lastById` temizliği
+    // ikisi de bunu kullanır (A1: filtre tombstone döngüsünden ÖNCE hesaplanmalı).
+    final presentIds = {for (final a in accounts) a.id};
+
+    // A1: a live account overrides its own tombstone. Without this both records
+    // reach the disk, `importRemote` later lets the tombstone win (silent loss)
+    // and `pushUpsert(onConflict: 'id')` dies with Postgres 21000 while both are
+    // dirty. Dropping it is a DELIBERATE resurrection: the live record is dirty
+    // (`sv == null`), so the next push sets `deleted = false` on the server.
+    _tombstones.removeWhere((id, _) => presentIds.contains(id));
+
     // Tombstone'lar (soft-delete) AYNEN korunur → push edilebilsin + bir sonraki
     // save token'ı diriltmesin (sunucu hâlâ row'a sahip; tombstone gitmezse LWW geri ekler).
     for (final t in _tombstones.values) {
@@ -243,7 +270,6 @@ class EncryptedVaultRepository implements VaultRepository, RawTokenStore {
     records.addAll(_corruptedRaw);
 
     // Bu save'de artık var olmayan id'leri _lastById'den temizle (kullanıcı sildi).
-    final presentIds = {for (final a in accounts) a.id};
     _lastById.removeWhere((id, _) => !presentIds.contains(id));
 
     await _storage.write(key: _vaultStorageKey, value: jsonEncode(records));
@@ -261,11 +287,22 @@ class EncryptedVaultRepository implements VaultRepository, RawTokenStore {
 
   // --- RawTokenStore (Faz 3 Patch 3 — token sync; masterKey GEREKTİRMEZ) ---
 
+  /// Diskteki ham kayıtlar (canlı + tombstone), **id başına en fazla bir tane**.
+  ///
+  /// **Id tekilliği (A2):** `_corruptedRaw` decrypt'i başarısız olan kayıtları da
+  /// tutar; bunlar ŞEMA olarak geçerlidir (nonce/ciphertext parse edilir), yalnız
+  /// plaintext'leri çözülemez. `load()` böyle bir kaydı `_corruptedRaw`'a, aynı
+  /// id'nin ikinci (çözülebilen) kaydını `_lastById`'ye koyabilir; `_writeRecords`
+  /// ikisini de diske yazar. Tekilleştirme olmadan `exportRaw` aynı id'yi iki kez
+  /// döndürür ve `pushUpsert(onConflict: 'id')` Postgres 21000 ("ON CONFLICT DO
+  /// UPDATE command cannot affect row a second time") ile ölür — bu da SONRAKİ TÜM
+  /// push'ları kilitler. Kural `load`/`importRemote` ile aynı: CANLI kayıt kendi
+  /// tombstone'unu yener (kasıtlı diriltme), aynı türden ikisinde İLKİ kazanır.
   @override
   Future<List<RawTokenRecord>> exportRaw() async {
     // DİSKTEN okur (decrypt YOK) → in-memory `_lastById`/`_tombstones` tazeliğine
-    // BAĞLI DEĞİL (merge-sonrası-reload yarışına kapalı). Bozuk kayıtlar atlanır
-    // (push edilemez; zaten geçersiz). Canlı + tombstone döner.
+    // BAĞLI DEĞİL (merge-sonrası-reload yarışına kapalı). Şeması bozuk kayıtlar
+    // atlanır (push edilemez; zaten geçersiz). Canlı + tombstone döner.
     final raw = await _storage.read(key: _vaultStorageKey);
     if (raw == null || raw.isEmpty) return const [];
     final Object? decoded;
@@ -275,12 +312,15 @@ class EncryptedVaultRepository implements VaultRepository, RawTokenStore {
       return const [];
     }
     if (decoded is! List) return const [];
-    final out = <RawTokenRecord>[];
+    // LinkedHashMap → disk sırası korunur (ilk-kazanır deterministik kalır).
+    final byId = <String, _TokenRecord>{};
     for (final item in decoded) {
       final rec = _tryParseRecord(item);
-      if (rec != null) out.add(rec.toRaw());
+      if (rec == null) continue;
+      final seen = byId[rec.id];
+      if (seen == null || (seen.deleted && !rec.deleted)) byId[rec.id] = rec;
     }
-    return out;
+    return [for (final rec in byId.values) rec.toRaw()];
   }
 
   @override
@@ -306,6 +346,23 @@ class EncryptedVaultRepository implements VaultRepository, RawTokenStore {
     await _writeRecords(survivors);
   }
 
+  /// Remote satırları LWW ile diske merge eder (decrypt YOK).
+  ///
+  /// **Null cursor kuralı (A2):** `pullCursorIso == null` = bu cihaz HİÇ başarılı
+  /// pull yapmamış. O durumda bir server satırının lokal dirty kaydımızdan SONRA
+  /// gelip gelmediğini kanıtlayacak referans noktası yoktur, bu yüzden **dirty
+  /// lokal kayıt korunur** (server satırı — tombstone dahil — uygulanmaz).
+  /// Lokali OLMAYAN id'ler her zaman kabul edilir, yani ilk pull yine tüm remote
+  /// token'ları getirir; yalnız push bekleyen kayıtlar dokunulmaz kalır.
+  ///
+  /// Bunu gerektiren senaryo: id koruyan bir yedek geri yüklenir, silinmiş bir
+  /// token diriltilir (canlı + `sv == null`), ve cihaz ilk sync'ini yapar. Eski
+  /// kural (`pullCursorIso == null` → server kazanır) sunucudaki tombstone'un
+  /// yeni diriltilen kaydı SESSİZCE silmesine yol açıyordu.
+  ///
+  /// **Davranış değişikliği:** ilk pull'da dirty bir lokal kayıt ile aynı id'li
+  /// bir remote satır çarpışırsa artık LOKAL kazanır; çakışma push sonrası
+  /// sunucudaki LWW ile çözülür (bir sonraki pull uzlaşılmış satırı geri getirir).
   @override
   Future<TokenMergeOutcome> importRemote(
     List<RemoteTokenRow> remote, {
@@ -317,6 +374,9 @@ class EncryptedVaultRepository implements VaultRepository, RawTokenStore {
     final raw = await _storage.read(key: _vaultStorageKey);
     final byId = <String, _TokenRecord>{}; // canlı + tombstone (id → kayıt)
     final corruptedRaw = <Object?>[]; // verbatim korunur (decode edilemeyenler)
+    // Disk carried more than one record for the same id → rewrite even if no
+    // remote row wins, so the duplicate does not survive to the next push.
+    var healedDuplicate = false;
 
     if (raw != null && raw.isNotEmpty) {
       final Object? decoded;
@@ -331,13 +391,24 @@ class EncryptedVaultRepository implements VaultRepository, RawTokenStore {
         final rec = _tryParseRecord(item);
         if (rec == null) {
           corruptedRaw.add(item);
-        } else {
-          byId[rec.id] = rec;
+          continue;
         }
+        final seen = byId[rec.id];
+        if (seen == null) {
+          byId[rec.id] = rec;
+          continue;
+        }
+        // A1 defence-in-depth: the disk should never hold two records for one
+        // id. If it does, the LIVE one wins (same deliberate resurrection rule
+        // as `load`/`_writeRecords`) and the extra record is dropped, which
+        // heals the file — `byId` alone would silently keep whichever came
+        // last. Two live rows: first wins, matching `load`.
+        if (seen.deleted && !rec.deleted) byId[rec.id] = rec;
+        healedDuplicate = true;
       }
     }
 
-    var changed = false;
+    var changed = healedDuplicate;
     var applied = 0;
 
     for (final r in remote) {
@@ -347,7 +418,9 @@ class EncryptedVaultRepository implements VaultRepository, RawTokenStore {
           : local.serverUpdatedAtIso == null
               // Lokal dirty (push beklemede): server YALNIZ pull-cursor'dan SONRAki
               // bir değişiklikse kazanır (başka cihaz); aksi halde kendi echo'muz → KORU.
-              ? (pullCursorIso == null ||
+              // `pullCursorIso == null` (bu cihaz HİÇ başarılı pull yapmadı) →
+              // "cursor'dan sonra" KANITLANAMAZ → dirty lokal KORUNUR (bkz. doc).
+              ? (pullCursorIso != null &&
                   _isoNewer(r.serverUpdatedAtIso, pullCursorIso))
               // sv'de uzlaşılmış: server daha yeniyse kazanır (idempotent).
               : _isoNewer(r.serverUpdatedAtIso, local.serverUpdatedAtIso!);

@@ -215,6 +215,44 @@ void main() {
     expect(find.byType(PasswordStrengthBar), findsOneWidget);
   });
 
+  testWidgets('C7: güç göstergesi tema renklerini kullanır + tek semantik düğüm',
+      (tester) async {
+    await _pumpPage(
+      tester,
+      backup: _FakeBackup(),
+      documents: _FakeDocuments(),
+      lock: lock,
+      accounts: [_acc('a')],
+    );
+
+    // "Orta" seviye: politikayı karşılar (12+ karakter, 3 sınıf) ama
+    // 16 karakter + 4 sınıf eşiğine ulaşmaz.
+    await tester.enterText(find.byType(TextFormField).at(0), 'Parolam12345');
+    await tester.pump();
+
+    final scheme = Theme.of(tester.element(find.byType(PasswordStrengthBar)))
+        .colorScheme;
+    final bar = tester.widget<LinearProgressIndicator>(
+      find.descendant(
+        of: find.byType(PasswordStrengthBar),
+        matching: find.byType(LinearProgressIndicator),
+      ),
+    );
+    expect(bar.color, scheme.tertiary,
+        reason: 'sabit Colors.orange değil, şema rolü');
+
+    // `excludeSemantics: true` → alt düğümler (metin, ilerleme çubuğu) ayrı
+    // düğüm üretmez; ekran okuyucu tek bir "Parola gücü: Orta" duyurur.
+    final node = tester.getSemantics(find.byType(PasswordStrengthBar));
+    expect(node.label, 'Parola gücü: Orta');
+    var children = 0;
+    node.visitChildren((_) {
+      children++;
+      return true;
+    });
+    expect(children, 0, reason: 'alt semantik düğümler dışlanmalı');
+  });
+
   testWidgets('zayıf parola → politika hatası, export ÇAĞRILMAZ', (tester) async {
     final backup = _FakeBackup();
     final docs = _FakeDocuments();

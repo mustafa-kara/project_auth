@@ -45,6 +45,22 @@ class EncryptedSourceException implements Exception {
   String toString() => 'EncryptedSourceException: ${source.name} export is encrypted';
 }
 
+/// The file carries more entries — accounts plus skipped ones — than
+/// `ImportService.maxEntries`. Rejected as a whole rather than truncated:
+/// silently importing the first 1024 of a 5000-entry file would leave the user
+/// believing everything came across.
+///
+/// [ImportFileTooLargeException] guards bytes; this one guards COUNT, which a
+/// small file full of tiny entries can blow past on its own.
+class ImportTooManyEntriesException implements Exception {
+  final int entries;
+  final int max;
+  const ImportTooManyEntriesException(this.entries, this.max);
+  @override
+  String toString() =>
+      'ImportTooManyEntriesException: $entries entries exceeds $max';
+}
+
 /// Format recognized but it yielded zero importable accounts.
 class EmptyImportException implements Exception {
   const EmptyImportException();

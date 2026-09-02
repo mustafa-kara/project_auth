@@ -14,7 +14,9 @@
         "issuer": "GitHub",
         "note": "",
         "favorite": false,
-        "icon": null,
+        "icon": "iVBORw0KGgoAAAANSUhEUg==",
+        "icon_mime": "image/png",
+        "icon_hash": "9f8e7d6c5b4a39281706f5e4d3c2b1a0",
         "info": {
           "secret": "JBSWY3DPEHPK3PXP",
           "algo": "SHA1",
@@ -98,18 +100,21 @@
         }
       },
       {
-        "type": "totp",
+        "type": "motp",
         "uuid": "77777777-7777-4777-8777-777777777777",
-        "name": "z",
-        "issuer": "WeirdAlgo",
-        "note": "",
+        "name": "motp-user",
+        "issuer": "Legacy",
+        "note": "aegis writes motp with a fixed MD5 / 10s / 6-digit profile",
         "favorite": false,
         "icon": null,
+        "icon_mime": null,
+        "icon_hash": null,
         "info": {
           "secret": "ONSWG4TFOQ======",
           "algo": "MD5",
           "digits": 6,
-          "period": 30
+          "period": 10,
+          "pin": "0000"
         }
       },
       {
@@ -117,7 +122,7 @@
         "uuid": "88888888-8888-4888-8888-888888888888",
         "name": "player",
         "issuer": "Steam",
-        "note": "steam exported as a plain totp entry",
+        "note": "an ordinary 6-digit totp whose issuer merely reads Steam",
         "favorite": false,
         "icon": null,
         "info": {
@@ -140,19 +145,6 @@
           "algo": "SHA1",
           "digits": 9,
           "period": 30
-        }
-      },
-      {
-        "type": "motp",
-        "uuid": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-        "name": "motp-user",
-        "issuer": "Legacy",
-        "note": "",
-        "favorite": false,
-        "icon": null,
-        "info": {
-          "secret": "d1d2d3d4e5e6f7f8",
-          "pin": "0000"
         }
       }
     ],

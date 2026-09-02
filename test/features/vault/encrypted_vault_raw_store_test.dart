@@ -128,6 +128,74 @@ void main() {
     });
   });
 
+  // --- Denetim A1: tombstone diriltme (id koruyan yedek geri yüklemesi) ---
+  group('A1 — canlı kayıt kendi tombstone\'unu düşürür', () {
+    test('sil → yedekten AYNI id ile geri yükle → TEK kayıt, deleted=false',
+        () async {
+      final storage = FakeSecureStorage();
+      final repo = _repo(storage);
+      await repo.load();
+      await repo.save([_acc('a'), _acc('b')]);
+
+      final restored = (await repo.load()).accounts.first;
+      await repo.markDeleted(restored.id);
+      expect((await repo.exportRaw()).firstWhere((r) => r.id == restored.id).deleted,
+          isTrue);
+
+      // Yedek geri yükleme: AYNI id ile canlı kayıt tekrar yazılır.
+      final survivors = (await repo.load()).accounts;
+      await repo.save([...survivors, restored]);
+
+      final raw = await repo.exportRaw();
+      expect(raw.where((r) => r.id == restored.id), hasLength(1),
+          reason: 'canlı + tombstone AYNI id ile diske yazılamaz — '
+              'push onConflict:id ile 21000 verirdi');
+      expect(raw.firstWhere((r) => r.id == restored.id).deleted, isFalse,
+          reason: 'bilinçli diriltme: canlı kazanır');
+      expect(raw.firstWhere((r) => r.id == restored.id).isDirty, isTrue,
+          reason: 'sv=null → push sunucuyu deleted=false yapar');
+      expect((await repo.load()).accounts.map((a) => a.id), contains(restored.id));
+    });
+
+    test('diskte canlı + tombstone (aynı id) → load canlıyı seçer, '
+        'importRemote diski ONARIR', () async {
+      final storage = FakeSecureStorage();
+      final account = _acc('resurrected');
+      final blob = FakeCrypto().encrypt(
+        plaintext: Uint8List.fromList(utf8.encode(jsonEncode(account.toJson()))),
+        key: FakeKeyHandle(),
+        aad: Uint8List.fromList('token|1|${account.id}'.codeUnits),
+      );
+      final record = {
+        'id': account.id,
+        'v': 1,
+        'n': base64Encode(blob.nonce),
+        'c': base64Encode(blob.ciphertext),
+        'updatedAt': 5,
+        'deleted': false,
+      };
+      // Tombstone ÖNCE yazılır → canlı kayıt sonradan görülse bile kazanmalı.
+      storage.data['vault_encrypted_v1'] = jsonEncode([
+        {...record, 'deleted': true, 'updatedAt': 9},
+        record,
+      ]);
+
+      final repo = _repo(storage);
+      final loaded = await repo.load();
+      expect(loaded.accounts.map((a) => a.id), [account.id],
+          reason: 'canlı kayıt tombstone\'a rağmen gösterilir');
+      expect(loaded.corruptedCount, 0);
+
+      // Boş pull bile diski onarır (mükerrer id bir sonraki push\'a taşınmaz).
+      final outcome = await repo.importRemote(const [], pullCursorIso: null);
+      expect(outcome.changed, isTrue);
+      expect(outcome.appliedCount, 0);
+      final raw = await repo.exportRaw();
+      expect(raw, hasLength(1));
+      expect(raw.single.deleted, isFalse);
+    });
+  });
+
   group('importRemote — LWW merge', () {
     test('remote-only → kabul (yeni cihaz restore)', () async {
       final storage = FakeSecureStorage();
@@ -229,6 +297,62 @@ void main() {
       expect((await repo.exportRaw()).length, 1);
     });
 
+    test('null cursor + dirty lokal → remote tombstone diriltilmiş kaydı SİLMEZ',
+        () async {
+      // Cihaz B hiç başarılı pull yapmamış (cursor null). Kullanıcı id koruyan
+      // bir yedeği geri yükler → silinen token canlı + sv=null (dirty) olur.
+      // Sunucu hâlâ tombstone taşıyor; ilk sync onu SESSİZCE uygulayamamalı.
+      final storage = FakeSecureStorage();
+      final repo = _repo(storage);
+      await repo.load();
+      await repo.save([_acc('a')]);
+      final acc = (await repo.load()).accounts.single;
+      await repo.markDeleted(acc.id);
+
+      // Yedek geri yükleme: AYNI id ile canlı kayıt (bilinçli diriltme).
+      await repo.load();
+      await repo.save([acc]);
+      final before = await repo.exportRaw();
+      expect(before.single.deleted, isFalse);
+      expect(before.single.isDirty, isTrue);
+
+      final out = await repo.importRemote(
+          [_row(acc.id, iso: '2026-06-09T10:00:00Z', deleted: true)],
+          pullCursorIso: null);
+
+      expect(out.changed, isFalse,
+          reason: 'cursor null → "cursor SONRASI" kanıtlanamaz → dirty lokal korunur');
+      final raw = await repo.exportRaw();
+      expect(raw, hasLength(1));
+      expect(raw.single.deleted, isFalse,
+          reason: 'diriltilen token sessizce silinmedi');
+      expect(raw.single.isDirty, isTrue,
+          reason: 'dirty kalır → push sunucuyu deleted=false yapar');
+    });
+
+    test('null cursor + dirty lokal + remote CANLI güncelleme → yine lokal kazanır',
+        () async {
+      // Aynı kural tombstone'a özel DEĞİL: ilk pull'da (cursor null) dirty lokal
+      // her zaman korunur; çakışma push sonrası sunucuda LWW ile çözülür.
+      final storage = FakeSecureStorage();
+      final repo = _repo(storage);
+      await repo.load();
+      await repo.save([_acc('a')]);
+      final acc = (await repo.load()).accounts.single;
+
+      final out = await repo.importRemote(
+          [_row(acc.id, iso: '2026-06-09T10:00:00Z')],
+          pullCursorIso: null);
+
+      expect(out.changed, isFalse);
+      expect((await repo.exportRaw()).single.isDirty, isTrue);
+      // Lokali OLMAYAN id'ler etkilenmez → ilk pull yine remote token getirir.
+      final out2 = await repo.importRemote(
+          [_row('remote-only', iso: '2026-06-09T10:00:00Z')],
+          pullCursorIso: null);
+      expect(out2.appliedCount, 1);
+    });
+
     test('import sonrası reload → remote token decrypt edilebilir (aynı masterKey)',
         () async {
       final storage = FakeSecureStorage();
@@ -254,6 +378,87 @@ void main() {
       // reload → decrypt çalışır (FakeCrypto AAD token|1|<id> eşleşir).
       final loaded = await repoB.load();
       expect(loaded.accounts.single.accountName, 'shared');
+    });
+  });
+
+  group('exportRaw — id başına tek kayıt (push onConflict:id)', () {
+    test('decrypt edilemeyen + canlı AYNI id → exportRaw TEK kayıt döndürür',
+        () async {
+      // load(): ilk kayıt decrypt fail → _corruptedRaw (ŞEMASI geçerli, yalnız
+      // AAD/anahtar tutmaz), ikincisi canlı → _lastById. save() ikisini de diske
+      // yazar (bozuk kayıt korunur). Tekilleştirme olmadan exportRaw aynı id'yi
+      // 2x döndürür ve pushUpsert(onConflict:'id') Postgres 21000 ile ölerdi.
+      final storage = FakeSecureStorage();
+      final crypto = FakeCrypto();
+      final account = OtpAccount(
+        id: 'dup',
+        secret: 'JBSWY3DPEHPK3PXP',
+        type: OtpType.totp,
+        accountName: 'canli',
+      );
+      final good = crypto.encrypt(
+        plaintext: Uint8List.fromList(utf8.encode(jsonEncode(account.toJson()))),
+        key: FakeKeyHandle(),
+        aad: Uint8List.fromList('token|1|dup'.codeUnits),
+      );
+      // Aynı id, ama BAŞKA bir AAD'ye bağlı blob → decrypt fail (tamper/yanlış key).
+      final bad = crypto.encrypt(
+        plaintext: Uint8List.fromList(utf8.encode('{}')),
+        key: FakeKeyHandle(),
+        aad: Uint8List.fromList('token|1|baska'.codeUnits),
+      );
+      Map<String, Object?> rec(EncryptedBlob b, int updatedAt) => {
+            'id': 'dup',
+            'v': 1,
+            'n': base64Encode(b.nonce),
+            'c': base64Encode(b.ciphertext),
+            'updatedAt': updatedAt,
+            'deleted': false,
+          };
+      // Bozuk kayıt ÖNCE → canlı olan sonradan görülse bile export'ta kalmalı.
+      storage.data['vault_encrypted_v1'] = jsonEncode([rec(bad, 1), rec(good, 2)]);
+
+      final repo = _repo(storage);
+      final loaded = await repo.load();
+      expect(loaded.accounts.single.accountName, 'canli');
+      expect(loaded.corruptedCount, 1);
+
+      // Kullanıcı banner'a rağmen kaydeder → bozuk raw AYNEN geri yazılır.
+      await repo.save(loaded.accounts);
+      expect(jsonDecode(storage.data['vault_encrypted_v1']!) as List, hasLength(2),
+          reason: 'bozuk kayıt silinmez (veri kaybı yok) → diskte mükerrer id');
+
+      final raw = await repo.exportRaw();
+      expect(raw, hasLength(1), reason: 'push tek satır görür (21000 yok)');
+      expect(raw.single.id, 'dup');
+      expect(raw.single.deleted, isFalse);
+    });
+
+    test('canlı + tombstone AYNI id → exportRaw canlıyı seçer', () async {
+      final storage = FakeSecureStorage();
+      final account = _acc('resurrected');
+      final blob = FakeCrypto().encrypt(
+        plaintext: Uint8List.fromList(utf8.encode(jsonEncode(account.toJson()))),
+        key: FakeKeyHandle(),
+        aad: Uint8List.fromList('token|1|${account.id}'.codeUnits),
+      );
+      final record = {
+        'id': account.id,
+        'v': 1,
+        'n': base64Encode(blob.nonce),
+        'c': base64Encode(blob.ciphertext),
+        'updatedAt': 5,
+        'deleted': false,
+      };
+      // Tombstone ÖNCE → canlı kayıt sonradan görülse bile kazanmalı.
+      storage.data['vault_encrypted_v1'] = jsonEncode([
+        {...record, 'deleted': true, 'updatedAt': 9},
+        record,
+      ]);
+
+      final raw = await _repo(storage).exportRaw();
+      expect(raw, hasLength(1));
+      expect(raw.single.deleted, isFalse, reason: 'bilinçli diriltme: canlı kazanır');
     });
   });
 

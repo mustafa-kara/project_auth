@@ -35,6 +35,7 @@ import '../../features/import_export/data/aegis_parser.dart';
 import '../../features/import_export/data/file_picker_document_port.dart';
 import '../../features/import_export/data/twofas_parser.dart';
 import '../../features/import_export/domain/backup_service.dart';
+import '../../features/import_export/domain/dedupe.dart';
 import '../../features/import_export/domain/file_port.dart';
 import '../../features/import_export/domain/import_service.dart';
 import '../../features/vault/data/catalog_cache_store.dart';
@@ -159,8 +160,18 @@ Future<void> configureDependencies() async {
 
   // Kaynak parser'lar burada bağlanır; `detector`/`keyOf` GEÇİLMEZ, böylece
   // üretimde her zaman gerçek `detectSource` / `dedupeKey` kullanılır.
+  //
+  // `canonicalizeResolver` ise ÜRETİM bağlantısıdır (denetim A2): VaultCubit
+  // token'ı vault'a yazarken issuer'ı AYNI `IssuerCatalogHolder` ile kanonik ada
+  // çevirir ("github.com" → "GitHub"). Önizleme ham issuer ile dedupe etseydi
+  // aynı dosyanın ikinci import'u vault'taki "GitHub" ile eşleşmez, token
+  // ÇİFTLENİRDİ. Resolver (düz fonksiyon değil) çünkü her import'ta TAZE katalog
+  // anlık görüntüsü alınmalı ve worker isolate'a giden closure yalnız o
+  // (değişmez) anlık görüntüyü yakalamalı — holder/repository'yi ASLA.
   locator.registerLazySingleton<ImportService>(() => ImportService(
         backup: locator<BackupService>(),
         parsers: const [AegisParser(), TwoFasParser()],
+        canonicalizeResolver: () =>
+            canonicalizerFor(locator<IssuerCatalogHolder>().current),
       ));
 }
