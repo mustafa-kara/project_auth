@@ -51,6 +51,19 @@ async function auditThen(entry: AuditEntry, successMessage: string): Promise<Act
   return { status: 'success', message: successMessage }
 }
 
+/**
+ * PostgREST answers a PATCH/DELETE that matched **zero** rows with `204 No Content`
+ * and no error, so postgrest-js hands back `{ data: null, error: null }`. Without
+ * asking for the affected rows back (`.select('id')`) the panel would report a
+ * success, revalidate, and write an `announcement.update`/`.delete` audit row for
+ * something that never happened — an audit trail whose whole job is attribution.
+ */
+const NOT_FOUND_MESSAGE = 'Duyuru bulunamadı (başka bir yönetici silmiş olabilir).'
+
+function affectedRowCount(data: unknown): number {
+  return Array.isArray(data) ? data.length : 0
+}
+
 function readInput(formData: FormData) {
   return announcementInputSchema.safeParse({
     title: formData.get('title'),
@@ -108,13 +121,24 @@ export async function updateAnnouncementAction(
     return { status: 'error', message: firstIssue(parsed.error, 'Duyuru bilgileri geçersiz.') }
   }
 
+  let affected = 0
   try {
     const supabase = createAdminClient()
-    const { error } = await supabase.from('announcements').update(parsed.data).eq('id', id.data)
+    const { data, error } = await supabase
+      .from('announcements')
+      .update(parsed.data)
+      .eq('id', id.data)
+      .select('id')
 
     if (error) throw error
+    affected = affectedRowCount(data)
   } catch (cause) {
     return failure('update', cause, 'Duyuru güncellenemedi.')
+  }
+
+  // Before revalidate and before the audit write: nothing happened.
+  if (affected === 0) {
+    return { status: 'error', message: NOT_FOUND_MESSAGE }
   }
 
   revalidatePath('/announcements')
@@ -133,13 +157,23 @@ export async function deleteAnnouncementAction(rawId: string): Promise<ActionSta
     return { status: 'error', message: firstIssue(id.error, 'Geçersiz duyuru kimliği.') }
   }
 
+  let affected = 0
   try {
     const supabase = createAdminClient()
-    const { error } = await supabase.from('announcements').delete().eq('id', id.data)
+    const { data, error } = await supabase
+      .from('announcements')
+      .delete()
+      .eq('id', id.data)
+      .select('id')
 
     if (error) throw error
+    affected = affectedRowCount(data)
   } catch (cause) {
     return failure('delete', cause, 'Duyuru silinemedi.')
+  }
+
+  if (affected === 0) {
+    return { status: 'error', message: NOT_FOUND_MESSAGE }
   }
 
   revalidatePath('/announcements')

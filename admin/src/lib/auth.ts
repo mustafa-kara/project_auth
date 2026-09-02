@@ -1,15 +1,14 @@
 import { redirect } from 'next/navigation'
 
+import { ADMIN_REVOKED_MESSAGE, ForbiddenError } from '@/lib/forbidden'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 
-/** Thrown when a valid session exists but does not carry `app_metadata.admin === true`. */
-export class ForbiddenError extends Error {
-  readonly name = 'ForbiddenError'
-
-  constructor(message = 'Bu hesap yönetici değil.') {
-    super(message)
-  }
-}
+// Re-exported so every server-side caller keeps importing the guard and its error
+// from one place; the definitions live in `@/lib/forbidden` because this module
+// pulls in the `server-only` secret-key client and the error boundary is a client
+// component.
+export { ADMIN_REVOKED_MESSAGE, FORBIDDEN_DIGEST, ForbiddenError } from '@/lib/forbidden'
 
 export interface AdminIdentity {
   userId: string
@@ -42,6 +41,7 @@ export function isAdminClaims(claims: unknown): boolean {
  *
  * - no/invalid session  → `redirect('/login')`
  * - session without the admin claim → `ForbiddenError`
+ * - claim present but the `admin_users` row is gone / unreadable → `ForbiddenError`
  *
  * Never rely on `src/proxy.ts` alone: Server Functions are POSTs to the page route
  * and a matcher change can silently drop proxy coverage, so every privileged
@@ -56,17 +56,56 @@ export async function requireAdmin(): Promise<AdminIdentity> {
   }
 
   const claims = data.claims
+  // Cheap reject first: a non-admin token never costs a database round trip.
   if (!isAdminClaims(claims)) {
     throw new ForbiddenError()
   }
 
   const userId = typeof claims.sub === 'string' ? claims.sub : null
   if (!userId) {
-    redirect('/login')
+    // An admin claim with no subject is not a session we can attribute an audit
+    // row to, so it is refused rather than sent back through the login flow.
+    throw new ForbiddenError('Oturum kimliği okunamadı.')
   }
+
+  await assertStillAdmin(userId)
 
   return {
     userId,
     email: typeof claims.email === 'string' ? claims.email : null,
+  }
+}
+
+/**
+ * Freshness check — the answer to "revoke this person's admin, now".
+ *
+ * `app_metadata.admin` is baked into the access token at issue time by
+ * `public.custom_access_token_hook`, so deleting the `public.admin_users` row does
+ * **not** invalidate an already-issued token: without this lookup a demoted admin
+ * keeps full panel powers (including the cascading `auth.admin.deleteUser`) until
+ * the token expires and the refresh flow re-runs the hook.
+ *
+ * Cost: one indexed primary-key lookup on `public.admin_users` per `requireAdmin()`
+ * call — i.e. per dashboard request, since the `(dashboard)` layout, every page and
+ * every server action call it. That is the deliberate trade (README §6.12).
+ *
+ * FAIL CLOSED: a read error is treated exactly like a missing row. The alternative
+ * — letting a database blip re-open the panel to a demoted admin — is the failure
+ * mode this check exists to remove.
+ */
+async function assertStillAdmin(userId: string): Promise<void> {
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from('admin_users')
+    .select('user_id')
+    .eq('user_id', userId)
+    .maybeSingle()
+
+  if (error) {
+    console.error('[auth] admin_users freshness check failed', error)
+    throw new ForbiddenError(ADMIN_REVOKED_MESSAGE)
+  }
+  if (!data) {
+    throw new ForbiddenError(ADMIN_REVOKED_MESSAGE)
   }
 }

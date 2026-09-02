@@ -49,6 +49,20 @@ async function auditThen(entry: AuditEntry, successMessage: string): Promise<Act
   return { status: 'success', message: successMessage }
 }
 
+/**
+ * PostgREST returns `204 No Content` and no error for a PATCH/DELETE that matched
+ * zero rows, so the affected rows have to be requested back (`.select('key')`).
+ * Without it a server action — which is just a POST with an arbitrary body — could
+ * be used to mint `flag.update` audit rows for keys that do not exist, and the
+ * `trg_feature_flags_touch` trigger never fires either, so not even `updated_at`
+ * moves.
+ */
+const NOT_FOUND_MESSAGE = 'Bayrak bulunamadı (başka bir yönetici silmiş olabilir).'
+
+function affectedRowCount(data: unknown): number {
+  return Array.isArray(data) ? data.length : 0
+}
+
 export async function createFlagAction(
   _prevState: ActionState,
   formData: FormData,
@@ -99,16 +113,24 @@ export async function toggleFlagAction(rawKey: string, enabled: boolean): Promis
     return { status: 'error', message: firstIssue(parsed.error, 'Bayrak bilgileri geçersiz.') }
   }
 
+  let affected = 0
   try {
     const supabase = createAdminClient()
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('feature_flags')
       .update({ enabled: parsed.data.enabled })
       .eq('key', parsed.data.key)
+      .select('key')
 
     if (error) throw error
+    affected = affectedRowCount(data)
   } catch (cause) {
     return failure('toggle', cause, 'Bayrak durumu değiştirilemedi.')
+  }
+
+  // Before revalidate and before the audit write: nothing happened.
+  if (affected === 0) {
+    return { status: 'error', message: NOT_FOUND_MESSAGE }
   }
 
   revalidatePath('/flags')
@@ -136,16 +158,23 @@ export async function updateFlagPayloadAction(
     return { status: 'error', message: firstIssue(parsed.error, 'Payload geçersiz.') }
   }
 
+  let affected = 0
   try {
     const supabase = createAdminClient()
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('feature_flags')
       .update({ payload: parsed.data.payload })
       .eq('key', parsed.data.key)
+      .select('key')
 
     if (error) throw error
+    affected = affectedRowCount(data)
   } catch (cause) {
     return failure('payload', cause, 'Payload kaydedilemedi.')
+  }
+
+  if (affected === 0) {
+    return { status: 'error', message: NOT_FOUND_MESSAGE }
   }
 
   revalidatePath('/flags')
@@ -171,13 +200,23 @@ export async function deleteFlagAction(rawKey: string): Promise<ActionState> {
     return { status: 'error', message: firstIssue(parsed.error, 'Bayrak silinemez.') }
   }
 
+  let affected = 0
   try {
     const supabase = createAdminClient()
-    const { error } = await supabase.from('feature_flags').delete().eq('key', parsed.data.key)
+    const { data, error } = await supabase
+      .from('feature_flags')
+      .delete()
+      .eq('key', parsed.data.key)
+      .select('key')
 
     if (error) throw error
+    affected = affectedRowCount(data)
   } catch (cause) {
     return failure('delete', cause, 'Bayrak silinemedi.')
+  }
+
+  if (affected === 0) {
+    return { status: 'error', message: NOT_FOUND_MESSAGE }
   }
 
   revalidatePath('/flags')

@@ -3,7 +3,7 @@ import 'server-only'
 import postgres from 'postgres'
 import { z } from 'zod'
 
-import { getServerEnv } from '@/lib/env'
+import { getServerEnv } from '@/lib/env.server'
 
 /**
  * Access path (a) — a DIRECT Postgres connection.
@@ -47,19 +47,46 @@ export function parseGlobalStats(value: unknown): GlobalStats {
 
 type Sql = ReturnType<typeof postgres>
 
+/** `postgres.js` `ssl` option shape for verified TLS. */
+export interface VerifiedTlsOptions {
+  rejectUnauthorized: true
+  ca?: string
+}
+
+/**
+ * TLS options for the driver — pure so it can be unit-tested.
+ *
+ * `ssl: 'require'` is deliberately NOT used. In `postgres@3.4.9`
+ * (`src/connection.js`) the string forms `'require' | 'allow' | 'prefer'` all set
+ * `options.rejectUnauthorized = false`, i.e. the connection is encrypted but the
+ * server certificate is never validated — libpq `sslmode=require` semantics, which
+ * a network-position attacker can terminate to capture the `admin_app` password
+ * from the startup packet. The object form is the supported escape hatch
+ * (`else if (typeof ssl === 'object') Object.assign(options, ssl)`).
+ *
+ * `ca` is optional in the type only. The Supavisor pooler presents a chain rooted
+ * at Supabase's own private "Supabase Root 2021 CA", which is NOT in any public
+ * trust store, so in production `SUPABASE_CA_CERT` must be set or the handshake
+ * fails closed with `self-signed certificate in certificate chain`. See
+ * admin/README.md §5 note 5 for the verification and the download location.
+ */
+export function buildSslOptions(ca: string | undefined): VerifiedTlsOptions {
+  return { rejectUnauthorized: true, ...(ca ? { ca } : {}) }
+}
+
 // Memoised across HMR reloads so dev does not exhaust the pooler.
 const globalForSql = globalThis as unknown as { __adminSql?: Sql }
 
 function getSql(): Sql {
   if (!globalForSql.__adminSql) {
-    const { DATABASE_URL } = getServerEnv()
+    const { DATABASE_URL, SUPABASE_CA_CERT } = getServerEnv()
     globalForSql.__adminSql = postgres(DATABASE_URL, {
       // Supavisor transaction mode (6543) does not support prepared statements.
       prepare: false,
       max: 2,
       idle_timeout: 20,
       connect_timeout: 10,
-      ssl: 'require',
+      ssl: buildSslOptions(SUPABASE_CA_CERT),
     })
   }
   return globalForSql.__adminSql

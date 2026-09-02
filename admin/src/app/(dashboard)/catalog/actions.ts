@@ -43,6 +43,18 @@ async function auditThen(entry: AuditEntry, successMessage: string): Promise<Act
   return { status: 'success', message: successMessage }
 }
 
+/**
+ * A PATCH/DELETE that matches zero rows comes back from PostgREST as `204 No
+ * Content` with no error, so it has to be detected by asking for the affected rows
+ * (`.select('id')`). Otherwise a stale row in a second admin's browser mints a
+ * `catalog.update`/`.delete` audit entry for a service that is already gone.
+ */
+const NOT_FOUND_MESSAGE = 'Servis bulunamadı (başka bir yönetici silmiş olabilir).'
+
+function affectedRowCount(data: unknown): number {
+  return Array.isArray(data) ? data.length : 0
+}
+
 function readInput(formData: FormData) {
   return catalogInputSchema.safeParse({
     name: formData.get('name'),
@@ -100,13 +112,24 @@ export async function updateCatalogServiceAction(
     return { status: 'error', message: firstIssue(parsed.error, 'Servis bilgileri geçersiz.') }
   }
 
+  let affected = 0
   try {
     const supabase = createAdminClient()
-    const { error } = await supabase.from('catalog_services').update(parsed.data).eq('id', id.data)
+    const { data, error } = await supabase
+      .from('catalog_services')
+      .update(parsed.data)
+      .eq('id', id.data)
+      .select('id')
 
     if (error) throw error
+    affected = affectedRowCount(data)
   } catch (cause) {
     return failure('update', cause, 'Servis güncellenemedi.')
+  }
+
+  // Before revalidate and before the audit write: nothing happened.
+  if (affected === 0) {
+    return { status: 'error', message: NOT_FOUND_MESSAGE }
   }
 
   revalidatePath('/catalog')
@@ -124,13 +147,23 @@ export async function deleteCatalogServiceAction(rawId: string): Promise<ActionS
     return { status: 'error', message: firstIssue(id.error, 'Geçersiz servis kimliği.') }
   }
 
+  let affected = 0
   try {
     const supabase = createAdminClient()
-    const { error } = await supabase.from('catalog_services').delete().eq('id', id.data)
+    const { data, error } = await supabase
+      .from('catalog_services')
+      .delete()
+      .eq('id', id.data)
+      .select('id')
 
     if (error) throw error
+    affected = affectedRowCount(data)
   } catch (cause) {
     return failure('delete', cause, 'Servis silinemedi.')
+  }
+
+  if (affected === 0) {
+    return { status: 'error', message: NOT_FOUND_MESSAGE }
   }
 
   revalidatePath('/catalog')

@@ -3,6 +3,7 @@ import { AuditPagination } from '@/components/audit/audit-pagination'
 import { AuditTable, type AuditLogRow } from '@/components/audit/audit-table'
 import { requireAdmin } from '@/lib/auth'
 import {
+  auditHasNextPage,
   auditPageCount,
   auditRange,
   escapeLikePattern,
@@ -62,6 +63,9 @@ export default async function AuditPage({
   const rows = (data ?? []) as unknown as AuditLogRow[]
   const total = typeof count === 'number' ? count : null
   const pageCount = auditPageCount(total ?? rows.length)
+  // Not `page < pageCount`: when PostgREST omits the total, `pageCount` is 1 and
+  // "Sonraki" would be disabled with a full page of rows on screen.
+  const hasNext = auditHasNextPage(query.page, total, rows.length)
 
   return (
     <div className="flex flex-col gap-6">
@@ -85,7 +89,7 @@ export default async function AuditPage({
       ) : (
         <>
           <AuditTable rows={rows} />
-          <AuditPagination query={query} total={total} pageCount={pageCount} />
+          <AuditPagination query={query} total={total} pageCount={pageCount} hasNext={hasNext} />
         </>
       )}
     </div>
