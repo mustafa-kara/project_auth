@@ -1,12 +1,19 @@
-import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { GlobalStatsCards } from '@/components/dashboard/global-stats-cards'
+import { RecentAuditCard } from '@/components/dashboard/recent-audit-card'
 import { requireAdmin } from '@/lib/auth'
+import { loadGlobalStats } from '@/lib/stats'
+
+export const dynamic = 'force-dynamic'
 
 export default async function DashboardPage() {
   await requireAdmin()
 
+  // Path (a) — direct Postgres. Never throws: a failure becomes an error card so the
+  // audit tail (path (c)) and the rest of the shell keep working.
+  const stats = await loadGlobalStats()
+
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-6">
+    <div className="mx-auto flex max-w-5xl flex-col gap-6">
       <div>
         <h1 className="text-2xl font-semibold">Panel</h1>
         <p className="text-muted-foreground text-sm">
@@ -15,21 +22,9 @@ export default async function DashboardPage() {
         </p>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            Genel istatistikler
-            <Badge variant="secondary">Yakında</Badge>
-          </CardTitle>
-          <CardDescription>
-            Kullanıcı, jeton ve cihaz sayıları doğrudan Postgres bağlantısı üzerinden
-            <code className="mx-1">private.admin_global_stats()</code> ile okunacak.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="text-muted-foreground text-sm">
-          Bu bölüm bir sonraki aşamada dolduruluyor.
-        </CardContent>
-      </Card>
+      <GlobalStatsCards result={stats} />
+
+      <RecentAuditCard />
     </div>
   )
 }
