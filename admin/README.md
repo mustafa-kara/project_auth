@@ -97,6 +97,9 @@ ile bağlanmaz.** Bağlantıda `set local role admin_backend` yapılır (aşağ�
 
 ---
 
+
+> **Canlı doğrulama (2026-09-02):** `admin_app` ile `aws-1-eu-central-1.pooler.supabase.com` üzerinden hem 6543 (transaction) hem 5432 (session) modunda bağlanıldı; `set local role admin_backend` içinde `private.admin_global_stats()` sayımları döndürdü, `select count(*) from public.tokens` ise `42501 permission denied` ile reddedildi. Bu projenin pooler hostu `aws-0-…` DEĞİL `aws-1-…`; `aws-0` hostu "tenant/user not found" döndürür.
+
 ## 2. Üç erişim yolu (ARCHITECTURE §6) ve karşılıkları
 
 Yollar **asla karıştırılmaz**.
