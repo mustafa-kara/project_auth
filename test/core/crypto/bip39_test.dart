@@ -100,30 +100,40 @@ void main() {
     });
 
     test('checksum hatası: tek kelime değiştir → FormatException', () {
-      final words = Bip39.encode(_hex(
-          '0000000000000000000000000000000000000000000000000000000000000000'));
+      final words = Bip39.encode(
+        _hex(
+          '0000000000000000000000000000000000000000000000000000000000000000',
+        ),
+      );
       // son kelime 'art' → checksum'ı bozan başka bir kelime
       final broken = [...words]..[23] = 'zoo';
       expect(() => Bip39.decode(broken), throwsFormatException);
     });
 
     test('bilinmeyen kelime → FormatException', () {
-      final words = Bip39.encode(_hex(
-          'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'));
+      final words = Bip39.encode(
+        _hex(
+          'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff',
+        ),
+      );
       final broken = [...words]..[0] = 'notaword';
       expect(() => Bip39.decode(broken), throwsFormatException);
     });
 
     test('yanlış kelime sayısı (23/25) → FormatException', () {
-      final words = Bip39.encode(_hex(
-          '8080808080808080808080808080808080808080808080808080808080808080'));
+      final words = Bip39.encode(
+        _hex(
+          '8080808080808080808080808080808080808080808080808080808080808080',
+        ),
+      );
       expect(() => Bip39.decode(words.sublist(0, 23)), throwsFormatException);
       expect(() => Bip39.decode([...words, words.last]), throwsFormatException);
     });
 
     test('normalize: büyük harf + fazla/baş-son boşluk toleranslı', () {
       final entropy = _hex(
-          '066dca1a2bb7e8a1db2832148ce9933eea0f3ac9548d793112d9a95c9407efad');
+        '066dca1a2bb7e8a1db2832148ce9933eea0f3ac9548d793112d9a95c9407efad',
+      );
       final words = Bip39.encode(entropy);
       // UPPER + baş/son boşluk + araya boş eleman karışımı
       final messy = words.map((w) => '  ${w.toUpperCase()}  ').toList()

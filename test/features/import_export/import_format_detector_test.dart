@@ -18,13 +18,17 @@ void main() {
     test('Aegis encrypted export is still detected as aegis', () {
       // Must NOT fall through to "unknown": the parser has to be reached so it
       // can raise EncryptedSourceException with actionable guidance.
-      expect(detectSource(_fixture('aegis_encrypted_slots.json')),
-          ImportSource.aegis);
+      expect(
+        detectSource(_fixture('aegis_encrypted_slots.json')),
+        ImportSource.aegis,
+      );
     });
 
     test('Aegis mixed-type export → aegis', () {
       expect(
-          detectSource(_fixture('aegis_mixed_types.json')), ImportSource.aegis);
+        detectSource(_fixture('aegis_mixed_types.json')),
+        ImportSource.aegis,
+      );
     });
 
     test('structurally broken Aegis file still fingerprints as aegis', () {
@@ -37,12 +41,16 @@ void main() {
 
     test('2FAS encrypted export → twofas', () {
       expect(
-          detectSource(_fixture('twofas_encrypted.json')), ImportSource.twofas);
+        detectSource(_fixture('twofas_encrypted.json')),
+        ImportSource.twofas,
+      );
     });
 
     test('2FAS steam/hotp export → twofas', () {
-      expect(detectSource(_fixture('twofas_steam_hotp.json')),
-          ImportSource.twofas);
+      expect(
+        detectSource(_fixture('twofas_steam_hotp.json')),
+        ImportSource.twofas,
+      );
     });
 
     test('our own backup envelope → projectauthBackup', () {
@@ -60,8 +68,10 @@ void main() {
     });
 
     test('servicesEncrypted alone is enough for twofas', () {
-      expect(detectSource(const {'servicesEncrypted': 'abc'}),
-          ImportSource.twofas);
+      expect(
+        detectSource(const {'servicesEncrypted': 'abc'}),
+        ImportSource.twofas,
+      );
     });
   });
 
@@ -96,13 +106,17 @@ void main() {
     });
 
     test('"db" without "header" is not Aegis', () {
-      expect(detectSource(const {'db': <String, dynamic>{}}),
-          ImportSource.unknown);
+      expect(
+        detectSource(const {'db': <String, dynamic>{}}),
+        ImportSource.unknown,
+      );
     });
 
     test('"header" without "db" is not Aegis', () {
-      expect(detectSource(const {'header': <String, dynamic>{}}),
-          ImportSource.unknown);
+      expect(
+        detectSource(const {'header': <String, dynamic>{}}),
+        ImportSource.unknown,
+      );
     });
 
     test('unrelated JSON object', () {
@@ -113,8 +127,10 @@ void main() {
     });
 
     test('foreign "format" value is not our backup', () {
-      expect(detectSource(const {'format': 'someone-elses-backup'}),
-          ImportSource.unknown);
+      expect(
+        detectSource(const {'format': 'someone-elses-backup'}),
+        ImportSource.unknown,
+      );
     });
 
     test('non-string "format" does not crash', () {

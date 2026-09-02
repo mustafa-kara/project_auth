@@ -24,8 +24,11 @@ enum SyncPhase { idle, syncing, error }
 /// Remote satırları diske merge edip (değişikse) UI'ı reload eden callback tipi.
 /// VaultCubit sequencer'ı altında çalışır (import yazımı mutasyonlarla serileşir).
 /// **`null` döner = merge UYGULANAMADI** (vault kapandı/ilk-load yok) → cursor ilerletilmez.
-typedef MergeRemote = Future<TokenMergeOutcome?> Function(
-    List<RemoteTokenRow> rows, String? pullCursorIso);
+typedef MergeRemote =
+    Future<TokenMergeOutcome?> Function(
+      List<RemoteTokenRow> rows,
+      String? pullCursorIso,
+    );
 
 /// Sync durumu — göstergeyi besler. Enum yetersiz: malformedCount + son hata taşır.
 class SyncState {
@@ -45,12 +48,15 @@ class SyncState {
 
   static const idle = SyncState();
 
-  SyncState copyWith({SyncPhase? phase, int? malformedCount, SyncError? error}) =>
-      SyncState(
-        phase: phase ?? this.phase,
-        malformedCount: malformedCount ?? this.malformedCount,
-        error: error,
-      );
+  SyncState copyWith({
+    SyncPhase? phase,
+    int? malformedCount,
+    SyncError? error,
+  }) => SyncState(
+    phase: phase ?? this.phase,
+    malformedCount: malformedCount ?? this.malformedCount,
+    error: error,
+  );
 
   @override
   bool operator ==(Object other) =>
@@ -74,15 +80,15 @@ class TokenSyncService {
     bool Function()? isEnabled,
     ValueListenable<int>? flagListenable,
     Future<bool> Function()? livePreferenceResolver,
-  })  : _remote = remote,
-        _store = store,
-        _lastSync = lastSync,
-        _uid = uid,
-        _mergeRemote = mergeRemote,
-        _onStatus = onStatus,
-        _isEnabled = isEnabled,
-        _flagListenable = flagListenable,
-        _livePreferenceResolver = livePreferenceResolver {
+  }) : _remote = remote,
+       _store = store,
+       _lastSync = lastSync,
+       _uid = uid,
+       _mergeRemote = mergeRemote,
+       _onStatus = onStatus,
+       _isEnabled = isEnabled,
+       _flagListenable = flagListenable,
+       _livePreferenceResolver = livePreferenceResolver {
     // Faz 3 Patch 4 (Adım F): flag değişince gate'i yeniden değerlendir (SELF-SUBSCRIBE —
     // root'ta cubit ref'i GEREKMEZ; Realtime bypass'ı kapatır). VaultCubit gate'i YETMEZ
     // çünkü _onRealtimeEvent doğrudan syncOnce çağırır.
@@ -174,7 +180,9 @@ class TokenSyncService {
   /// Tam bir sync turu: cursor oku → push (dirty) → pull → merge → cursor ilerlet.
   /// Best-effort: hata → `SyncPhase.error` (re-throw YOK).
   Future<void> syncOnce() async {
-    if (_disposed || _syncing || !_enabled) return; // kill-switch (Realtime bypass dahil)
+    if (_disposed || _syncing || !_enabled) {
+      return; // kill-switch (Realtime bypass dahil)
+    }
     _syncing = true;
     _emit(const SyncState(phase: SyncPhase.syncing));
     try {
@@ -211,12 +219,20 @@ class TokenSyncService {
       _emit(SyncState(phase: SyncPhase.idle, malformedCount: _lastMalformed));
     } on SyncError catch (e) {
       if (!_disposed) {
-        _emit(SyncState(phase: SyncPhase.error, malformedCount: _lastMalformed, error: e));
+        _emit(
+          SyncState(
+            phase: SyncPhase.error,
+            malformedCount: _lastMalformed,
+            error: e,
+          ),
+        );
       }
     } catch (_) {
       // SyncError dışı (IO/parse) → yine error state; kullanıcı bloklanmaz.
       if (!_disposed) {
-        _emit(SyncState(phase: SyncPhase.error, malformedCount: _lastMalformed));
+        _emit(
+          SyncState(phase: SyncPhase.error, malformedCount: _lastMalformed),
+        );
       }
     } finally {
       _syncing = false;
@@ -277,7 +293,9 @@ class TokenSyncService {
   /// Realtime olayı = yalnız TETİKLEYİCİ (payload OKUNMAZ — #1180). sync sürüyorsa
   /// işaretle (coalesce), değilse REST pull tetikle.
   void _onRealtimeEvent() {
-    if (_disposed || !_enabled) return; // kill-switch: Realtime tetikleyici no-op (bypass YOK)
+    if (_disposed || !_enabled) {
+      return; // kill-switch: Realtime tetikleyici no-op (bypass YOK)
+    }
     if (_syncing) {
       _pendingEvent = true;
       return;
@@ -329,7 +347,9 @@ class TokenSyncService {
   /// VaultCubit.close → çağrılır. Aboneliği kapatır; sonrası tüm callback'ler no-op.
   Future<void> dispose() async {
     _disposed = true;
-    _flagListenable?.removeListener(_onFlagChanged); // self-subscribe temizliği (Adım F)
+    _flagListenable?.removeListener(
+      _onFlagChanged,
+    ); // self-subscribe temizliği (Adım F)
     final ch = _channel;
     _channel = null;
     await ch?.unsubscribe();

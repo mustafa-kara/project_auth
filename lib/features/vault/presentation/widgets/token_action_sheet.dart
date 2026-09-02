@@ -37,11 +37,10 @@ class TokenActionSheet extends StatelessWidget {
   static Future<TokenAction?> show(
     BuildContext context, {
     required OtpAccount account,
-  }) =>
-      showModalBottomSheet<TokenAction>(
-        context: context,
-        builder: (_) => TokenActionSheet(account: account),
-      );
+  }) => showModalBottomSheet<TokenAction>(
+    context: context,
+    builder: (_) => TokenActionSheet(account: account),
+  );
 
   @override
   Widget build(BuildContext context) {

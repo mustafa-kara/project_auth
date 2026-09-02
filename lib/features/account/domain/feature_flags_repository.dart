@@ -18,10 +18,14 @@ class FeatureFlag {
     final key = json['key'];
     final enabled = json['enabled'];
     if (key is! String) {
-      throw FormatException('feature_flags.key String bekleniyordu (${key.runtimeType})');
+      throw FormatException(
+        'feature_flags.key String bekleniyordu (${key.runtimeType})',
+      );
     }
     if (enabled is! bool) {
-      throw FormatException('feature_flags.enabled bool bekleniyordu (${enabled.runtimeType})');
+      throw FormatException(
+        'feature_flags.enabled bool bekleniyordu (${enabled.runtimeType})',
+      );
     }
     final payload = json['payload'];
     return FeatureFlag(

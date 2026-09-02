@@ -27,11 +27,33 @@ class _EmptyRepo implements VaultRepository {
 class _MemStorage implements FlutterSecureStorage {
   final Map<String, String> _d = {};
   @override
-  Future<String?> read({required String key, dynamic iOptions, dynamic aOptions, dynamic lOptions, dynamic webOptions, dynamic mOptions, dynamic wOptions}) async => _d[key];
+  Future<String?> read({
+    required String key,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async => _d[key];
   @override
-  Future<void> write({required String key, required String? value, dynamic iOptions, dynamic aOptions, dynamic lOptions, dynamic webOptions, dynamic mOptions, dynamic wOptions}) async {
-    if (value == null) { _d.remove(key); } else { _d[key] = value; }
+  Future<void> write({
+    required String key,
+    required String? value,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async {
+    if (value == null) {
+      _d.remove(key);
+    } else {
+      _d[key] = value;
+    }
   }
+
   @override
   noSuchMethod(Invocation i) => throw UnimplementedError();
 }
@@ -40,12 +62,14 @@ void main() {
   setUp(() {
     locator.registerLazySingleton<OtpGenerator>(() => const OtpGenerator());
     locator.registerLazySingleton<ViewModeStore>(
-        () => ViewModeStore(storage: _MemStorage()));
+      () => ViewModeStore(storage: _MemStorage()),
+    );
   });
   tearDown(GetIt.instance.reset);
 
-  testWidgets('yükleme sonrası boş vault "Henüz kod yok" gösterir',
-      (tester) async {
+  testWidgets('yükleme sonrası boş vault "Henüz kod yok" gösterir', (
+    tester,
+  ) async {
     await tester.pumpWidget(
       MaterialApp(
         home: BlocProvider(

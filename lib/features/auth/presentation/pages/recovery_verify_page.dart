@@ -51,8 +51,9 @@ class _RecoveryVerifyPageState extends State<RecoveryVerifyPage> {
   Future<void> _verify() async {
     final cubit = context.read<VaultLockCubit>();
     final mnemonic = cubit.state.mnemonic;
-    final ok = _positions.every((p) =>
-        _controllers[p]!.text.trim().toLowerCase() == mnemonic[p]);
+    final ok = _positions.every(
+      (p) => _controllers[p]!.text.trim().toLowerCase() == mnemonic[p],
+    );
     if (!ok) {
       _attempts++;
       if (_attempts >= _maxAttempts) {
@@ -62,8 +63,10 @@ class _RecoveryVerifyPageState extends State<RecoveryVerifyPage> {
         return;
       }
       final remaining = _maxAttempts - _attempts;
-      setState(() => _error =
-          'Kelimeler eşleşmedi. Tekrar kontrol et ($remaining deneme hakkın kaldı).');
+      setState(
+        () => _error =
+            'Kelimeler eşleşmedi. Tekrar kontrol et ($remaining deneme hakkın kaldı).',
+      );
       return;
     }
     setState(() {

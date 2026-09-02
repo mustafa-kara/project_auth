@@ -14,8 +14,12 @@ import 'package:project_auth/features/settings/presentation/settings_page.dart';
 
 class _FakeLockCubit extends Cubit<VaultLockState> implements VaultLockCubit {
   _FakeLockCubit()
-      : super(VaultLockState.unlocked(
-            biometricEnrolled: false, deviceBiometricAvailable: false));
+    : super(
+        VaultLockState.unlocked(
+          biometricEnrolled: false,
+          deviceBiometricAvailable: false,
+        ),
+      );
   @override
   noSuchMethod(Invocation invocation) =>
       throw UnimplementedError('${invocation.memberName}');
@@ -46,12 +50,18 @@ class _NoCache implements AnnouncementsCacheStore {
 }
 
 Announcement _ann(String id, String title, String audience) => Announcement(
-      id: id, title: title, body: 'Body $id', audience: audience,
-      createdAt: DateTime.utc(2026, 6, 10),
-    );
+  id: id,
+  title: title,
+  body: 'Body $id',
+  audience: audience,
+  createdAt: DateTime.utc(2026, 6, 10),
+);
 
-Widget _wrap(Widget child,
-    {AnnouncementsRepository? repo, AnnouncementsCacheStore? cache}) {
+Widget _wrap(
+  Widget child, {
+  AnnouncementsRepository? repo,
+  AnnouncementsCacheStore? cache,
+}) {
   Widget tree = MaterialApp(home: child);
   if (repo != null && cache != null) {
     tree = RepositoryProvider<AnnouncementsRepository>.value(
@@ -62,7 +72,10 @@ Widget _wrap(Widget child,
       ),
     );
   }
-  return BlocProvider<VaultLockCubit>.value(value: _FakeLockCubit(), child: tree);
+  return BlocProvider<VaultLockCubit>.value(
+    value: _FakeLockCubit(),
+    child: tree,
+  );
 }
 
 void main() {
@@ -72,12 +85,16 @@ void main() {
     expect(find.text('YENİLİKLER'), findsNothing);
   });
 
-  testWidgets('audience eşleşen duyurular listelenir; eşleşmeyen gizli', (tester) async {
+  testWidgets('audience eşleşen duyurular listelenir; eşleşmeyen gizli', (
+    tester,
+  ) async {
     final repo = _FakeAnnRepo([
       _ann('1', 'Herkese', 'all'),
       _ann('2', 'Sadece web', 'web'), // platform eşleşmez (test host)
     ]);
-    await tester.pumpWidget(_wrap(const SettingsPage(), repo: repo, cache: _NoCache()));
+    await tester.pumpWidget(
+      _wrap(const SettingsPage(), repo: repo, cache: _NoCache()),
+    );
     await tester.pumpAndSettle();
     expect(find.text('YENİLİKLER'), findsOneWidget);
     expect(find.text('Herkese'), findsOneWidget);
@@ -86,14 +103,18 @@ void main() {
 
   testWidgets('boş duyuru → bölüm gizli', (tester) async {
     final repo = _FakeAnnRepo(const []);
-    await tester.pumpWidget(_wrap(const SettingsPage(), repo: repo, cache: _NoCache()));
+    await tester.pumpWidget(
+      _wrap(const SettingsPage(), repo: repo, cache: _NoCache()),
+    );
     await tester.pumpAndSettle();
     expect(find.text('YENİLİKLER'), findsNothing);
   });
 
   testWidgets('ağ hatası + cache yok → bölüm gizli (sessiz)', (tester) async {
     final repo = _FakeAnnRepo(const [], throwError: true);
-    await tester.pumpWidget(_wrap(const SettingsPage(), repo: repo, cache: _NoCache()));
+    await tester.pumpWidget(
+      _wrap(const SettingsPage(), repo: repo, cache: _NoCache()),
+    );
     await tester.pumpAndSettle();
     expect(find.text('YENİLİKLER'), findsNothing);
   });

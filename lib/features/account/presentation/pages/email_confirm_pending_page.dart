@@ -22,7 +22,9 @@ class EmailConfirmPendingPage extends StatelessWidget {
     final cubit = context.read<SessionCubit>();
     final email = context.select<SessionCubit, String?>((c) => c.state.email);
     final busy = context.select<SessionCubit, bool>((c) => c.state.busy);
-    final error = context.select<SessionCubit, AuthError?>((c) => c.state.error);
+    final error = context.select<SessionCubit, AuthError?>(
+      (c) => c.state.error,
+    );
 
     return AuthScaffold(
       icon: Icons.mark_email_unread_outlined,
@@ -30,9 +32,7 @@ class EmailConfirmPendingPage extends StatelessWidget {
       description: email == null
           ? 'Sana bir onay maili gönderdik. Linke tıklayınca giriş tamamlanır.'
           : '$email adresine onay maili gönderdik. Linke tıklayınca giriş tamamlanır.',
-      body: [
-        if (error != null) AuthErrorText(error.message),
-      ],
+      body: [if (error != null) AuthErrorText(error.message)],
       actions: [
         FilledButton(
           onPressed: busy ? null : cubit.resend,

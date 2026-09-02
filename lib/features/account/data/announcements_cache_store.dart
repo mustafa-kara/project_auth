@@ -15,7 +15,7 @@ class AnnouncementsCacheStore {
   final FlutterSecureStorage _storage;
 
   AnnouncementsCacheStore({FlutterSecureStorage? storage})
-      : _storage = storage ?? const FlutterSecureStorage();
+    : _storage = storage ?? const FlutterSecureStorage();
 
   Future<List<Announcement>?> read() async {
     final raw = await _storage.read(key: storageKey);
@@ -39,8 +39,10 @@ class AnnouncementsCacheStore {
     }
   }
 
-  Future<void> write(List<Announcement> items) =>
-      _storage.write(key: storageKey, value: jsonEncode(items.map((a) => a.toJson()).toList()));
+  Future<void> write(List<Announcement> items) => _storage.write(
+    key: storageKey,
+    value: jsonEncode(items.map((a) => a.toJson()).toList()),
+  );
 
   Future<void> clear() => _storage.delete(key: storageKey);
 }

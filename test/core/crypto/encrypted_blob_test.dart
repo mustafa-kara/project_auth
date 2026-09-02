@@ -40,53 +40,69 @@ void main() {
   });
 
   test('eksik alan → FormatException', () {
-    expect(() => EncryptedBlob.fromJson({'n': base64Encode(_nonce())}),
-        throwsFormatException);
-    expect(() => EncryptedBlob.fromJson({'c': base64Encode(_ct())}),
-        throwsFormatException);
+    expect(
+      () => EncryptedBlob.fromJson({'n': base64Encode(_nonce())}),
+      throwsFormatException,
+    );
+    expect(
+      () => EncryptedBlob.fromJson({'c': base64Encode(_ct())}),
+      throwsFormatException,
+    );
   });
 
   test('yanlış tip → FormatException', () {
-    expect(() => EncryptedBlob.fromJson({'n': 123, 'c': base64Encode(_ct())}),
-        throwsFormatException);
+    expect(
+      () => EncryptedBlob.fromJson({'n': 123, 'c': base64Encode(_ct())}),
+      throwsFormatException,
+    );
     final valid = EncryptedBlob(nonce: _nonce(), ciphertext: _ct()).toJson();
-    expect(() => EncryptedBlob.fromJson({...valid, 'v': 'x'}),
-        throwsFormatException);
+    expect(
+      () => EncryptedBlob.fromJson({...valid, 'v': 'x'}),
+      throwsFormatException,
+    );
   });
 
   test('geçersiz base64 → FormatException', () {
-    expect(() => EncryptedBlob.fromJson({'n': '!!!', 'c': base64Encode(_ct())}),
-        throwsFormatException);
+    expect(
+      () => EncryptedBlob.fromJson({'n': '!!!', 'c': base64Encode(_ct())}),
+      throwsFormatException,
+    );
   });
 
   // --- Sıkı validasyon (review P2) ---
 
   test('yanlış nonce uzunluğu → FormatException (ctor + fromJson)', () {
     expect(
-        () => EncryptedBlob(
-            nonce: Uint8List(EncryptedBlob.nonceBytes - 1), ciphertext: _ct()),
-        throwsFormatException);
+      () => EncryptedBlob(
+        nonce: Uint8List(EncryptedBlob.nonceBytes - 1),
+        ciphertext: _ct(),
+      ),
+      throwsFormatException,
+    );
     // fromJson da ctor'a düştüğü için aynı korunur
-    final j = {
-      'n': base64Encode(Uint8List(4)),
-      'c': base64Encode(_ct()),
-    };
+    final j = {'n': base64Encode(Uint8List(4)), 'c': base64Encode(_ct())};
     expect(() => EncryptedBlob.fromJson(j), throwsFormatException);
   });
 
   test('çok kısa ciphertext (< tag) → FormatException', () {
     expect(
-        () => EncryptedBlob(
-            nonce: _nonce(),
-            ciphertext: Uint8List(EncryptedBlob.minCiphertextBytes - 1)),
-        throwsFormatException);
+      () => EncryptedBlob(
+        nonce: _nonce(),
+        ciphertext: Uint8List(EncryptedBlob.minCiphertextBytes - 1),
+      ),
+      throwsFormatException,
+    );
   });
 
   test('desteklenmeyen ileri version → FormatException', () {
-    expect(() => EncryptedBlob(nonce: _nonce(), ciphertext: _ct(), version: 99),
-        throwsFormatException);
-    expect(() => EncryptedBlob(nonce: _nonce(), ciphertext: _ct(), version: 0),
-        throwsFormatException);
+    expect(
+      () => EncryptedBlob(nonce: _nonce(), ciphertext: _ct(), version: 99),
+      throwsFormatException,
+    );
+    expect(
+      () => EncryptedBlob(nonce: _nonce(), ciphertext: _ct(), version: 0),
+      throwsFormatException,
+    );
     final j = EncryptedBlob(nonce: _nonce(), ciphertext: _ct()).toJson()
       ..['v'] = 99;
     expect(() => EncryptedBlob.fromJson(j), throwsFormatException);

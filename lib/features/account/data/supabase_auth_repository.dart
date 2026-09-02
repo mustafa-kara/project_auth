@@ -30,16 +30,16 @@ class SupabaseAuthRepository implements AuthRepository {
   @override
   Stream<AuthSessionState> authStateChanges() {
     return _auth.onAuthStateChange
-        .map((state) => state.session != null
-            ? AuthSessionState.signedIn
-            : AuthSessionState.signedOut)
+        .map(
+          (state) => state.session != null
+              ? AuthSessionState.signedIn
+              : AuthSessionState.signedOut,
+        )
         // Ağ hatası stream error olarak gelir; domain hatasına çevirip iletilir.
         // Dinleyen (SessionCubit) `onError` vermeli — yine de burada da map'lenir.
-        .handleError(
-      (Object e) {
-        throw _mapError(e);
-      },
-    );
+        .handleError((Object e) {
+          throw _mapError(e);
+        });
   }
 
   @override
@@ -63,10 +63,7 @@ class SupabaseAuthRepository implements AuthRepository {
   }
 
   @override
-  Future<void> signIn({
-    required String email,
-    required String password,
-  }) async {
+  Future<void> signIn({required String email, required String password}) async {
     try {
       await _auth.signInWithPassword(email: email, password: password);
     } catch (e) {
@@ -129,10 +126,12 @@ class SupabaseAuthRepository implements AuthRepository {
       if (msg.contains('not confirmed') || msg.contains('not been confirmed')) {
         return const AuthEmailNotConfirmed();
       }
-      if (msg.contains('already registered') || msg.contains('already exists')) {
+      if (msg.contains('already registered') ||
+          msg.contains('already exists')) {
         return const AuthEmailAlreadyInUse();
       }
-      if (msg.contains('invalid login') || msg.contains('invalid credentials')) {
+      if (msg.contains('invalid login') ||
+          msg.contains('invalid credentials')) {
         return const AuthInvalidCredentials();
       }
       return AuthUnknownError(ex.message);

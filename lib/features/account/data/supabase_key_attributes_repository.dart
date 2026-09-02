@@ -81,18 +81,19 @@ class SupabaseKeyAttributesRepository implements KeyAttributesRepository {
   /// alanlar + KDF parametreleri — masterKey/KEK/secret ASLA yer almaz.
   @visibleForTesting
   static Map<String, dynamic> toRow(String uid, KeyAttributes attrs) => {
-        'user_id': uid,
-        'kdf_salt': ByteaCodec.encode(attrs.kdfSalt),
-        'kdf_ops': attrs.kdfOps,
-        'kdf_mem': attrs.kdfMem,
-        'encrypted_master_key':
-            ByteaCodec.encode(attrs.encryptedMasterKey.ciphertext),
-        'master_key_nonce': ByteaCodec.encode(attrs.encryptedMasterKey.nonce),
-        'recovery_encrypted_master_key':
-            ByteaCodec.encode(attrs.recoveryEncryptedMasterKey.ciphertext),
-        'recovery_nonce':
-            ByteaCodec.encode(attrs.recoveryEncryptedMasterKey.nonce),
-      };
+    'user_id': uid,
+    'kdf_salt': ByteaCodec.encode(attrs.kdfSalt),
+    'kdf_ops': attrs.kdfOps,
+    'kdf_mem': attrs.kdfMem,
+    'encrypted_master_key': ByteaCodec.encode(
+      attrs.encryptedMasterKey.ciphertext,
+    ),
+    'master_key_nonce': ByteaCodec.encode(attrs.encryptedMasterKey.nonce),
+    'recovery_encrypted_master_key': ByteaCodec.encode(
+      attrs.recoveryEncryptedMasterKey.ciphertext,
+    ),
+    'recovery_nonce': ByteaCodec.encode(attrs.recoveryEncryptedMasterKey.nonce),
+  };
 
   /// Sunucu satırı → KeyAttributes. İki bytea kolon → bir `EncryptedBlob` MERGE.
   /// `bmk` YOK → null. Eksik kolon / geçersiz bytea → [FormatException] (fetch
@@ -102,17 +103,19 @@ class SupabaseKeyAttributesRepository implements KeyAttributesRepository {
     final salt = ByteaCodec.decode(_str(row, 'kdf_salt'));
     final emkCipher = ByteaCodec.decode(_str(row, 'encrypted_master_key'));
     final emkNonce = ByteaCodec.decode(_str(row, 'master_key_nonce'));
-    final remkCipher =
-        ByteaCodec.decode(_str(row, 'recovery_encrypted_master_key'));
+    final remkCipher = ByteaCodec.decode(
+      _str(row, 'recovery_encrypted_master_key'),
+    );
     final remkNonce = ByteaCodec.decode(_str(row, 'recovery_nonce'));
     return KeyAttributes(
       kdfSalt: salt,
       kdfOps: _int(row, 'kdf_ops'),
       kdfMem: _int(row, 'kdf_mem'),
-      encryptedMasterKey:
-          EncryptedBlob(nonce: emkNonce, ciphertext: emkCipher),
-      recoveryEncryptedMasterKey:
-          EncryptedBlob(nonce: remkNonce, ciphertext: remkCipher),
+      encryptedMasterKey: EncryptedBlob(nonce: emkNonce, ciphertext: emkCipher),
+      recoveryEncryptedMasterKey: EncryptedBlob(
+        nonce: remkNonce,
+        ciphertext: remkCipher,
+      ),
       // bmk sunucuda yok → null (yeni cihaz biyometriyi yeniden enroll eder).
     );
   }
@@ -120,13 +123,17 @@ class SupabaseKeyAttributesRepository implements KeyAttributesRepository {
   static String _str(Map<String, dynamic> row, String key) {
     final v = row[key];
     if (v is String) return v;
-    throw FormatException('key_attributes."$key" String bekleniyordu (${v.runtimeType})');
+    throw FormatException(
+      'key_attributes."$key" String bekleniyordu (${v.runtimeType})',
+    );
   }
 
   static int _int(Map<String, dynamic> row, String key) {
     final v = row[key];
     if (v is int) return v;
-    throw FormatException('key_attributes."$key" int bekleniyordu (${v.runtimeType})');
+    throw FormatException(
+      'key_attributes."$key" int bekleniyordu (${v.runtimeType})',
+    );
   }
 
   /// PostgREST/ağ hatasını domain [SyncError]'a eşler.
@@ -136,7 +143,10 @@ class SupabaseKeyAttributesRepository implements KeyAttributesRepository {
     if (e is PostgrestException) {
       final code = e.code ?? '';
       // RLS/yetki: PostgREST 401/403 veya "42501" (insufficient_privilege).
-      if (code == '42501' || code == 'PGRST301' || code == '401' || code == '403') {
+      if (code == '42501' ||
+          code == 'PGRST301' ||
+          code == '401' ||
+          code == '403') {
         return const SyncPermissionDenied();
       }
       return SyncUnknownError('PostgREST ${e.code ?? ''}: ${e.message}');

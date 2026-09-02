@@ -21,9 +21,9 @@ void main() {
     SecureScreen.debugReset();
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
-      calls.add(call.method);
-      return null;
-    });
+          calls.add(call.method);
+          return null;
+        });
   });
 
   tearDown(() {
@@ -47,79 +47,93 @@ void main() {
     expect(SecureScreen.holderCount, 0);
   });
 
-  test('iki acquire + bir release → koruma AÇIK kalır; ikinci release → kapanır',
-      () async {
-    SecureScreen.acquire(); // ör. vault
-    SecureScreen.acquire(); // ör. üstüne açılan recovery ekranı
-    await flush();
-    // Yalnız 0→1 geçişi native'e gider (idempotent değil, gereksiz çağrı yok).
-    expect(calls, ['enable']);
-    expect(SecureScreen.holderCount, 2);
+  test(
+    'iki acquire + bir release → koruma AÇIK kalır; ikinci release → kapanır',
+    () async {
+      SecureScreen.acquire(); // ör. vault
+      SecureScreen.acquire(); // ör. üstüne açılan recovery ekranı
+      await flush();
+      // Yalnız 0→1 geçişi native'e gider (idempotent değil, gereksiz çağrı yok).
+      expect(calls, ['enable']);
+      expect(SecureScreen.holderCount, 2);
 
-    SecureScreen.release(); // recovery kapandı — vault hâlâ görünür
-    await flush();
-    expect(calls, ['enable'], reason: 'disable ERKEN çağrılmamalı');
-    expect(SecureScreen.holderCount, 1);
+      SecureScreen.release(); // recovery kapandı — vault hâlâ görünür
+      await flush();
+      expect(calls, ['enable'], reason: 'disable ERKEN çağrılmamalı');
+      expect(SecureScreen.holderCount, 1);
 
-    SecureScreen.release(); // vault da kapandı
-    await flush();
-    expect(calls, ['enable', 'disable']);
-    expect(SecureScreen.holderCount, 0);
-  });
+      SecureScreen.release(); // vault da kapandı
+      await flush();
+      expect(calls, ['enable', 'disable']);
+      expect(SecureScreen.holderCount, 0);
+    },
+  );
 
-  test('fazla release sayacı negatife düşürmez (sonraki acquire yine açar)',
-      () async {
-    SecureScreen.acquire();
-    SecureScreen.release();
-    SecureScreen.release(); // eşleşmeyen fazla release → yok sayılır
-    SecureScreen.release();
-    await flush();
-    expect(SecureScreen.holderCount, 0);
-    expect(calls, ['enable', 'disable'], reason: 'tek disable yeter');
+  test(
+    'fazla release sayacı negatife düşürmez (sonraki acquire yine açar)',
+    () async {
+      SecureScreen.acquire();
+      SecureScreen.release();
+      SecureScreen.release(); // eşleşmeyen fazla release → yok sayılır
+      SecureScreen.release();
+      await flush();
+      expect(SecureScreen.holderCount, 0);
+      expect(calls, ['enable', 'disable'], reason: 'tek disable yeter');
 
-    SecureScreen.acquire();
-    await flush();
-    expect(calls, ['enable', 'disable', 'enable'],
-        reason: '0→1 geçişi kaçmamalı');
-  });
+      SecureScreen.acquire();
+      await flush();
+      expect(calls, [
+        'enable',
+        'disable',
+        'enable',
+      ], reason: '0→1 geçişi kaçmamalı');
+    },
+  );
 
-  test('native enable HATA verirse sonraki acquire yeniden dener (review [P2])',
-      () async {
-    // İlk `enable` PlatformException ile düşer → sayaç 1'de kalır. Naif kodda
-    // 0→1 geçişi bir daha olmadığı için koruma sessizce KAPALI kalırdı.
-    var failNext = true;
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(channel, (call) async {
-      calls.add(call.method);
-      if (failNext && call.method == 'enable') {
-        failNext = false;
-        throw PlatformException(code: 'ERR', message: 'native reddetti');
-      }
-      return null;
-    });
+  test(
+    'native enable HATA verirse sonraki acquire yeniden dener (review [P2])',
+    () async {
+      // İlk `enable` PlatformException ile düşer → sayaç 1'de kalır. Naif kodda
+      // 0→1 geçişi bir daha olmadığı için koruma sessizce KAPALI kalırdı.
+      var failNext = true;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            calls.add(call.method);
+            if (failNext && call.method == 'enable') {
+              failNext = false;
+              throw PlatformException(code: 'ERR', message: 'native reddetti');
+            }
+            return null;
+          });
 
-    SecureScreen.acquire(); // ör. vault
-    await flush();
-    expect(calls, ['enable']);
-    expect(SecureScreen.nativeOn, isFalse, reason: 'native açılmadı');
+      SecureScreen.acquire(); // ör. vault
+      await flush();
+      expect(calls, ['enable']);
+      expect(SecureScreen.nativeOn, isFalse, reason: 'native açılmadı');
 
-    SecureScreen.acquire(); // ör. üstüne açılan hassas ekran → RETRY
-    await flush();
-    expect(calls, ['enable', 'enable'], reason: 'başarısız enable tekrarlanmalı');
-    expect(SecureScreen.nativeOn, isTrue);
-    expect(SecureScreen.holderCount, 2);
+      SecureScreen.acquire(); // ör. üstüne açılan hassas ekran → RETRY
+      await flush();
+      expect(calls, [
+        'enable',
+        'enable',
+      ], reason: 'başarısız enable tekrarlanmalı');
+      expect(SecureScreen.nativeOn, isTrue);
+      expect(SecureScreen.holderCount, 2);
 
-    SecureScreen.acquire(); // artık native AÇIK → tekrar çağrı YOK
-    await flush();
-    expect(calls, ['enable', 'enable'],
-        reason: 'başarılı enable sonrası gereksiz çağrı olmamalı');
-    expect(SecureScreen.holderCount, 3);
-  });
+      SecureScreen.acquire(); // artık native AÇIK → tekrar çağrı YOK
+      await flush();
+      expect(calls, [
+        'enable',
+        'enable',
+      ], reason: 'başarılı enable sonrası gereksiz çağrı olmamalı');
+      expect(SecureScreen.holderCount, 3);
+    },
+  );
 
-  testWidgets('SecureScreenScope: mount → enable, unmount → disable',
-      (tester) async {
-    await tester.pumpWidget(
-        const SecureScreenScope(child: SizedBox.shrink()));
+  testWidgets('SecureScreenScope: mount → enable, unmount → disable', (
+    tester,
+  ) async {
+    await tester.pumpWidget(const SecureScreenScope(child: SizedBox.shrink()));
     await tester.pump();
     expect(calls, ['enable']);
 
@@ -130,50 +144,55 @@ void main() {
   });
 
   testWidgets(
-      'enable hatası → 500ms sonra TEK seferlik yeniden deneme (denetim C9)',
-      (tester) async {
-    // Önceki test sonraki `acquire`'ın kurtardığı hâli doğruluyor; TEK hassas
-    // ekran açıkken ise ikinci bir acquire hiç gelmez → gecikmeli deneme.
-    var failEnable = true;
+    'enable hatası → 500ms sonra TEK seferlik yeniden deneme (denetim C9)',
+    (tester) async {
+      // Önceki test sonraki `acquire`'ın kurtardığı hâli doğruluyor; TEK hassas
+      // ekran açıkken ise ikinci bir acquire hiç gelmez → gecikmeli deneme.
+      var failEnable = true;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            calls.add(call.method);
+            if (failEnable && call.method == 'enable') {
+              throw PlatformException(
+                code: 'ERR',
+                message: 'pencere hazır değil',
+              );
+            }
+            return null;
+          });
+
+      SecureScreen.acquire();
+      await tester.pump();
+      expect(calls, ['enable']);
+      expect(SecureScreen.nativeOn, isFalse);
+
+      failEnable = false; // geçici sebep ortadan kalktı
+      await tester.pump(const Duration(milliseconds: 600));
+
+      expect(calls, ['enable', 'enable'], reason: 'gecikmeli deneme gelmeli');
+      expect(SecureScreen.nativeOn, isTrue);
+
+      // Ekstra bekleme YENİ çağrı üretmez (deneme tek seferlik).
+      await tester.pump(const Duration(seconds: 2));
+      expect(calls, ['enable', 'enable']);
+
+      SecureScreen.release();
+      await tester.pump();
+      expect(calls, ['enable', 'enable', 'disable']);
+    },
+  );
+
+  testWidgets('yeniden deneme sırasında ekran kapandıysa enable GÖNDERİLMEZ', (
+    tester,
+  ) async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
-      calls.add(call.method);
-      if (failEnable && call.method == 'enable') {
-        throw PlatformException(code: 'ERR', message: 'pencere hazır değil');
-      }
-      return null;
-    });
-
-    SecureScreen.acquire();
-    await tester.pump();
-    expect(calls, ['enable']);
-    expect(SecureScreen.nativeOn, isFalse);
-
-    failEnable = false; // geçici sebep ortadan kalktı
-    await tester.pump(const Duration(milliseconds: 600));
-
-    expect(calls, ['enable', 'enable'], reason: 'gecikmeli deneme gelmeli');
-    expect(SecureScreen.nativeOn, isTrue);
-
-    // Ekstra bekleme YENİ çağrı üretmez (deneme tek seferlik).
-    await tester.pump(const Duration(seconds: 2));
-    expect(calls, ['enable', 'enable']);
-
-    SecureScreen.release();
-    await tester.pump();
-    expect(calls, ['enable', 'enable', 'disable']);
-  });
-
-  testWidgets('yeniden deneme sırasında ekran kapandıysa enable GÖNDERİLMEZ',
-      (tester) async {
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(channel, (call) async {
-      calls.add(call.method);
-      if (call.method == 'enable' && calls.length == 1) {
-        throw PlatformException(code: 'ERR');
-      }
-      return null;
-    });
+          calls.add(call.method);
+          if (call.method == 'enable' && calls.length == 1) {
+            throw PlatformException(code: 'ERR');
+          }
+          return null;
+        });
 
     SecureScreen.acquire();
     await tester.pump();
@@ -183,20 +202,22 @@ void main() {
 
     await tester.pump(const Duration(milliseconds: 600));
 
-    expect(calls, ['enable', 'disable'],
-        reason: 'kapalı ekran için koruma açılmamalı');
+    expect(calls, [
+      'enable',
+      'disable',
+    ], reason: 'kapalı ekran için koruma açılmamalı');
     expect(SecureScreen.holderCount, 0);
   });
 
   test('disable REDDEDİLİRSE koruma açık kabul edilir (denetim C9)', () async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
-      calls.add(call.method);
-      if (call.method == 'disable') {
-        throw PlatformException(code: 'ERR', message: 'native reddetti');
-      }
-      return null;
-    });
+          calls.add(call.method);
+          if (call.method == 'disable') {
+            throw PlatformException(code: 'ERR', message: 'native reddetti');
+          }
+          return null;
+        });
 
     SecureScreen.acquire();
     await flush();
@@ -206,8 +227,11 @@ void main() {
     await flush();
 
     expect(calls, ['enable', 'disable']);
-    expect(SecureScreen.nativeOn, isTrue,
-        reason: 'native FLAG_SECURE hâlâ açık — muhasebe yalan söylememeli');
+    expect(
+      SecureScreen.nativeOn,
+      isTrue,
+      reason: 'native FLAG_SECURE hâlâ açık — muhasebe yalan söylememeli',
+    );
     expect(SecureScreen.holderCount, 0);
   });
 }

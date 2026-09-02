@@ -28,8 +28,8 @@ class KeyAttributesStore {
   final String _keyPrefix;
 
   KeyAttributesStore({FlutterSecureStorage? storage, String keyPrefix = ''})
-      : _storage = storage ?? const FlutterSecureStorage(),
-        _keyPrefix = keyPrefix;
+    : _storage = storage ?? const FlutterSecureStorage(),
+      _keyPrefix = keyPrefix;
 
   String get _key => '$_keyPrefix$storageKey';
 
@@ -44,15 +44,18 @@ class KeyAttributesStore {
       decoded = jsonDecode(raw);
     } on FormatException {
       throw const FormatException(
-          'KeyAttributesStore: kayıtlı JSON bozuk (malformed)');
+        'KeyAttributesStore: kayıtlı JSON bozuk (malformed)',
+      );
     }
     if (decoded is! Map) {
       throw const FormatException(
-          'KeyAttributesStore: kayıt beklenen nesne formatında değil');
+        'KeyAttributesStore: kayıt beklenen nesne formatında değil',
+      );
     }
     // KeyAttributes.fromJson eksik/yanlış tip/geçersiz base64'te FormatException atar.
-    return KeyAttributes.fromJson(
-        {for (final e in decoded.entries) e.key.toString(): e.value});
+    return KeyAttributes.fromJson({
+      for (final e in decoded.entries) e.key.toString(): e.value,
+    });
   }
 
   Future<void> write(KeyAttributes attrs) =>

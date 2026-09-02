@@ -24,9 +24,10 @@ class AuthIntegrityPage extends StatelessWidget {
       builder: (ctx) => AlertDialog(
         title: const Text('Vault\'u sıfırla?'),
         content: const Text(
-            'Tüm şifreli token\'lar ve anahtar verisi KALICI silinir. '
-            'Bu işlem geri alınamaz. Recovery key\'in olsa bile bu cihazdaki '
-            'veri gider.'),
+          'Tüm şifreli token\'lar ve anahtar verisi KALICI silinir. '
+          'Bu işlem geri alınamaz. Recovery key\'in olsa bile bu cihazdaki '
+          'veri gider.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
@@ -34,7 +35,8 @@ class AuthIntegrityPage extends StatelessWidget {
           ),
           FilledButton(
             style: FilledButton.styleFrom(
-                backgroundColor: Theme.of(ctx).colorScheme.error),
+              backgroundColor: Theme.of(ctx).colorScheme.error,
+            ),
             onPressed: () => Navigator.of(ctx).pop(true),
             child: const Text('Sıfırla'),
           ),

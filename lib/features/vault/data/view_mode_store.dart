@@ -18,8 +18,8 @@ class ViewModeStore {
   final String _keyPrefix;
 
   ViewModeStore({FlutterSecureStorage? storage, String keyPrefix = ''})
-      : _storage = storage ?? const FlutterSecureStorage(),
-        _keyPrefix = keyPrefix;
+    : _storage = storage ?? const FlutterSecureStorage(),
+      _keyPrefix = keyPrefix;
 
   String get _key => '$_keyPrefix$storageKey';
 
@@ -29,6 +29,8 @@ class ViewModeStore {
     return raw == 'list' ? VaultViewMode.list : VaultViewMode.card;
   }
 
-  Future<void> write(VaultViewMode mode) =>
-      _storage.write(key: _key, value: mode == VaultViewMode.list ? 'list' : 'card');
+  Future<void> write(VaultViewMode mode) => _storage.write(
+    key: _key,
+    value: mode == VaultViewMode.list ? 'list' : 'card',
+  );
 }

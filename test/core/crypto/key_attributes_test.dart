@@ -18,12 +18,12 @@ EncryptedBlob _blob(int seed) =>
     EncryptedBlob(nonce: _nonce(seed), ciphertext: _ct(seed));
 
 KeyAttributes _sample() => KeyAttributes(
-      kdfSalt: _salt(),
-      kdfOps: 3,
-      kdfMem: 67108864,
-      encryptedMasterKey: _blob(10),
-      recoveryEncryptedMasterKey: _blob(20),
-    );
+  kdfSalt: _salt(),
+  kdfOps: 3,
+  kdfMem: 67108864,
+  encryptedMasterKey: _blob(10),
+  recoveryEncryptedMasterKey: _blob(20),
+);
 
 void main() {
   test('JSON round-trip (tüm alanlar)', () {
@@ -34,8 +34,10 @@ void main() {
     expect(back.kdfMem, 67108864);
     expect(back.encryptedMasterKey.nonce, a.encryptedMasterKey.nonce);
     expect(back.encryptedMasterKey.ciphertext, a.encryptedMasterKey.ciphertext);
-    expect(back.recoveryEncryptedMasterKey.ciphertext,
-        a.recoveryEncryptedMasterKey.ciphertext);
+    expect(
+      back.recoveryEncryptedMasterKey.ciphertext,
+      a.recoveryEncryptedMasterKey.ciphertext,
+    );
     expect(back.version, 1);
   });
 
@@ -60,22 +62,31 @@ void main() {
     final newSalt = _salt(8);
     final newEmk = _blob(55);
     final b = a.copyWith(
-        kdfSalt: newSalt, kdfOps: 4, kdfMem: 999, encryptedMasterKey: newEmk);
+      kdfSalt: newSalt,
+      kdfOps: 4,
+      kdfMem: 999,
+      encryptedMasterKey: newEmk,
+    );
     expect(b.kdfSalt, newSalt);
     expect(b.kdfOps, 4);
     expect(b.kdfMem, 999);
     expect(b.encryptedMasterKey.ciphertext, newEmk.ciphertext);
     // recovery DOKUNULMAZ
-    expect(b.recoveryEncryptedMasterKey.ciphertext,
-        a.recoveryEncryptedMasterKey.ciphertext);
+    expect(
+      b.recoveryEncryptedMasterKey.ciphertext,
+      a.recoveryEncryptedMasterKey.ciphertext,
+    );
   });
 
   test('eksik alan → FormatException', () {
     final full = _sample().toJson();
     for (final key in ['salt', 'ops', 'mem', 'emk', 'remk']) {
       final partial = Map<String, dynamic>.from(full)..remove(key);
-      expect(() => KeyAttributes.fromJson(partial), throwsFormatException,
-          reason: 'eksik: $key');
+      expect(
+        () => KeyAttributes.fromJson(partial),
+        throwsFormatException,
+        reason: 'eksik: $key',
+      );
     }
   });
 
@@ -95,24 +106,25 @@ void main() {
 
   test('yanlış salt uzunluğu → FormatException', () {
     expect(
-        () => KeyAttributes(
-              kdfSalt: Uint8List(KeyAttributes.saltBytes - 1),
-              kdfOps: 1,
-              kdfMem: 1,
-              encryptedMasterKey: _blob(1),
-              recoveryEncryptedMasterKey: _blob(2),
-            ),
-        throwsFormatException);
+      () => KeyAttributes(
+        kdfSalt: Uint8List(KeyAttributes.saltBytes - 1),
+        kdfOps: 1,
+        kdfMem: 1,
+        encryptedMasterKey: _blob(1),
+        recoveryEncryptedMasterKey: _blob(2),
+      ),
+      throwsFormatException,
+    );
   });
 
   test('negatif / sıfır KDF değerleri → FormatException', () {
     KeyAttributes make(int ops, int mem) => KeyAttributes(
-          kdfSalt: _salt(),
-          kdfOps: ops,
-          kdfMem: mem,
-          encryptedMasterKey: _blob(1),
-          recoveryEncryptedMasterKey: _blob(2),
-        );
+      kdfSalt: _salt(),
+      kdfOps: ops,
+      kdfMem: mem,
+      encryptedMasterKey: _blob(1),
+      recoveryEncryptedMasterKey: _blob(2),
+    );
     expect(() => make(0, 1), throwsFormatException);
     expect(() => make(-1, 1), throwsFormatException);
     expect(() => make(1, 0), throwsFormatException);
@@ -136,10 +148,13 @@ void main() {
 
   // --- Biyometri (bmk) opsiyonel alanı (Patch 5) ---
 
-  test('bmk yokken toJson "bmk" anahtarı YAZMAZ (eski vault byte-identical)', () {
-    final j = _sample().toJson();
-    expect(j.containsKey('bmk'), isFalse);
-  });
+  test(
+    'bmk yokken toJson "bmk" anahtarı YAZMAZ (eski vault byte-identical)',
+    () {
+      final j = _sample().toJson();
+      expect(j.containsKey('bmk'), isFalse);
+    },
+  );
 
   test('eski JSON (bmk yok) → biometricEncryptedMasterKey null', () {
     final back = KeyAttributes.fromJson(_sample().toJson());
@@ -184,20 +199,31 @@ void main() {
   test('changePassword benzeri copyWith (kdf+emk) bmk KORUR', () {
     final a = _sample().copyWith(biometricEncryptedMasterKey: _blob(44));
     final b = a.copyWith(
-        kdfSalt: _salt(8), kdfOps: 4, kdfMem: 999, encryptedMasterKey: _blob(55));
+      kdfSalt: _salt(8),
+      kdfOps: 4,
+      kdfMem: 999,
+      encryptedMasterKey: _blob(55),
+    );
     expect(b.biometricEncryptedMasterKey, isNotNull);
-    expect(b.biometricEncryptedMasterKey!.ciphertext,
-        a.biometricEncryptedMasterKey!.ciphertext);
-  });
-
-  test('copyWith: clearBiometric + biometricEncryptedMasterKey birlikte → assert', () {
-    final a = _sample();
     expect(
-      () => a.copyWith(
-          biometricEncryptedMasterKey: _blob(44), clearBiometric: true),
-      throwsA(isA<AssertionError>()),
+      b.biometricEncryptedMasterKey!.ciphertext,
+      a.biometricEncryptedMasterKey!.ciphertext,
     );
   });
+
+  test(
+    'copyWith: clearBiometric + biometricEncryptedMasterKey birlikte → assert',
+    () {
+      final a = _sample();
+      expect(
+        () => a.copyWith(
+          biometricEncryptedMasterKey: _blob(44),
+          clearBiometric: true,
+        ),
+        throwsA(isA<AssertionError>()),
+      );
+    },
+  );
 
   test('bmk yanlış tip → FormatException', () {
     final j = _sample().toJson()..['bmk'] = 'notamap';

@@ -94,9 +94,10 @@ String dedupeKey(OtpAccount account) {
 /// catalog must therefore never carry a chained alias (`a` → `b` and `b` → `c`)
 /// — with one, two sides that entered at different links in the chain would
 /// still disagree. Catalog rows are authored server-side; keep them flat.
-OtpAccount Function(OtpAccount account) canonicalizerFor(IssuerCatalog catalog) =>
-    (account) {
-      final canon = catalog.canonicalIssuer(account.issuer);
-      if (canon == null || canon == account.issuer) return account;
-      return account.copyWith(issuer: canon);
-    };
+OtpAccount Function(OtpAccount account) canonicalizerFor(
+  IssuerCatalog catalog,
+) => (account) {
+  final canon = catalog.canonicalIssuer(account.issuer);
+  if (canon == null || canon == account.issuer) return account;
+  return account.copyWith(issuer: canon);
+};

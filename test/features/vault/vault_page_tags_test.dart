@@ -39,8 +39,7 @@ class _MemStorage implements FlutterSecureStorage {
     dynamic webOptions,
     dynamic mOptions,
     dynamic wOptions,
-  }) async =>
-      _d[key];
+  }) async => _d[key];
   @override
   Future<void> write({
     required String key,
@@ -97,37 +96,47 @@ class _TagCubit extends VaultCubit {
     List<String>? tags,
   }) async {
     calls.add('edit:$id');
-    emit(state.copyWith(accounts: [
-      for (final a in state.accounts)
-        if (a.id == id)
-          a.copyWith(issuer: issuer, accountName: accountName, tags: tags)
-        else
-          a,
-    ]));
+    emit(
+      state.copyWith(
+        accounts: [
+          for (final a in state.accounts)
+            if (a.id == id)
+              a.copyWith(issuer: issuer, accountName: accountName, tags: tags)
+            else
+              a,
+        ],
+      ),
+    );
   }
 
   @override
   Future<void> renameTag(String from, String to) async {
     calls.add('rename:$from>$to');
-    emit(state.copyWith(accounts: [
-      for (final a in state.accounts)
-        a.tags.contains(from)
-            ? a.copyWith(
-                tags: [for (final t in a.tags) t == from ? to : t],
-              )
-            : a,
-    ]));
+    emit(
+      state.copyWith(
+        accounts: [
+          for (final a in state.accounts)
+            a.tags.contains(from)
+                ? a.copyWith(tags: [for (final t in a.tags) t == from ? to : t])
+                : a,
+        ],
+      ),
+    );
   }
 
   @override
   Future<void> deleteTag(String tag) async {
     calls.add('delete:$tag');
-    emit(state.copyWith(accounts: [
-      for (final a in state.accounts)
-        a.tags.contains(tag)
-            ? a.copyWith(tags: a.tags.where((t) => t != tag).toList())
-            : a,
-    ]));
+    emit(
+      state.copyWith(
+        accounts: [
+          for (final a in state.accounts)
+            a.tags.contains(tag)
+                ? a.copyWith(tags: a.tags.where((t) => t != tag).toList())
+                : a,
+        ],
+      ),
+    );
   }
 }
 
@@ -139,33 +148,36 @@ class _FakeLockCubit extends Cubit<VaultLockState> implements VaultLockCubit {
 }
 
 OtpAccount _acc(String name, {List<String> tags = const []}) => OtpAccount(
-      secret: 'JBSWY3DPEHPK3PXP',
-      type: OtpType.totp,
-      accountName: name,
-      tags: tags,
-    );
+  secret: 'JBSWY3DPEHPK3PXP',
+  type: OtpType.totp,
+  accountName: name,
+  tags: tags,
+);
 
 Future<_TagCubit> _pump(WidgetTester tester, List<OtpAccount> accounts) async {
   final vault = _TagCubit(_FakeRepo(accounts))..load();
   addTearDown(vault.close);
   final lock = _FakeLockCubit();
   addTearDown(lock.close);
-  await tester.pumpWidget(MultiBlocProvider(
-    providers: [
-      BlocProvider<VaultCubit>.value(value: vault),
-      BlocProvider<VaultLockCubit>.value(value: lock),
-    ],
-    child: const MediaQuery(
-      data: MediaQueryData(disableAnimations: true),
-      child: MaterialApp(home: VaultPage()),
+  await tester.pumpWidget(
+    MultiBlocProvider(
+      providers: [
+        BlocProvider<VaultCubit>.value(value: vault),
+        BlocProvider<VaultLockCubit>.value(value: lock),
+      ],
+      child: const MediaQuery(
+        data: MediaQueryData(disableAnimations: true),
+        child: MaterialApp(home: VaultPage()),
+      ),
     ),
-  ));
+  );
   await tester.pumpAndSettle();
   return vault;
 }
 
 final Finder _searchField = find.byWidgetPredicate(
-    (w) => w is TextField && w.decoration?.hintText == 'Ara (issuer / hesap)');
+  (w) => w is TextField && w.decoration?.hintText == 'Ara (issuer / hesap)',
+);
 
 void main() {
   setUp(() {
@@ -174,22 +186,25 @@ void main() {
     }
     if (!locator.isRegistered<ViewModeStore>()) {
       locator.registerLazySingleton<ViewModeStore>(
-          () => ViewModeStore(storage: _MemStorage()));
+        () => ViewModeStore(storage: _MemStorage()),
+      );
     }
   });
   tearDown(GetIt.instance.reset);
 
   group('etiket çip şeridi', () {
-    testWidgets('etiket yoksa şerit RENDER EDİLMEZ (dikey alan yenmez)',
-        (tester) async {
+    testWidgets('etiket yoksa şerit RENDER EDİLMEZ (dikey alan yenmez)', (
+      tester,
+    ) async {
       await _pump(tester, [_acc('alice@example.com')]);
       expect(find.byType(TagChipsBar), findsOneWidget);
       expect(find.byType(FilterChip), findsNothing);
       expect(find.text('Etiketleri yönet'), findsNothing);
     });
 
-    testWidgets('etiketler kullanım sırasıyla çip olur + "Etiketleri yönet"',
-        (tester) async {
+    testWidgets('etiketler kullanım sırasıyla çip olur + "Etiketleri yönet"', (
+      tester,
+    ) async {
       await _pump(tester, [
         _acc('alice@example.com', tags: ['İş']),
         _acc('bob@example.com', tags: ['İş', 'Kişisel']),
@@ -199,8 +214,9 @@ void main() {
       expect(find.text('Etiketleri yönet'), findsOneWidget);
     });
 
-    testWidgets('çipe basınca liste filtrelenir, tekrar basınca temizlenir',
-        (tester) async {
+    testWidgets('çipe basınca liste filtrelenir, tekrar basınca temizlenir', (
+      tester,
+    ) async {
       await _pump(tester, [
         _acc('alice@example.com', tags: ['İş']),
         _acc('bob@example.com'),
@@ -243,8 +259,9 @@ void main() {
       expect(find.text('alice@example.com'), findsOneWidget);
     });
 
-    testWidgets('etiket filtresi boş sonuç → "Bu etikette kod yok" + temizle',
-        (tester) async {
+    testWidgets('etiket filtresi boş sonuç → "Bu etikette kod yok" + temizle', (
+      tester,
+    ) async {
       await _pump(tester, [
         _acc('alice@example.com', tags: ['İş']),
         _acc('bob@example.com'),
@@ -255,8 +272,10 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Bu etikette kod yok'), findsOneWidget);
-      expect(find.text('« İş » etiketiyle eşleşen kod bulunamadı.'),
-          findsOneWidget);
+      expect(
+        find.text('« İş » etiketiyle eşleşen kod bulunamadı.'),
+        findsOneWidget,
+      );
 
       await tester.tap(find.text('Filtreyi temizle'));
       await tester.pumpAndSettle();
@@ -264,41 +283,47 @@ void main() {
       expect(find.byType(OtpCard), findsNWidgets(2));
     });
 
-    testWidgets('arama-yalnız boş sonuç eski EmptyState\'i korur',
-        (tester) async {
-      await _pump(tester, [_acc('alice@example.com', tags: ['İş'])]);
+    testWidgets('arama-yalnız boş sonuç eski EmptyState\'i korur', (
+      tester,
+    ) async {
+      await _pump(tester, [
+        _acc('alice@example.com', tags: ['İş']),
+      ]);
       await tester.enterText(_searchField, 'zzzz');
       await tester.pumpAndSettle();
       expect(find.text('Aramayla eşleşen kod yok'), findsOneWidget);
       expect(find.text('Aramayı temizle'), findsWidgets);
     });
 
-    testWidgets('seçili etiketi taşıyan son kod silinince filtre kendini siler',
-        (tester) async {
-      await _pump(tester, [
-        _acc('alice@example.com', tags: ['İş']),
-        _acc('bob@example.com'),
-      ]);
-      await tester.tap(find.widgetWithText(FilterChip, 'İş'));
-      await tester.pumpAndSettle();
-      expect(find.byType(OtpCard), findsOneWidget);
+    testWidgets(
+      'seçili etiketi taşıyan son kod silinince filtre kendini siler',
+      (tester) async {
+        await _pump(tester, [
+          _acc('alice@example.com', tags: ['İş']),
+          _acc('bob@example.com'),
+        ]);
+        await tester.tap(find.widgetWithText(FilterChip, 'İş'));
+        await tester.pumpAndSettle();
+        expect(find.byType(OtpCard), findsOneWidget);
 
-      await tester.longPress(find.byType(OtpCard));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Sil'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(FilledButton, 'Sil'));
-      await tester.pumpAndSettle();
+        await tester.longPress(find.byType(OtpCard));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Sil'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.widgetWithText(FilledButton, 'Sil'));
+        await tester.pumpAndSettle();
 
-      // Etiket artık hiçbir kayıtta yok → şerit boşalır, filtre düşer, kalan
-      // kod gizli KALMAZ.
-      expect(find.byType(FilterChip), findsNothing);
-      expect(find.byType(OtpCard), findsOneWidget);
-      expect(find.text('bob@example.com'), findsOneWidget);
-    });
+        // Etiket artık hiçbir kayıtta yok → şerit boşalır, filtre düşer, kalan
+        // kod gizli KALMAZ.
+        expect(find.byType(FilterChip), findsNothing);
+        expect(find.byType(OtpCard), findsOneWidget);
+        expect(find.text('bob@example.com'), findsOneWidget);
+      },
+    );
 
-    testWidgets('kaybolan etiket geri gelirse filtre KENDİLİĞİNDEN dönmez',
-        (tester) async {
+    testWidgets('kaybolan etiket geri gelirse filtre KENDİLİĞİNDEN dönmez', (
+      tester,
+    ) async {
       final vault = await _pump(tester, [
         _acc('alice@example.com', tags: ['İş']),
         _acc('bob@example.com'),
@@ -319,16 +344,21 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(OtpCard), findsNWidgets(2));
       expect(
-        tester.widget<FilterChip>(find.widgetWithText(FilterChip, 'İş')).selected,
+        tester
+            .widget<FilterChip>(find.widgetWithText(FilterChip, 'İş'))
+            .selected,
         isFalse,
       );
     });
   });
 
   group('a11y', () {
-    testWidgets('şerit "Etiket filtresi" etiketli, çipler button + selected',
-        (tester) async {
-      await _pump(tester, [_acc('alice@example.com', tags: ['İş'])]);
+    testWidgets('şerit "Etiket filtresi" etiketli, çipler button + selected', (
+      tester,
+    ) async {
+      await _pump(tester, [
+        _acc('alice@example.com', tags: ['İş']),
+      ]);
 
       final labels = tester
           .widgetList<Semantics>(find.byType(Semantics))
@@ -348,9 +378,12 @@ void main() {
       expect(chipSemantics().properties.selected, isTrue);
     });
 
-    testWidgets('çip dokunma hedefi ≥48dp ve seçilide onay İKONU var',
-        (tester) async {
-      await _pump(tester, [_acc('alice@example.com', tags: ['İş'])]);
+    testWidgets('çip dokunma hedefi ≥48dp ve seçilide onay İKONU var', (
+      tester,
+    ) async {
+      await _pump(tester, [
+        _acc('alice@example.com', tags: ['İş']),
+      ]);
       expect(
         tester.getSize(find.widgetWithText(FilterChip, 'İş')).height,
         greaterThanOrEqualTo(TagChipsBar.minTouchTarget),
@@ -376,8 +409,9 @@ void main() {
       expect(vault.state.accounts.length, 1, reason: 'hiçbir şey silinmedi');
     });
 
-    testWidgets('"Sil" → onay diyaloğu; "Vazgeç" → kayıt DURUR',
-        (tester) async {
+    testWidgets('"Sil" → onay diyaloğu; "Vazgeç" → kayıt DURUR', (
+      tester,
+    ) async {
       final vault = await _pump(tester, [_acc('alice@example.com')]);
 
       await tester.longPress(find.byType(OtpCard));
@@ -406,9 +440,12 @@ void main() {
       expect(vault.state.accounts, isEmpty);
     });
 
-    testWidgets('"Kodu düzenle" → EditTokenSheet açılır (secret YOK)',
-        (tester) async {
-      await _pump(tester, [_acc('alice@example.com', tags: ['İş'])]);
+    testWidgets('"Kodu düzenle" → EditTokenSheet açılır (secret YOK)', (
+      tester,
+    ) async {
+      await _pump(tester, [
+        _acc('alice@example.com', tags: ['İş']),
+      ]);
 
       await tester.longPress(find.byType(OtpCard));
       await tester.pumpAndSettle();
@@ -423,8 +460,9 @@ void main() {
   });
 
   group('etiket yöneticisi', () {
-    testWidgets('"Etiketleri yönet" → satırlar "etiket · n kod"',
-        (tester) async {
+    testWidgets('"Etiketleri yönet" → satırlar "etiket · n kod"', (
+      tester,
+    ) async {
       await _pump(tester, [
         _acc('alice@example.com', tags: ['İş']),
         _acc('bob@example.com', tags: ['İş']),
@@ -434,9 +472,12 @@ void main() {
       expect(find.text('İş · 2 kod'), findsOneWidget);
     });
 
-    testWidgets('yeniden adlandırma aktif filtreyi YENİ ada taşır',
-        (tester) async {
-      await _pump(tester, [_acc('alice@example.com', tags: ['İş'])]);
+    testWidgets('yeniden adlandırma aktif filtreyi YENİ ada taşır', (
+      tester,
+    ) async {
+      await _pump(tester, [
+        _acc('alice@example.com', tags: ['İş']),
+      ]);
       await tester.tap(find.widgetWithText(FilterChip, 'İş'));
       await tester.pumpAndSettle();
 
@@ -452,7 +493,8 @@ void main() {
       // kod gizlenmedi.
       expect(find.byType(OtpCard), findsOneWidget);
       final chip = tester.widget<FilterChip>(
-          find.widgetWithText(FilterChip, 'Ofis'));
+        find.widgetWithText(FilterChip, 'Ofis'),
+      );
       expect(chip.selected, isTrue);
     });
 

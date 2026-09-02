@@ -92,7 +92,8 @@ class _SetupPasswordPageState extends State<SetupPasswordPage> {
             autofocus: true,
             autocorrect: false,
             enableSuggestions: false,
-            helperText: 'En az ${KeyManager.minPasswordLength} karakter, '
+            helperText:
+                'En az ${KeyManager.minPasswordLength} karakter, '
                 'en az ${KeyManager.minPasswordClasses} farklı tür '
                 '(büyük/küçük harf, rakam, sembol)',
             validator: (v) {

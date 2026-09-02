@@ -76,8 +76,9 @@ class AuthScaffold extends StatelessWidget {
                       const SizedBox(height: Gap.sm),
                       Text(
                         description!,
-                        style: theme.textTheme.bodyMedium
-                            ?.copyWith(color: scheme.onSurfaceVariant),
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
                       ),
                     ],
                     const SizedBox(height: Gap.xl),

@@ -20,9 +20,26 @@ import 'package:project_auth/features/account/presentation/pages/register_page.d
 class _FakeStorage implements FlutterSecureStorage {
   final Map<String, String> data = {};
   @override
-  Future<String?> read({required String key, dynamic iOptions, dynamic aOptions, dynamic lOptions, dynamic webOptions, dynamic mOptions, dynamic wOptions}) async => data[key];
+  Future<String?> read({
+    required String key,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async => data[key];
   @override
-  Future<void> write({required String key, required String? value, dynamic iOptions, dynamic aOptions, dynamic lOptions, dynamic webOptions, dynamic mOptions, dynamic wOptions}) async {
+  Future<void> write({
+    required String key,
+    required String? value,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async {
     if (value == null) {
       data.remove(key);
     } else {
@@ -31,7 +48,15 @@ class _FakeStorage implements FlutterSecureStorage {
   }
 
   @override
-  Future<void> delete({required String key, dynamic iOptions, dynamic aOptions, dynamic lOptions, dynamic webOptions, dynamic mOptions, dynamic wOptions}) async => data.remove(key);
+  Future<void> delete({
+    required String key,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async => data.remove(key);
   @override
   noSuchMethod(Invocation i) => throw UnimplementedError('$i');
 }
@@ -51,7 +76,10 @@ class _FakeAuth implements AuthRepository {
   @override
   Stream<AuthSessionState> authStateChanges() => _c.stream;
   @override
-  Future<SignUpOutcome> signUp({required String email, required String password}) async {
+  Future<SignUpOutcome> signUp({
+    required String email,
+    required String password,
+  }) async {
     signUpCount++;
     lastEmail = email;
     lastPassword = password;
@@ -91,8 +119,8 @@ void main() {
   });
 
   Widget wrap(Widget page) => MaterialApp(
-        home: BlocProvider<SessionCubit>.value(value: cubit, child: page),
-      );
+    home: BlocProvider<SessionCubit>.value(value: cubit, child: page),
+  );
 
   group('LoginPage', () {
     testWidgets('alanlar dolu + Giriş yap → signIn çağrılır', (tester) async {
@@ -117,8 +145,9 @@ void main() {
   });
 
   group('RegisterPage', () {
-    testWidgets('parolalar eşleşmiyor → inline hata, signUp ÇAĞRILMAZ',
-        (tester) async {
+    testWidgets('parolalar eşleşmiyor → inline hata, signUp ÇAĞRILMAZ', (
+      tester,
+    ) async {
       await tester.pumpWidget(wrap(const RegisterPage()));
       await tester.enterText(find.byType(TextFormField).at(0), 'a@b.com');
       await tester.enterText(find.byType(TextFormField).at(1), 'parola12');

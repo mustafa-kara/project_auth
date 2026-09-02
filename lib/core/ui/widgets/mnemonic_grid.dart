@@ -22,9 +22,9 @@ class MnemonicGrid extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final half = (words.length + 1) ~/ 2; // sol sütun kelime sayısı (12)
     final numberStyle = Theme.of(context).textTheme.labelMedium?.copyWith(
-          color: scheme.onSurfaceVariant,
-          fontFeatures: const [FontFeature.tabularFigures()],
-        );
+      color: scheme.onSurfaceVariant,
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
 
     Widget cell(int index) {
       if (index >= words.length) return const SizedBox.shrink();
@@ -64,17 +64,13 @@ class MnemonicGrid extends StatelessWidget {
         children: [
           // Sol sütun: 1..half
           Expanded(
-            child: Column(
-              children: [for (var i = 0; i < half; i++) cell(i)],
-            ),
+            child: Column(children: [for (var i = 0; i < half; i++) cell(i)]),
           ),
           const SizedBox(width: Gap.lg),
           // Sağ sütun: half..end
           Expanded(
             child: Column(
-              children: [
-                for (var i = half; i < half * 2; i++) cell(i),
-              ],
+              children: [for (var i = half; i < half * 2; i++) cell(i)],
             ),
           ),
         ],

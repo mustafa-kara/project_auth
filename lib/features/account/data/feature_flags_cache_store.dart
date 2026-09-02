@@ -14,7 +14,7 @@ class FeatureFlagsCacheStore {
   final FlutterSecureStorage _storage;
 
   FeatureFlagsCacheStore({FlutterSecureStorage? storage})
-      : _storage = storage ?? const FlutterSecureStorage();
+    : _storage = storage ?? const FlutterSecureStorage();
 
   Future<Map<String, bool>?> read() async {
     final raw = await _storage.read(key: storageKey);

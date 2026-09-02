@@ -61,9 +61,10 @@ class _RecoveryUnlockPageState extends State<RecoveryUnlockPage> {
     final words = _parseWords(_mnemonicCtrl.text);
     setState(() => _busy = true);
     try {
-      await context
-          .read<VaultLockCubit>()
-          .recoverWithNewPassword(words, _passwordCtrl.text);
+      await context.read<VaultLockCubit>().recoverWithNewPassword(
+        words,
+        _passwordCtrl.text,
+      );
       _mnemonicCtrl.clear();
       _passwordCtrl.clear();
     } finally {
@@ -74,7 +75,8 @@ class _RecoveryUnlockPageState extends State<RecoveryUnlockPage> {
   @override
   Widget build(BuildContext context) {
     final error = context.select<VaultLockCubit, VaultLockError?>(
-        (c) => c.state.status == VaultLockStatus.locked ? c.state.error : null);
+      (c) => c.state.status == VaultLockStatus.locked ? c.state.error : null,
+    );
 
     final page = Form(
       key: _formKey,
@@ -117,8 +119,8 @@ class _RecoveryUnlockPageState extends State<RecoveryUnlockPage> {
                 : null,
             validator: (v) =>
                 (v == null || v.length < KeyManager.minPasswordLength)
-                    ? 'En az ${KeyManager.minPasswordLength} karakter'
-                    : null,
+                ? 'En az ${KeyManager.minPasswordLength} karakter'
+                : null,
           ),
         ],
         actions: [

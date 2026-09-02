@@ -28,9 +28,26 @@ class _FakeKeyHandle implements KeyHandle {
 class _FakeStorage implements FlutterSecureStorage {
   final Map<String, String> data = {};
   @override
-  Future<String?> read({required String key, dynamic iOptions, dynamic aOptions, dynamic lOptions, dynamic webOptions, dynamic mOptions, dynamic wOptions}) async => data[key];
+  Future<String?> read({
+    required String key,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async => data[key];
   @override
-  Future<void> write({required String key, required String? value, dynamic iOptions, dynamic aOptions, dynamic lOptions, dynamic webOptions, dynamic mOptions, dynamic wOptions}) async {
+  Future<void> write({
+    required String key,
+    required String? value,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async {
     if (value == null) {
       data.remove(key);
     } else {
@@ -39,7 +56,15 @@ class _FakeStorage implements FlutterSecureStorage {
   }
 
   @override
-  Future<void> delete({required String key, dynamic iOptions, dynamic aOptions, dynamic lOptions, dynamic webOptions, dynamic mOptions, dynamic wOptions}) async => data.remove(key);
+  Future<void> delete({
+    required String key,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async => data.remove(key);
   @override
   noSuchMethod(Invocation i) => throw UnimplementedError('$i');
 }
@@ -58,10 +83,14 @@ KeyAttributes _attrs({bool withBmk = false}) {
 
 class _FakeKeyManager implements KeyManager {
   @override
-  Future<KeyHandle> unlock(KeyAttributes attrs, String p) async => _FakeKeyHandle();
+  Future<KeyHandle> unlock(KeyAttributes attrs, String p) async =>
+      _FakeKeyHandle();
 
   @override
-  BiometricEnrollResult enrollBiometric(KeyAttributes attrs, KeyHandle masterKey) {
+  BiometricEnrollResult enrollBiometric(
+    KeyAttributes attrs,
+    KeyHandle masterKey,
+  ) {
     final blob = EncryptedBlob(nonce: Uint8List(24), ciphertext: Uint8List(16));
     return (
       attrs: attrs.copyWith(biometricEncryptedMasterKey: blob),
@@ -88,7 +117,8 @@ class _FakeBiometric implements BiometricService {
   Future<void> disable() async => disableCount++;
 }
 
-VaultLockCubit _cubit(_FakeStorage storage, _FakeBiometric bio) => VaultLockCubit(
+VaultLockCubit _cubit(_FakeStorage storage, _FakeBiometric bio) =>
+    VaultLockCubit(
       keyManager: _FakeKeyManager(),
       attrsStore: KeyAttributesStore(storage: storage),
       biometric: bio,
@@ -104,9 +134,11 @@ void main() {
       final cubit = _cubit(storage, _FakeBiometric(available: true));
       await cubit.bootstrap();
 
-      await tester.pumpWidget(MaterialApp(
-        home: BlocProvider.value(value: cubit, child: const UnlockPage()),
-      ));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: BlocProvider.value(value: cubit, child: const UnlockPage()),
+        ),
+      );
       expect(find.text('Biyometri ile aç'), findsOneWidget);
       await cubit.close();
     });
@@ -117,9 +149,11 @@ void main() {
       final cubit = _cubit(storage, _FakeBiometric(available: false));
       await cubit.bootstrap();
 
-      await tester.pumpWidget(MaterialApp(
-        home: BlocProvider.value(value: cubit, child: const UnlockPage()),
-      ));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: BlocProvider.value(value: cubit, child: const UnlockPage()),
+        ),
+      );
       expect(find.text('Biyometri ile aç'), findsNothing);
       await cubit.close();
     });
@@ -130,16 +164,21 @@ void main() {
       final cubit = _cubit(storage, _FakeBiometric(available: true));
       await cubit.bootstrap();
 
-      await tester.pumpWidget(MaterialApp(
-        home: BlocProvider.value(value: cubit, child: const UnlockPage()),
-      ));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: BlocProvider.value(value: cubit, child: const UnlockPage()),
+        ),
+      );
       expect(find.text('Biyometri ile aç'), findsNothing);
       await cubit.close();
     });
   });
 
   group('SettingsPage switch', () {
-    Future<VaultLockCubit> unlockedCubit(_FakeStorage storage, _FakeBiometric bio) async {
+    Future<VaultLockCubit> unlockedCubit(
+      _FakeStorage storage,
+      _FakeBiometric bio,
+    ) async {
       await KeyAttributesStore(storage: storage).write(_attrs());
       final cubit = _cubit(storage, bio);
       await cubit.bootstrap();
@@ -147,14 +186,18 @@ void main() {
       return cubit;
     }
 
-    testWidgets('cihaz available → switch etkin, aç → enableBiometric', (tester) async {
+    testWidgets('cihaz available → switch etkin, aç → enableBiometric', (
+      tester,
+    ) async {
       final storage = _FakeStorage();
       final bio = _FakeBiometric(available: true);
       final cubit = await unlockedCubit(storage, bio);
 
-      await tester.pumpWidget(MaterialApp(
-        home: BlocProvider.value(value: cubit, child: const SettingsPage()),
-      ));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: BlocProvider.value(value: cubit, child: const SettingsPage()),
+        ),
+      );
       expect(find.byType(SwitchListTile), findsOneWidget);
       await tester.tap(find.byType(SwitchListTile));
       await tester.pumpAndSettle();
@@ -163,17 +206,27 @@ void main() {
       await cubit.close();
     });
 
-    testWidgets('enrolled DEĞİL + cihaz unavailable → switch devre dışı', (tester) async {
+    testWidgets('enrolled DEĞİL + cihaz unavailable → switch devre dışı', (
+      tester,
+    ) async {
       final storage = _FakeStorage();
       final bio = _FakeBiometric(available: false);
-      final cubit = await unlockedCubit(storage, bio); // bmk yok → enrolled false
+      final cubit = await unlockedCubit(
+        storage,
+        bio,
+      ); // bmk yok → enrolled false
 
-      await tester.pumpWidget(MaterialApp(
-        home: BlocProvider.value(value: cubit, child: const SettingsPage()),
-      ));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: BlocProvider.value(value: cubit, child: const SettingsPage()),
+        ),
+      );
       final sw = tester.widget<SwitchListTile>(find.byType(SwitchListTile));
-      expect(sw.onChanged, isNull,
-          reason: 'enrolled değil + cihaz uygun değil → açılamaz');
+      expect(
+        sw.onChanged,
+        isNull,
+        reason: 'enrolled değil + cihaz uygun değil → açılamaz',
+      );
       await cubit.close();
     });
 
@@ -190,12 +243,17 @@ void main() {
       expect(cubit.state.biometricEnrolled, isTrue);
       expect(cubit.state.deviceBiometricAvailable, isFalse);
 
-      await tester.pumpWidget(MaterialApp(
-        home: BlocProvider.value(value: cubit, child: const SettingsPage()),
-      ));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: BlocProvider.value(value: cubit, child: const SettingsPage()),
+        ),
+      );
       final sw = tester.widget<SwitchListTile>(find.byType(SwitchListTile));
-      expect(sw.onChanged, isNotNull,
-          reason: 'enrolled iken cihaz uygun olmasa da KAPATILABİLMELİ');
+      expect(
+        sw.onChanged,
+        isNotNull,
+        reason: 'enrolled iken cihaz uygun olmasa da KAPATILABİLMELİ',
+      );
 
       // Kapat → disableBiometric (availability'den bağımsız).
       await tester.tap(find.byType(SwitchListTile));

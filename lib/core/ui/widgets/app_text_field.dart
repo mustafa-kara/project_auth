@@ -76,8 +76,7 @@ class _AppTextFieldState extends State<AppTextField> {
         errorText: widget.errorText,
         suffixIcon: showToggle
             ? IconButton(
-                icon: Icon(
-                    _obscured ? Icons.visibility : Icons.visibility_off),
+                icon: Icon(_obscured ? Icons.visibility : Icons.visibility_off),
                 tooltip: _obscured ? 'Göster' : 'Gizle',
                 onPressed: () => setState(() => _obscured = !_obscured),
               )

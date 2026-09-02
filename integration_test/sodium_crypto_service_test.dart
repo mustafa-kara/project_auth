@@ -52,7 +52,11 @@ void main() {
 
   test('yanlış AAD → DecryptException', () {
     final key = crypto.generateMasterKey();
-    final blob = crypto.encrypt(plaintext: bytes('x'), key: key, aad: bytes('token|1|a'));
+    final blob = crypto.encrypt(
+      plaintext: bytes('x'),
+      key: key,
+      aad: bytes('token|1|a'),
+    );
     expect(
       () => crypto.decrypt(blob: blob, key: key, aad: bytes('token|1|b')),
       throwsA(isA<DecryptException>()),
@@ -90,31 +94,38 @@ void main() {
     key.dispose();
   });
 
-  test('Argon2id determinizmi (fonksiyonel): aynı parola+salt+param → aynı KEK', () async {
-    final params = crypto.defaultKdfParams();
-    final salt = crypto.randomBytes(params.saltBytes);
-    final aad = bytes('test|1');
+  test(
+    'Argon2id determinizmi (fonksiyonel): aynı parola+salt+param → aynı KEK',
+    () async {
+      final params = crypto.defaultKdfParams();
+      final salt = crypto.randomBytes(params.saltBytes);
+      final aad = bytes('test|1');
 
-    final kek1 = await crypto.deriveKek(
-      password: 'parola123',
-      salt: salt,
-      opsLimit: params.opsLimit,
-      memLimit: params.memLimit,
-    );
-    final blob = crypto.encrypt(plaintext: bytes('veri'), key: kek1, aad: aad);
+      final kek1 = await crypto.deriveKek(
+        password: 'parola123',
+        salt: salt,
+        opsLimit: params.opsLimit,
+        memLimit: params.memLimit,
+      );
+      final blob = crypto.encrypt(
+        plaintext: bytes('veri'),
+        key: kek1,
+        aad: aad,
+      );
 
-    final kek2 = await crypto.deriveKek(
-      password: 'parola123',
-      salt: salt,
-      opsLimit: params.opsLimit,
-      memLimit: params.memLimit,
-    );
-    // Aynı parametrelerden türeyen KEK2, KEK1'in şifrelediğini çözebilmeli.
-    final out = crypto.decrypt(blob: blob, key: kek2, aad: aad);
-    expect(out, bytes('veri'));
-    kek1.dispose();
-    kek2.dispose();
-  });
+      final kek2 = await crypto.deriveKek(
+        password: 'parola123',
+        salt: salt,
+        opsLimit: params.opsLimit,
+        memLimit: params.memLimit,
+      );
+      // Aynı parametrelerden türeyen KEK2, KEK1'in şifrelediğini çözebilmeli.
+      final out = crypto.decrypt(blob: blob, key: kek2, aad: aad);
+      expect(out, bytes('veri'));
+      kek1.dispose();
+      kek2.dispose();
+    },
+  );
 
   test('farklı parola → farklı KEK (decrypt fail)', () async {
     final params = crypto.defaultKdfParams();
@@ -122,10 +133,18 @@ void main() {
     final aad = bytes('test|1');
 
     final kek1 = await crypto.deriveKek(
-      password: 'dogru', salt: salt, opsLimit: params.opsLimit, memLimit: params.memLimit);
+      password: 'dogru',
+      salt: salt,
+      opsLimit: params.opsLimit,
+      memLimit: params.memLimit,
+    );
     final blob = crypto.encrypt(plaintext: bytes('veri'), key: kek1, aad: aad);
     final kek2 = await crypto.deriveKek(
-      password: 'yanlis', salt: salt, opsLimit: params.opsLimit, memLimit: params.memLimit);
+      password: 'yanlis',
+      salt: salt,
+      opsLimit: params.opsLimit,
+      memLimit: params.memLimit,
+    );
     expect(
       () => crypto.decrypt(blob: blob, key: kek2, aad: aad),
       throwsA(isA<DecryptException>()),
@@ -141,10 +160,22 @@ void main() {
 
     // master'ı bir token şifrelemesinde kullan (kimliğini doğrulamak için)
     final tokenAad = bytes('token|1|t');
-    final tokenBlob = crypto.encrypt(plaintext: bytes('SEED'), key: master, aad: tokenAad);
+    final tokenBlob = crypto.encrypt(
+      plaintext: bytes('SEED'),
+      key: master,
+      aad: tokenAad,
+    );
 
-    final wrapped = crypto.wrapKey(keyToWrap: master, wrappingKey: kek, aad: aad);
-    final unwrapped = crypto.unwrapKey(blob: wrapped, wrappingKey: kek, aad: aad);
+    final wrapped = crypto.wrapKey(
+      keyToWrap: master,
+      wrappingKey: kek,
+      aad: aad,
+    );
+    final unwrapped = crypto.unwrapKey(
+      blob: wrapped,
+      wrappingKey: kek,
+      aad: aad,
+    );
 
     // unwrapped, master ile aynı → master'ın şifrelediği token'ı çözebilmeli.
     final out = crypto.decrypt(blob: tokenBlob, key: unwrapped, aad: tokenAad);

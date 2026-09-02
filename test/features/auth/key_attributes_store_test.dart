@@ -12,25 +12,26 @@ import 'package:project_auth/features/auth/data/key_attributes_store.dart';
 class FakeSecureStorage implements FlutterSecureStorage {
   final Map<String, String> data = {};
   @override
-  Future<String?> read(
-          {required String key,
-          dynamic iOptions,
-          dynamic aOptions,
-          dynamic lOptions,
-          dynamic webOptions,
-          dynamic mOptions,
-          dynamic wOptions}) async =>
-      data[key];
+  Future<String?> read({
+    required String key,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async => data[key];
   @override
-  Future<void> write(
-      {required String key,
-      required String? value,
-      dynamic iOptions,
-      dynamic aOptions,
-      dynamic lOptions,
-      dynamic webOptions,
-      dynamic mOptions,
-      dynamic wOptions}) async {
+  Future<void> write({
+    required String key,
+    required String? value,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async {
     if (value == null) {
       data.remove(key);
     } else {
@@ -39,14 +40,15 @@ class FakeSecureStorage implements FlutterSecureStorage {
   }
 
   @override
-  Future<void> delete(
-      {required String key,
-      dynamic iOptions,
-      dynamic aOptions,
-      dynamic lOptions,
-      dynamic webOptions,
-      dynamic mOptions,
-      dynamic wOptions}) async {
+  Future<void> delete({
+    required String key,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async {
     data.remove(key);
   }
 
@@ -106,16 +108,19 @@ void main() {
     expect(await store.read(), isNull);
   });
 
-  test('storage raw yalnız şifreli blob tutar (parola/mnemonic sızmaz)', () async {
-    await store.write(_attrs());
-    final raw = storage.data[KeyAttributesStore.storageKey]!;
-    // KeyAttributes yalnız KDF param + şifreli blob içerir; parola/mnemonic
-    // hiçbir zaman buraya yazılmaz. Raw, base64 blob + sayılardan ibaret.
-    expect(raw.contains('parola'), isFalse);
-    expect(raw.contains('mnemonic'), isFalse);
-    // Beklenen alanlar mevcut (şema).
-    expect(raw.contains('salt'), isTrue);
-    expect(raw.contains('emk'), isTrue);
-    expect(raw.contains('remk'), isTrue);
-  });
+  test(
+    'storage raw yalnız şifreli blob tutar (parola/mnemonic sızmaz)',
+    () async {
+      await store.write(_attrs());
+      final raw = storage.data[KeyAttributesStore.storageKey]!;
+      // KeyAttributes yalnız KDF param + şifreli blob içerir; parola/mnemonic
+      // hiçbir zaman buraya yazılmaz. Raw, base64 blob + sayılardan ibaret.
+      expect(raw.contains('parola'), isFalse);
+      expect(raw.contains('mnemonic'), isFalse);
+      // Beklenen alanlar mevcut (şema).
+      expect(raw.contains('salt'), isTrue);
+      expect(raw.contains('emk'), isTrue);
+      expect(raw.contains('remk'), isTrue);
+    },
+  );
 }

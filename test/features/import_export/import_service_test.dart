@@ -6,7 +6,6 @@
 /// passes neither and gets the real ones.
 library;
 
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:project_auth/core/otp/otp_account.dart';
 import 'package:project_auth/features/import_export/domain/backup_service.dart';
@@ -65,54 +64,67 @@ void main() {
   ImportService service({
     List<ImportParser>? parsers,
     ImportSource detected = ImportSource.aegis,
-  }) =>
-      ImportService(
-        parsers: parsers,
-        backup: backup,
-        detector: (_) => detected,
-        keyOf: _testKey,
-      );
+  }) => ImportService(
+    parsers: parsers,
+    backup: backup,
+    detector: (_) => detected,
+    keyOf: _testKey,
+  );
 
   const anyJson = '{"db":{},"header":{}}';
 
   group('decodeRoot / detect', () {
     test('detect returns the detector verdict', () {
-      expect(service(detected: ImportSource.twofas).detect(anyJson),
-          ImportSource.twofas);
+      expect(
+        service(detected: ImportSource.twofas).detect(anyJson),
+        ImportSource.twofas,
+      );
     });
 
     test('unknown is returned, not thrown — the caller decides', () {
-      expect(service(detected: ImportSource.unknown).detect(anyJson),
-          ImportSource.unknown);
+      expect(
+        service(detected: ImportSource.unknown).detect(anyJson),
+        ImportSource.unknown,
+      );
     });
 
     test('not JSON → MalformedImportFileException', () {
-      expect(() => service().detect('<xml/>'),
-          throwsA(isA<MalformedImportFileException>()));
+      expect(
+        () => service().detect('<xml/>'),
+        throwsA(isA<MalformedImportFileException>()),
+      );
     });
 
     test('a JSON array root → MalformedImportFileException', () {
-      expect(() => service().detect('[1,2,3]'),
-          throwsA(isA<MalformedImportFileException>()));
+      expect(
+        () => service().detect('[1,2,3]'),
+        throwsA(isA<MalformedImportFileException>()),
+      );
     });
 
     test('a JSON scalar root → MalformedImportFileException', () {
-      expect(() => service().detect('42'),
-          throwsA(isA<MalformedImportFileException>()));
+      expect(
+        () => service().detect('42'),
+        throwsA(isA<MalformedImportFileException>()),
+      );
     });
 
     test('over maxBytes → ImportFileTooLargeException (before decoding)', () {
       final huge = '{"pad":"${'x' * (ImportService.maxBytes + 10)}"}';
-      expect(() => service().detect(huge),
-          throwsA(isA<ImportFileTooLargeException>()));
+      expect(
+        () => service().detect(huge),
+        throwsA(isA<ImportFileTooLargeException>()),
+      );
     });
 
     test('the size limit counts UTF-8 bytes, not UTF-16 code units', () {
       // 'ş' is 2 bytes in UTF-8 but a single code unit — a file just under the
       // limit by code units can still be over it by bytes.
       final padding = 'ş' * (ImportService.maxBytes ~/ 2);
-      expect(() => service().detect('{"pad":"$padding"}'),
-          throwsA(isA<ImportFileTooLargeException>()));
+      expect(
+        () => service().detect('{"pad":"$padding"}'),
+        throwsA(isA<ImportFileTooLargeException>()),
+      );
     });
 
     test('preview enforces the same size limit', () async {
@@ -127,19 +139,22 @@ void main() {
   group('preview — routing', () {
     test('unknown format → UnsupportedImportFormatException', () async {
       await expectLater(
-        service(detected: ImportSource.unknown)
-            .preview(raw: anyJson, existing: const []),
+        service(
+          detected: ImportSource.unknown,
+        ).preview(raw: anyJson, existing: const []),
         throwsA(isA<UnsupportedImportFormatException>()),
       );
     });
 
-    test('a detected format with no parser wired → UnsupportedImportFormat',
-        () async {
-      await expectLater(
-        service(parsers: const []).preview(raw: anyJson, existing: const []),
-        throwsA(isA<UnsupportedImportFormatException>()),
-      );
-    });
+    test(
+      'a detected format with no parser wired → UnsupportedImportFormat',
+      () async {
+        await expectLater(
+          service(parsers: const []).preview(raw: anyJson, existing: const []),
+          throwsA(isA<UnsupportedImportFormatException>()),
+        );
+      },
+    );
 
     test('picks the parser whose source matches the detector', () async {
       final preview = await service(
@@ -156,65 +171,89 @@ void main() {
 
     test('a parser error propagates out of the parse isolate', () async {
       await expectLater(
-        service(parsers: [
-          const _StubParser(ImportSource.aegis,
-              error: EncryptedSourceException(ImportSource.aegis)),
-        ]).preview(raw: anyJson, existing: const []),
+        service(
+          parsers: [
+            const _StubParser(
+              ImportSource.aegis,
+              error: EncryptedSourceException(ImportSource.aegis),
+            ),
+          ],
+        ).preview(raw: anyJson, existing: const []),
         throwsA(isA<EncryptedSourceException>()),
       );
     });
 
-    test('zero parsed accounts AND zero skips → EmptyImportException', () async {
-      await expectLater(
-        service(parsers: [const _StubParser(ImportSource.aegis)])
-            .preview(raw: anyJson, existing: const []),
-        throwsA(isA<EmptyImportException>()),
-      );
-    });
+    test(
+      'zero parsed accounts AND zero skips → EmptyImportException',
+      () async {
+        await expectLater(
+          service(
+            parsers: [const _StubParser(ImportSource.aegis)],
+          ).preview(raw: anyJson, existing: const []),
+          throwsA(isA<EmptyImportException>()),
+        );
+      },
+    );
 
-    test('zero parsed accounts but skips present → preview with the skips',
-        () async {
-      final preview = await service(parsers: [
-        const _StubParser(
-          ImportSource.aegis,
-          skipped: [SkippedEntry(reason: SkipReason.unsupportedType)],
-        ),
-      ]).preview(raw: anyJson, existing: const []);
-      expect(preview.toAdd, isEmpty);
-      expect(preview.skipped, hasLength(1));
-    });
-
-    test('the parser\'s own skipped entries survive into the preview', () async {
-      final preview = await service(parsers: [
-        _StubParser(
-          ImportSource.aegis,
-          accounts: [_acc('a')],
-          skipped: const [
-            SkippedEntry(reason: SkipReason.unsupportedType, label: 'Yandex'),
+    test(
+      'zero parsed accounts but skips present → preview with the skips',
+      () async {
+        final preview = await service(
+          parsers: [
+            const _StubParser(
+              ImportSource.aegis,
+              skipped: [SkippedEntry(reason: SkipReason.unsupportedType)],
+            ),
           ],
-        ),
-      ]).preview(raw: anyJson, existing: const []);
+        ).preview(raw: anyJson, existing: const []);
+        expect(preview.toAdd, isEmpty);
+        expect(preview.skipped, hasLength(1));
+      },
+    );
 
-      expect(preview.addCount, 1);
-      expect(preview.skippedCount, 1);
-      expect(preview.duplicateCount, 0);
-      expect(preview.skipped.single.label, 'Yandex');
-    });
+    test(
+      'the parser\'s own skipped entries survive into the preview',
+      () async {
+        final preview = await service(
+          parsers: [
+            _StubParser(
+              ImportSource.aegis,
+              accounts: [_acc('a')],
+              skipped: const [
+                SkippedEntry(
+                  reason: SkipReason.unsupportedType,
+                  label: 'Yandex',
+                ),
+              ],
+            ),
+          ],
+        ).preview(raw: anyJson, existing: const []);
+
+        expect(preview.addCount, 1);
+        expect(preview.skippedCount, 1);
+        expect(preview.duplicateCount, 0);
+        expect(preview.skipped.single.label, 'Yandex');
+      },
+    );
   });
 
   group('dedupe', () {
-    ImportPreview run(List<OtpAccount> parsed, List<OtpAccount> existing,
-            {ImportSource source = ImportSource.aegis,
-            List<SkippedEntry> skipped = const []}) =>
-        ImportService.dedupeSync(
-          ParsedImport(source: source, accounts: parsed, skipped: skipped),
-          existing: existing,
-          keyOf: _testKey,
-        );
+    ImportPreview run(
+      List<OtpAccount> parsed,
+      List<OtpAccount> existing, {
+      ImportSource source = ImportSource.aegis,
+      List<SkippedEntry> skipped = const [],
+    }) => ImportService.dedupeSync(
+      ParsedImport(source: source, accounts: parsed, skipped: skipped),
+      existing: existing,
+      keyOf: _testKey,
+    );
 
     test('an account already in the vault → alreadyInVault', () {
-      final preview = run([_acc('a', issuer: 'GitHub')],
-          [_acc('a', issuer: 'GitHub')]);
+      final preview = run(
+        [_acc('a', issuer: 'GitHub')],
+        [_acc('a', issuer: 'GitHub')],
+      );
       expect(preview.toAdd, isEmpty);
       expect(preview.skipped.single.reason, SkipReason.alreadyInVault);
       expect(preview.skipped.single.label, 'GitHub (a)');
@@ -229,8 +268,10 @@ void main() {
     });
 
     test('the comparison is case-insensitive on issuer and account name', () {
-      final preview =
-          run([_acc('A', issuer: 'GITHUB')], [_acc('a', issuer: 'github')]);
+      final preview = run(
+        [_acc('A', issuer: 'GITHUB')],
+        [_acc('a', issuer: 'github')],
+      );
       expect(preview.toAdd, isEmpty);
     });
 
@@ -246,28 +287,32 @@ void main() {
     });
 
     test('a truly empty parse result → EmptyImportException', () {
-      expect(() => run(const [], const []),
-          throwsA(isA<EmptyImportException>()));
+      expect(
+        () => run(const [], const []),
+        throwsA(isA<EmptyImportException>()),
+      );
     });
 
-    test('0 accounts but skipped entries → preview, NOT EmptyImportException',
-        () {
-      // Every entry was dropped by the parser. Telling the user WHICH ones and
-      // why beats a bare "nothing to import" (review follow-up). `toAdd` is
-      // empty, so the UI keeps the confirm button disabled.
-      final preview = run(
-        const [],
-        const [],
-        skipped: const [
-          SkippedEntry(reason: SkipReason.unsupportedType, label: 'Mystery'),
-          SkippedEntry(reason: SkipReason.invalidSecret, label: 'Broken'),
-        ],
-      );
-      expect(preview.toAdd, isEmpty);
-      expect(preview.skipped, hasLength(2));
-      expect(preview.skippedCount, 2);
-      expect(preview.duplicateCount, 0);
-    });
+    test(
+      '0 accounts but skipped entries → preview, NOT EmptyImportException',
+      () {
+        // Every entry was dropped by the parser. Telling the user WHICH ones and
+        // why beats a bare "nothing to import" (review follow-up). `toAdd` is
+        // empty, so the UI keeps the confirm button disabled.
+        final preview = run(
+          const [],
+          const [],
+          skipped: const [
+            SkippedEntry(reason: SkipReason.unsupportedType, label: 'Mystery'),
+            SkippedEntry(reason: SkipReason.invalidSecret, label: 'Broken'),
+          ],
+        );
+        expect(preview.toAdd, isEmpty);
+        expect(preview.skipped, hasLength(2));
+        expect(preview.skippedCount, 2);
+        expect(preview.duplicateCount, 0);
+      },
+    );
 
     test('parser skips are counted separately from duplicates', () {
       final preview = run(
@@ -285,10 +330,16 @@ void main() {
       final incoming = _acc('original', issuer: 'Old', id: existing.id);
 
       // Foreign source: ids are freshly generated, so only the key matters.
-      expect(run([incoming], [existing], source: ImportSource.aegis).addCount, 1);
+      expect(
+        run([incoming], [existing], source: ImportSource.aegis).addCount,
+        1,
+      );
       // Our backup preserves ids → the same id is the same token.
-      final backupRun =
-          run([incoming], [existing], source: ImportSource.projectauthBackup);
+      final backupRun = run(
+        [incoming],
+        [existing],
+        source: ImportSource.projectauthBackup,
+      );
       expect(backupRun.addCount, 0);
       expect(backupRun.skipped.single.reason, SkipReason.alreadyInVault);
     });
@@ -296,8 +347,11 @@ void main() {
     test('a repeated id inside a backup file → duplicateInFile', () {
       final a = _acc('a', secret: _secretA, id: 'fixed-id');
       final b = _acc('b', secret: _secretB, id: 'fixed-id');
-      final preview =
-          run([a, b], const [], source: ImportSource.projectauthBackup);
+      final preview = run(
+        [a, b],
+        const [],
+        source: ImportSource.projectauthBackup,
+      );
       expect(preview.addCount, 1);
       expect(preview.skipped.single.reason, SkipReason.duplicateInFile);
     });
@@ -306,45 +360,54 @@ void main() {
       final preview = run([_acc('a')], const []);
       expect(() => preview.toAdd.add(_acc('b')), throwsUnsupportedError);
       expect(
-          () => preview.skipped
-              .add(const SkippedEntry(reason: SkipReason.invalidFields)),
-          throwsUnsupportedError);
+        () => preview.skipped.add(
+          const SkippedEntry(reason: SkipReason.invalidFields),
+        ),
+        throwsUnsupportedError,
+      );
     });
   });
 
   // --- Audit A3: entry ceiling (accounts + skipped) ---
   group('entry ceiling', () {
     ImportPreview run(int accounts, int skipped) => ImportService.dedupeSync(
-          ParsedImport(
-            source: ImportSource.aegis,
-            accounts: [for (var i = 0; i < accounts; i++) _acc('a$i')],
-            skipped: [
-              for (var i = 0; i < skipped; i++)
-                SkippedEntry(reason: SkipReason.unsupportedType, label: 's$i'),
-            ],
-          ),
-          existing: const [],
-          keyOf: _testKey,
-        );
+      ParsedImport(
+        source: ImportSource.aegis,
+        accounts: [for (var i = 0; i < accounts; i++) _acc('a$i')],
+        skipped: [
+          for (var i = 0; i < skipped; i++)
+            SkippedEntry(reason: SkipReason.unsupportedType, label: 's$i'),
+        ],
+      ),
+      existing: const [],
+      keyOf: _testKey,
+    );
 
     test('exactly maxEntries is accepted', () {
-      expect(run(ImportService.maxEntries, 0).addCount, ImportService.maxEntries);
+      expect(
+        run(ImportService.maxEntries, 0).addCount,
+        ImportService.maxEntries,
+      );
     });
 
     test('one entry past the ceiling → ImportTooManyEntriesException', () {
       expect(
         () => run(ImportService.maxEntries + 1, 0),
-        throwsA(isA<ImportTooManyEntriesException>()
-            .having((e) => e.entries, 'entries', ImportService.maxEntries + 1)
-            .having((e) => e.max, 'max', ImportService.maxEntries)),
+        throwsA(
+          isA<ImportTooManyEntriesException>()
+              .having((e) => e.entries, 'entries', ImportService.maxEntries + 1)
+              .having((e) => e.max, 'max', ImportService.maxEntries),
+        ),
       );
     });
 
     test('skipped entries count towards the ceiling too', () {
       // A file made of nothing but unmappable rows renders one preview row
       // each, so it must not sail past the limit.
-      expect(() => run(1, ImportService.maxEntries),
-          throwsA(isA<ImportTooManyEntriesException>()));
+      expect(
+        () => run(1, ImportService.maxEntries),
+        throwsA(isA<ImportTooManyEntriesException>()),
+      );
     });
 
     test('the ceiling matches the scanned Google path', () {
@@ -356,7 +419,8 @@ void main() {
         for (var i = 0; i < ImportService.maxEntries + 1; i++) _acc('a$i'),
       ];
       final svc = service(
-          parsers: [_StubParser(ImportSource.aegis, accounts: tooMany)]);
+        parsers: [_StubParser(ImportSource.aegis, accounts: tooMany)],
+      );
       await expectLater(
         svc.preview(raw: anyJson, existing: const []),
         throwsA(isA<ImportTooManyEntriesException>()),
@@ -365,7 +429,10 @@ void main() {
 
     test('the message carries no entry content (secret safety)', () {
       const e = ImportTooManyEntriesException(2000, 1024);
-      expect(e.toString(), 'ImportTooManyEntriesException: 2000 entries exceeds 1024');
+      expect(
+        e.toString(),
+        'ImportTooManyEntriesException: 2000 entries exceeds 1024',
+      );
     });
   });
 
@@ -379,8 +446,9 @@ void main() {
       // rewrite these are two different keys and the token lands twice.
       final preview = ImportService.dedupeSync(
         ParsedImport(
-            source: ImportSource.aegis,
-            accounts: [_acc('a', issuer: 'GitHub')]),
+          source: ImportSource.aegis,
+          accounts: [_acc('a', issuer: 'GitHub')],
+        ),
         existing: [_acc('a', issuer: 'github.com')],
         keyOf: _testKey,
         canonicalize: alias,
@@ -393,21 +461,26 @@ void main() {
         'canonical issuer', () {
       final preview = ImportService.dedupeSync(
         ParsedImport(
-            source: ImportSource.aegis,
-            accounts: [_acc('a', issuer: 'github.com')]),
+          source: ImportSource.aegis,
+          accounts: [_acc('a', issuer: 'github.com')],
+        ),
         existing: const [],
         keyOf: _testKey,
         canonicalize: alias,
       );
-      expect(preview.toAdd.single.issuer, 'GitHub',
-          reason: 'what the preview shows is what addAll will store');
+      expect(
+        preview.toAdd.single.issuer,
+        'GitHub',
+        reason: 'what the preview shows is what addAll will store',
+      );
     });
 
     test('without the rewrite the same pair is NOT deduped (regression)', () {
       final preview = ImportService.dedupeSync(
         ParsedImport(
-            source: ImportSource.aegis,
-            accounts: [_acc('a', issuer: 'GitHub')]),
+          source: ImportSource.aegis,
+          accounts: [_acc('a', issuer: 'GitHub')],
+        ),
         existing: [_acc('a', issuer: 'github.com')],
         keyOf: _testKey,
       );
@@ -427,8 +500,9 @@ void main() {
       );
       final preview = svc.previewParsed(
         ParsedImport(
-            source: ImportSource.googleAuth,
-            accounts: [_acc('a', issuer: 'github.com')]),
+          source: ImportSource.googleAuth,
+          accounts: [_acc('a', issuer: 'github.com')],
+        ),
         existing: [_acc('a', issuer: 'GitHub')],
       );
       expect(resolved, 1, reason: 'a refreshed catalog is picked up next call');
@@ -486,22 +560,30 @@ void main() {
       );
       expect(preview.source, ImportSource.projectauthBackup);
       expect(preview.toAdd.map((a) => a.accountName), ['a', 'b']);
-      expect(preview.toAdd.first.id, exported.first.id,
-          reason: 'our own backup preserves ids');
-    });
-
-    test('a missing password is a programming error (detect() comes first)',
-        () async {
-      await expectLater(
-        backupService().preview(raw: backupJson, existing: const []),
-        throwsA(isA<ArgumentError>()),
+      expect(
+        preview.toAdd.first.id,
+        exported.first.id,
+        reason: 'our own backup preserves ids',
       );
     });
 
+    test(
+      'a missing password is a programming error (detect() comes first)',
+      () async {
+        await expectLater(
+          backupService().preview(raw: backupJson, existing: const []),
+          throwsA(isA<ArgumentError>()),
+        );
+      },
+    );
+
     test('an empty password is treated as missing', () async {
       await expectLater(
-        backupService()
-            .preview(raw: backupJson, existing: const [], backupPassword: ''),
+        backupService().preview(
+          raw: backupJson,
+          existing: const [],
+          backupPassword: '',
+        ),
         throwsA(isA<ArgumentError>()),
       );
     });
@@ -509,30 +591,38 @@ void main() {
     test('a wrong password surfaces as WrongBackupPasswordException', () async {
       await expectLater(
         backupService().preview(
-            raw: backupJson,
-            existing: const [],
-            backupPassword: 'Baska-Parola12!'),
+          raw: backupJson,
+          existing: const [],
+          backupPassword: 'Baska-Parola12!',
+        ),
         throwsA(isA<WrongBackupPasswordException>()),
       );
     });
 
-    test('restoring over the same vault reports everything as already present',
-        () async {
-      final preview = await backupService().preview(
-        raw: backupJson,
-        existing: exported,
-        backupPassword: _password,
-      );
-      expect(preview.addCount, 0);
-      expect(preview.duplicateCount, 2);
-    });
+    test(
+      'restoring over the same vault reports everything as already present',
+      () async {
+        final preview = await backupService().preview(
+          raw: backupJson,
+          existing: exported,
+          backupPassword: _password,
+        );
+        expect(preview.addCount, 0);
+        expect(preview.duplicateCount, 2);
+      },
+    );
 
     test('a backup of an empty vault → EmptyImportException', () async {
-      final empty =
-          await backup.export(accounts: const [], password: _password);
+      final empty = await backup.export(
+        accounts: const [],
+        password: _password,
+      );
       await expectLater(
-        backupService()
-            .preview(raw: empty, existing: const [], backupPassword: _password),
+        backupService().preview(
+          raw: empty,
+          existing: const [],
+          backupPassword: _password,
+        ),
         throwsA(isA<EmptyImportException>()),
       );
     });
@@ -543,13 +633,14 @@ void main() {
   // pipeline here, so `previewParsed` must apply exactly the dedupe contract
   // `preview` applies — synchronously, with no isolate and no parser wired.
   group('previewParsed — the QR entry point', () {
-    ParsedImport parsed(List<OtpAccount> accounts,
-            {List<SkippedEntry> skipped = const []}) =>
-        ParsedImport(
-          source: ImportSource.googleAuth,
-          accounts: accounts,
-          skipped: skipped,
-        );
+    ParsedImport parsed(
+      List<OtpAccount> accounts, {
+      List<SkippedEntry> skipped = const [],
+    }) => ParsedImport(
+      source: ImportSource.googleAuth,
+      accounts: accounts,
+      skipped: skipped,
+    );
 
     test('dedupes against the vault and keeps the source', () {
       final preview = service().previewParsed(
@@ -576,12 +667,16 @@ void main() {
 
     test('the parser\'s skipped entries survive into the preview', () {
       final preview = service().previewParsed(
-        parsed([_acc('a')], skipped: const [
-          SkippedEntry(
+        parsed(
+          [_acc('a')],
+          skipped: const [
+            SkippedEntry(
               reason: SkipReason.unsupportedType,
               label: 'Mystery',
-              detail: 'algorithm=MD5'),
-        ]),
+              detail: 'algorithm=MD5',
+            ),
+          ],
+        ),
         existing: const [],
       );
       expect(preview.addCount, 1);
@@ -590,15 +685,20 @@ void main() {
     });
 
     test('nothing scanned at all → EmptyImportException', () {
-      expect(() => service().previewParsed(parsed(const []), existing: const []),
-          throwsA(isA<EmptyImportException>()));
+      expect(
+        () => service().previewParsed(parsed(const []), existing: const []),
+        throwsA(isA<EmptyImportException>()),
+      );
     });
 
     test('all entries skipped is NOT empty — the user still sees why', () {
       final preview = service().previewParsed(
-        parsed(const [], skipped: const [
-          SkippedEntry(reason: SkipReason.invalidFields, label: 'Broken'),
-        ]),
+        parsed(
+          const [],
+          skipped: const [
+            SkippedEntry(reason: SkipReason.invalidFields, label: 'Broken'),
+          ],
+        ),
         existing: const [],
       );
       expect(preview.toAdd, isEmpty);
@@ -617,8 +717,10 @@ void main() {
 
     test('needs no parser wired and runs synchronously', () {
       final bare = ImportService(backup: backup, keyOf: _testKey);
-      final preview =
-          bare.previewParsed(parsed([_acc('a')]), existing: const []);
+      final preview = bare.previewParsed(
+        parsed([_acc('a')]),
+        existing: const [],
+      );
       expect(preview.addCount, 1);
     });
   });

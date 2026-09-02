@@ -14,7 +14,7 @@ import '../domain/sync_exceptions.dart';
 
 class SupabaseDeviceRepository implements DeviceRepository {
   SupabaseDeviceRepository(this._client, {DateTime Function()? now})
-      : _now = now ?? DateTime.now;
+    : _now = now ?? DateTime.now;
 
   final SupabaseClient _client;
   final DateTime Function() _now;
@@ -24,8 +24,11 @@ class SupabaseDeviceRepository implements DeviceRepository {
   String _nowIso() => _now().toUtc().toIso8601String();
 
   @override
-  Future<void> register(String uid,
-      {required String deviceId, String? name}) async {
+  Future<void> register(
+    String uid, {
+    required String deviceId,
+    String? name,
+  }) async {
     try {
       final row = <String, dynamic>{
         'user_id': uid,
@@ -78,12 +81,15 @@ class SupabaseDeviceRepository implements DeviceRepository {
   static DeviceRow parseRow(Map<String, dynamic> row) {
     final id = row['device_id'];
     if (id is! String) {
-      throw FormatException('devices.device_id String bekleniyordu (${id.runtimeType})');
+      throw FormatException(
+        'devices.device_id String bekleniyordu (${id.runtimeType})',
+      );
     }
     final createdRaw = row['created_at'];
     if (createdRaw is! String) {
       throw FormatException(
-          'devices.created_at String bekleniyordu (${createdRaw.runtimeType})');
+        'devices.created_at String bekleniyordu (${createdRaw.runtimeType})',
+      );
     }
     final created = DateTime.tryParse(createdRaw);
     if (created == null) {
@@ -94,7 +100,9 @@ class SupabaseDeviceRepository implements DeviceRepository {
     return DeviceRow(
       deviceId: id,
       name: name is String ? name : null,
-      lastSeen: lastSeenRaw is String ? DateTime.tryParse(lastSeenRaw)?.toUtc() : null,
+      lastSeen: lastSeenRaw is String
+          ? DateTime.tryParse(lastSeenRaw)?.toUtc()
+          : null,
       createdAt: created.toUtc(),
     );
   }
@@ -105,7 +113,10 @@ class SupabaseDeviceRepository implements DeviceRepository {
     if (e is AuthRetryableFetchException) return const SyncNetworkError();
     if (e is PostgrestException) {
       final code = e.code ?? '';
-      if (code == '42501' || code == 'PGRST301' || code == '401' || code == '403') {
+      if (code == '42501' ||
+          code == 'PGRST301' ||
+          code == '401' ||
+          code == '403') {
         return const SyncPermissionDenied();
       }
       return SyncUnknownError('PostgREST ${e.code ?? ''}: ${e.message}');

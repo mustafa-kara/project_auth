@@ -14,12 +14,12 @@ Map<String, dynamic> _fixture(String name) =>
 
 /// Minimal 2FAS envelope around [services].
 Map<String, dynamic> _export(List<Object?> services) => {
-      'services': services,
-      'groups': <Object?>[],
-      'updatedAt': 1699999999500,
-      'schemaVersion': 4,
-      'appOrigin': 'android',
-    };
+  'services': services,
+  'groups': <Object?>[],
+  'updatedAt': 1699999999500,
+  'schemaVersion': 4,
+  'appOrigin': 'android',
+};
 
 Map<String, dynamic> _service({
   String name = 'Acme',
@@ -33,8 +33,7 @@ Map<String, dynamic> _service({
     'algorithm': 'SHA1',
     'tokenType': 'TOTP',
   },
-}) =>
-    {'name': name, 'secret': secret, 'otp': otp};
+}) => {'name': name, 'secret': secret, 'otp': otp};
 
 void main() {
   const parser = TwoFasParser();
@@ -123,37 +122,42 @@ void main() {
   group('groups → tags', () {
     /// A 2FAS envelope with an explicit root `groups` index.
     Map<String, dynamic> exportWithGroups(
-            List<Object?> groups, List<Object?> services) =>
-        {
-          'services': services,
-          'groups': groups,
-          'updatedAt': 1699999999500,
-          'schemaVersion': 4,
-          'appOrigin': 'android',
-        };
+      List<Object?> groups,
+      List<Object?> services,
+    ) => {
+      'services': services,
+      'groups': groups,
+      'updatedAt': 1699999999500,
+      'schemaVersion': 4,
+      'appOrigin': 'android',
+    };
 
-    Map<String, dynamic> group(String id, String name) =>
-        {'id': id, 'name': name, 'updatedAt': 1699999999500};
+    Map<String, dynamic> group(String id, String name) => {
+      'id': id,
+      'name': name,
+      'updatedAt': 1699999999500,
+    };
 
     List<String> tagsOf(Map<String, dynamic> export) =>
         parser.parse(export).accounts.single.tags;
 
     test('a service carries AT MOST one tag', () {
-      final export = exportWithGroups([
-        group('g1', 'Work'),
-        group('g2', 'Kişisel'),
-      ], [
-        {..._service(), 'groupId': 'g2'},
-      ]);
+      final export = exportWithGroups(
+        [group('g1', 'Work'), group('g2', 'Kişisel')],
+        [
+          {..._service(), 'groupId': 'g2'},
+        ],
+      );
       expect(tagsOf(export), ['Kişisel']);
     });
 
     test('the group id is trimmed before the lookup', () {
-      final export = exportWithGroups([
-        group('g1', 'Work'),
-      ], [
-        {..._service(), 'groupId': '  g1  '},
-      ]);
+      final export = exportWithGroups(
+        [group('g1', 'Work')],
+        [
+          {..._service(), 'groupId': '  g1  '},
+        ],
+      );
       expect(tagsOf(export), ['Work']);
     });
 
@@ -162,69 +166,83 @@ void main() {
     // so a `7` that fails to match a `"7"` cannot silently cost the token its
     // group. The NAME is not given the same tolerance: a number is not a label.
     test('an integer group id matches an integer groupId', () {
-      final export = exportWithGroups([
-        {'id': 7, 'name': 'Work'},
-      ], [
-        {..._service(), 'groupId': 7},
-      ]);
+      final export = exportWithGroups(
+        [
+          {'id': 7, 'name': 'Work'},
+        ],
+        [
+          {..._service(), 'groupId': 7},
+        ],
+      );
       expect(tagsOf(export), ['Work']);
     });
 
     test('an integer groupId matches a string group id', () {
-      final export = exportWithGroups([
-        group('7', 'Work'),
-      ], [
-        {..._service(), 'groupId': 7},
-      ]);
+      final export = exportWithGroups(
+        [group('7', 'Work')],
+        [
+          {..._service(), 'groupId': 7},
+        ],
+      );
       expect(tagsOf(export), ['Work']);
     });
 
     test('a string groupId matches an integer group id', () {
-      final export = exportWithGroups([
-        {'id': 7, 'name': 'Work'},
-      ], [
-        {..._service(), 'groupId': ' 7 '},
-      ]);
+      final export = exportWithGroups(
+        [
+          {'id': 7, 'name': 'Work'},
+        ],
+        [
+          {..._service(), 'groupId': ' 7 '},
+        ],
+      );
       expect(tagsOf(export), ['Work']);
     });
 
     test('a non-scalar groupId is still no group at all', () {
       for (final bad in <Object?>[true, <String>[], <String, Object?>{}]) {
-        final export = exportWithGroups([
-          {'id': 7, 'name': 'Work'},
-          group('true', 'Bool'),
-        ], [
-          {..._service(), 'groupId': bad},
-        ]);
+        final export = exportWithGroups(
+          [
+            {'id': 7, 'name': 'Work'},
+            group('true', 'Bool'),
+          ],
+          [
+            {..._service(), 'groupId': bad},
+          ],
+        );
         expect(tagsOf(export), isEmpty, reason: 'groupId: $bad');
       }
     });
 
     test('a numeric group NAME is still rejected', () {
-      final export = exportWithGroups([
-        {'id': 7, 'name': 7},
-      ], [
-        {..._service(), 'groupId': 7},
-      ]);
+      final export = exportWithGroups(
+        [
+          {'id': 7, 'name': 7},
+        ],
+        [
+          {..._service(), 'groupId': 7},
+        ],
+      );
       expect(tagsOf(export), isEmpty);
     });
 
     test('a 40-character group name is clipped to 32 runes', () {
-      final export = exportWithGroups([
-        group('g1', 'g' * 40),
-      ], [
-        {..._service(), 'groupId': 'g1'},
-      ]);
+      final export = exportWithGroups(
+        [group('g1', 'g' * 40)],
+        [
+          {..._service(), 'groupId': 'g1'},
+        ],
+      );
       expect(tagsOf(export).single, 'g' * OtpAccount.maxTagRunes);
     });
 
     test('the first row wins a duplicated group id', () {
-      final export = exportWithGroups([
-        group('g1', 'Once'),
-        group('g1', 'Twice'),
-      ], [
-        {..._service(), 'groupId': 'g1'},
-      ]);
+      final export = exportWithGroups(
+        [group('g1', 'Once'), group('g1', 'Twice')],
+        [
+          {..._service(), 'groupId': 'g1'},
+        ],
+      );
       expect(tagsOf(export), ['Once']);
     });
 
@@ -250,47 +268,59 @@ void main() {
           'schemaVersion': 4,
         },
         // groupId is a number that matches nothing in the index
-        exportWithGroups([
-          group('g1', 'Work'),
-        ], [
-          {..._service(), 'groupId': 7},
-        ]),
+        exportWithGroups(
+          [group('g1', 'Work')],
+          [
+            {..._service(), 'groupId': 7},
+          ],
+        ),
         // groupId is a type that can never be an id
-        exportWithGroups([
-          group('g1', 'Work'),
-        ], [
-          {..._service(), 'groupId': <String>['g1']},
-        ]),
+        exportWithGroups(
+          [group('g1', 'Work')],
+          [
+            {
+              ..._service(),
+              'groupId': <String>['g1'],
+            },
+          ],
+        ),
         // group rows are missing halves / wrongly typed / unmatched
-        exportWithGroups([
-          {'id': 'g1'},
-          {'name': 'Work'},
-          {'id': 'g2', 'name': '  '},
-          {'id': 5, 'name': 'Work'},
-          'not a map',
-        ], [
-          {..._service(), 'groupId': 'g1'},
-        ]),
+        exportWithGroups(
+          [
+            {'id': 'g1'},
+            {'name': 'Work'},
+            {'id': 'g2', 'name': '  '},
+            {'id': 5, 'name': 'Work'},
+            'not a map',
+          ],
+          [
+            {..._service(), 'groupId': 'g1'},
+          ],
+        ),
       ];
 
       for (final export in broken) {
         final result = parser.parse(export);
         expect(result.accounts, hasLength(1));
         expect(result.accounts.single.tags, isEmpty);
-        expect(result.skipped, isEmpty,
-            reason: 'a group problem must never produce a SkippedEntry');
+        expect(
+          result.skipped,
+          isEmpty,
+          reason: 'a group problem must never produce a SkippedEntry',
+        );
       }
     });
 
     test('a skipped service stays skipped regardless of its group', () {
-      final export = exportWithGroups([
-        group('g1', 'Work'),
-      ], [
-        {
-          ..._service(otp: const {'tokenType': 'YANDEX'}),
-          'groupId': 'g1',
-        },
-      ]);
+      final export = exportWithGroups(
+        [group('g1', 'Work')],
+        [
+          {
+            ..._service(otp: const {'tokenType': 'YANDEX'}),
+            'groupId': 'g1',
+          },
+        ],
+      );
       final result = parser.parse(export);
       expect(result.accounts, isEmpty);
       expect(result.skipped.single.reason, SkipReason.unsupportedType);
@@ -387,8 +417,13 @@ void main() {
     test('servicesEncrypted → EncryptedSourceException(twofas)', () {
       expect(
         () => parser.parse(_fixture('twofas_encrypted.json')),
-        throwsA(isA<EncryptedSourceException>()
-            .having((e) => e.source, 'source', ImportSource.twofas)),
+        throwsA(
+          isA<EncryptedSourceException>().having(
+            (e) => e.source,
+            'source',
+            ImportSource.twofas,
+          ),
+        ),
       );
     });
 
@@ -397,22 +432,28 @@ void main() {
       expect(parser.parse(json).accounts, hasLength(1));
     });
 
-    test('a blank-only servicesEncrypted value is not treated as encrypted',
-        () {
-      final json = _export(const [])..['servicesEncrypted'] = '   ';
-      expect(parser.parse(json).accounts, isEmpty);
-    });
+    test(
+      'a blank-only servicesEncrypted value is not treated as encrypted',
+      () {
+        final json = _export(const [])..['servicesEncrypted'] = '   ';
+        expect(parser.parse(json).accounts, isEmpty);
+      },
+    );
 
     test('B2 — a non-empty "reference" alone flags an encrypted export', () {
       // 2FAS' own predicate: BackupContent.isEncrypted is
       // `reference.isNullOrBlank().not()`. An export can carry the reference
       // without servicesEncrypted; it is still password-protected.
-      final json = _export(const [])
-        ..['reference'] = 'Y2lwaGVy:c2FsdA==:aXY=';
+      final json = _export(const [])..['reference'] = 'Y2lwaGVy:c2FsdA==:aXY=';
       expect(
         () => parser.parse(json),
-        throwsA(isA<EncryptedSourceException>()
-            .having((e) => e.source, 'source', ImportSource.twofas)),
+        throwsA(
+          isA<EncryptedSourceException>().having(
+            (e) => e.source,
+            'source',
+            ImportSource.twofas,
+          ),
+        ),
       );
     });
 
@@ -449,9 +490,11 @@ void main() {
     });
 
     test('a service without an otp object still imports as TOTP', () {
-      final result = parser.parse(_export([
-        const {'name': 'Bare', 'secret': 'JBSWY3DPEHPK3PXP'},
-      ]));
+      final result = parser.parse(
+        _export([
+          const {'name': 'Bare', 'secret': 'JBSWY3DPEHPK3PXP'},
+        ]),
+      );
       final a = result.accounts.single;
       expect(a.type, OtpType.totp);
       expect(a.issuer, 'Bare');
@@ -461,28 +504,35 @@ void main() {
     });
 
     test('a missing root secret falls back to the otpauth link', () {
-      final result = parser.parse(_export([
-        const {
-          'name': 'Linked',
-          'otp': {
-            'account': 'linked@example.com',
-            'issuer': 'Linked',
-            'tokenType': 'TOTP',
-            'link':
-                'otpauth://totp/Linked:linked%40example.com?secret=GEZDGNBVGY3TQOJQ&issuer=Linked',
+      final result = parser.parse(
+        _export([
+          const {
+            'name': 'Linked',
+            'otp': {
+              'account': 'linked@example.com',
+              'issuer': 'Linked',
+              'tokenType': 'TOTP',
+              'link':
+                  'otpauth://totp/Linked:linked%40example.com?secret=GEZDGNBVGY3TQOJQ&issuer=Linked',
+            },
           },
-        },
-      ]));
+        ]),
+      );
       expect(result.accounts.single.secret, 'GEZDGNBVGY3TQOJQ');
     });
 
     test('a non-otpauth link is not used as a secret source', () {
-      final result = parser.parse(_export([
-        const {
-          'name': 'Linked',
-          'otp': {'tokenType': 'TOTP', 'link': 'https://example.com/?secret=X'},
-        },
-      ]));
+      final result = parser.parse(
+        _export([
+          const {
+            'name': 'Linked',
+            'otp': {
+              'tokenType': 'TOTP',
+              'link': 'https://example.com/?secret=X',
+            },
+          },
+        ]),
+      );
       expect(result.accounts, isEmpty);
       expect(result.skipped.single.reason, SkipReason.invalidSecret);
     });
@@ -493,8 +543,7 @@ void main() {
       expect(result.skipped.single.detail, isNot(contains('not-base32')));
     });
 
-    test('B1 — neither otp.issuer nor the service name can promote a TOTP',
-        () {
+    test('B1 — neither otp.issuer nor the service name can promote a TOTP', () {
       for (final otp in const [
         {
           'account': 'user',
@@ -512,8 +561,9 @@ void main() {
           'tokenType': 'TOTP',
         },
       ]) {
-        final result =
-            parser.parse(_export([_service(name: 'Steam', otp: otp)]));
+        final result = parser.parse(
+          _export([_service(name: 'Steam', otp: otp)]),
+        );
         final a = result.accounts.single;
         expect(a.type, OtpType.totp);
         expect(a.digits, 6);
@@ -523,41 +573,55 @@ void main() {
     test('HOTP still accepts the defensive "initialCounter" field name', () {
       // Not written by the official exporter (BackupService.Otp only has
       // `counter`); kept for third-party writers that claim the 2FAS shape.
-      final result = parser.parse(_export([
-        _service(otp: const {
-          'account': 'a',
-          'tokenType': 'HOTP',
-          'initialCounter': 12,
-        }),
-      ]));
+      final result = parser.parse(
+        _export([
+          _service(
+            otp: const {
+              'account': 'a',
+              'tokenType': 'HOTP',
+              'initialCounter': 12,
+            },
+          ),
+        ]),
+      );
       expect(result.accounts.single.type, OtpType.hotp);
       expect(result.accounts.single.counter, 12);
     });
 
     test('B3 — SHA224/SHA384/MD5 are unsupportedType, not invalidFields', () {
       for (final algorithm in const ['SHA224', 'sha-384', 'MD5']) {
-        final result = parser.parse(_export([
-          _service(otp: {
-            'account': 'a',
-            'tokenType': 'TOTP',
-            'algorithm': algorithm,
-          }),
-        ]));
+        final result = parser.parse(
+          _export([
+            _service(
+              otp: {
+                'account': 'a',
+                'tokenType': 'TOTP',
+                'algorithm': algorithm,
+              },
+            ),
+          ]),
+        );
         expect(result.accounts, isEmpty);
         expect(result.skipped.single.reason, SkipReason.unsupportedType);
-        expect(result.skipped.single.detail,
-            'algorithm=${algorithm.toUpperCase().replaceAll('-', '')}');
+        expect(
+          result.skipped.single.detail,
+          'algorithm=${algorithm.toUpperCase().replaceAll('-', '')}',
+        );
       }
     });
 
     test('B3 — an algorithm outside the 2FAS enum stays invalidFields', () {
-      final result = parser.parse(_export([
-        _service(otp: const {
-          'account': 'a',
-          'tokenType': 'TOTP',
-          'algorithm': 'BLAKE2B',
-        }),
-      ]));
+      final result = parser.parse(
+        _export([
+          _service(
+            otp: const {
+              'account': 'a',
+              'tokenType': 'TOTP',
+              'algorithm': 'BLAKE2B',
+            },
+          ),
+        ]),
+      );
       expect(result.skipped.single.reason, SkipReason.invalidFields);
       expect(result.skipped.single.detail, contains('BLAKE2B'));
     });
@@ -575,48 +639,63 @@ void main() {
         expect(result.skipped.single.detail, contains(field));
       });
 
-      final byName = parser.parse(_export([
-        _service(name: long, otp: const {'account': 'a', 'tokenType': 'TOTP'}),
-      ]));
+      final byName = parser.parse(
+        _export([
+          _service(
+            name: long,
+            otp: const {'account': 'a', 'tokenType': 'TOTP'},
+          ),
+        ]),
+      );
       expect(byName.accounts, isEmpty);
       expect(byName.skipped.single.detail, contains('name'));
     });
 
     test('B4 — the ceiling counts bytes, not code units', () {
-      final result = parser.parse(_export([
-        _service(otp: {'account': 'ş' * 300, 'tokenType': 'TOTP'}),
-      ]));
+      final result = parser.parse(
+        _export([
+          _service(otp: {'account': 'ş' * 300, 'tokenType': 'TOTP'}),
+        ]),
+      );
       expect(result.accounts, isEmpty);
       expect(result.skipped.single.reason, SkipReason.invalidFields);
 
-      final ok = parser.parse(_export([
-        _service(otp: {'account': 'ş' * 256, 'tokenType': 'TOTP'}),
-      ]));
+      final ok = parser.parse(
+        _export([
+          _service(otp: {'account': 'ş' * 256, 'tokenType': 'TOTP'}),
+        ]),
+      );
       expect(ok.accounts.single.accountName, 'ş' * 256);
     });
 
-    test('B4 — an oversized label is clamped before it reaches the preview',
-        () {
-      final result = parser.parse(_export([
-        _service(otp: {'account': 'C' * 5000, 'tokenType': 'TOTP'}),
-      ]));
-      final label = result.skipped.single.label!;
-      expect(label.length, lessThan(200));
-      expect(label, contains('…'));
-    });
+    test(
+      'B4 — an oversized label is clamped before it reaches the preview',
+      () {
+        final result = parser.parse(
+          _export([
+            _service(otp: {'account': 'C' * 5000, 'tokenType': 'TOTP'}),
+          ]),
+        );
+        final label = result.skipped.single.label!;
+        expect(label.length, lessThan(200));
+        expect(label, contains('…'));
+      },
+    );
 
     test('B6 — a redacted link secret gets a 2FAS-specific detail', () {
-      final result = parser.parse(_export([
-        const {
-          'name': 'Redacted',
-          'otp': {
-            'account': 'user',
-            'tokenType': 'TOTP',
-            'link':
-                'otpauth://totp/Redacted:user?secret=%5Bhidden%5D&issuer=X',
+      final result = parser.parse(
+        _export([
+          const {
+            'name': 'Redacted',
+            'otp': {
+              'account': 'user',
+              'tokenType': 'TOTP',
+              'link':
+                  'otpauth://totp/Redacted:user?secret=%5Bhidden%5D&issuer=X',
+            },
           },
-        },
-      ]));
+        ]),
+      );
       expect(result.accounts, isEmpty);
       final skip = result.skipped.single;
       expect(skip.reason, SkipReason.invalidSecret);
@@ -628,17 +707,23 @@ void main() {
     });
 
     test('tokenType is case-insensitive', () {
-      final result = parser.parse(_export([
-        _service(otp: const {'account': 'a', 'tokenType': 'steam'}),
-      ]));
+      final result = parser.parse(
+        _export([
+          _service(otp: const {'account': 'a', 'tokenType': 'steam'}),
+        ]),
+      );
       expect(result.accounts.single.type, OtpType.steam);
     });
 
     test('digits below and above the contract are rejected', () {
       for (final digits in const [5, 9]) {
-        final result = parser.parse(_export([
-          _service(otp: {'account': 'a', 'tokenType': 'TOTP', 'digits': digits}),
-        ]));
+        final result = parser.parse(
+          _export([
+            _service(
+              otp: {'account': 'a', 'tokenType': 'TOTP', 'digits': digits},
+            ),
+          ]),
+        );
         expect(result.accounts, isEmpty);
         expect(result.skipped.single.reason, SkipReason.invalidFields);
         expect(result.skipped.single.detail, contains('digits=$digits'));
@@ -647,86 +732,100 @@ void main() {
 
     test('period bounds 1 and 600 are accepted, 0 and 601 are rejected', () {
       for (final period in const [1, 600]) {
-        final result = parser.parse(_export([
-          _service(otp: {'account': 'a', 'tokenType': 'TOTP', 'period': period}),
-        ]));
+        final result = parser.parse(
+          _export([
+            _service(
+              otp: {'account': 'a', 'tokenType': 'TOTP', 'period': period},
+            ),
+          ]),
+        );
         expect(result.accounts.single.period, period);
       }
       for (final period in const [0, 601]) {
-        final result = parser.parse(_export([
-          _service(otp: {'account': 'a', 'tokenType': 'TOTP', 'period': period}),
-        ]));
+        final result = parser.parse(
+          _export([
+            _service(
+              otp: {'account': 'a', 'tokenType': 'TOTP', 'period': period},
+            ),
+          ]),
+        );
         expect(result.skipped.single.reason, SkipReason.invalidFields);
       }
     });
 
     test('numeric strings and integer-valued doubles are accepted', () {
-      final result = parser.parse(_export([
-        _service(otp: const {
-          'account': 'a',
-          'tokenType': 'TOTP',
-          'digits': '8',
-          'period': 60.0,
-        }),
-      ]));
+      final result = parser.parse(
+        _export([
+          _service(
+            otp: const {
+              'account': 'a',
+              'tokenType': 'TOTP',
+              'digits': '8',
+              'period': 60.0,
+            },
+          ),
+        ]),
+      );
       expect(result.accounts.single.digits, 8);
       expect(result.accounts.single.period, 60);
     });
 
     test('fractional numbers are rejected, never truncated', () {
-      final result = parser.parse(_export([
-        _service(otp: const {
-          'account': 'a',
-          'tokenType': 'TOTP',
-          'period': 30.5,
-        }),
-      ]));
+      final result = parser.parse(
+        _export([
+          _service(
+            otp: const {'account': 'a', 'tokenType': 'TOTP', 'period': 30.5},
+          ),
+        ]),
+      );
       expect(result.accounts, isEmpty);
       expect(result.skipped.single.reason, SkipReason.invalidFields);
       expect(result.skipped.single.detail, contains('period'));
     });
 
     test('steam keeps an in-range period but ignores an out-of-range one', () {
-      final kept = parser.parse(_export([
-        _service(otp: const {
-          'account': 'a',
-          'tokenType': 'STEAM',
-          'period': 45,
-        }),
-      ]));
+      final kept = parser.parse(
+        _export([
+          _service(
+            otp: const {'account': 'a', 'tokenType': 'STEAM', 'period': 45},
+          ),
+        ]),
+      );
       expect(kept.accounts.single.period, 45);
 
-      final fallback = parser.parse(_export([
-        _service(otp: const {
-          'account': 'a',
-          'tokenType': 'STEAM',
-          'period': 5000,
-        }),
-      ]));
+      final fallback = parser.parse(
+        _export([
+          _service(
+            otp: const {'account': 'a', 'tokenType': 'STEAM', 'period': 5000},
+          ),
+        ]),
+      );
       expect(fallback.accounts.single.period, 30);
       expect(fallback.accounts.single.digits, 5);
     });
 
     test('negative HOTP counter is rejected', () {
-      final result = parser.parse(_export([
-        _service(otp: const {
-          'account': 'a',
-          'tokenType': 'HOTP',
-          'counter': -1,
-        }),
-      ]));
+      final result = parser.parse(
+        _export([
+          _service(
+            otp: const {'account': 'a', 'tokenType': 'HOTP', 'counter': -1},
+          ),
+        ]),
+      );
       expect(result.accounts, isEmpty);
       expect(result.skipped.single.reason, SkipReason.invalidFields);
     });
 
     test('wrongly typed names do not crash label building', () {
-      final result = parser.parse(_export([
-        const {
-          'name': 7,
-          'secret': 'not-base32!!',
-          'otp': {'account': <String, dynamic>{}, 'tokenType': 'TOTP'},
-        },
-      ]));
+      final result = parser.parse(
+        _export([
+          const {
+            'name': 7,
+            'secret': 'not-base32!!',
+            'otp': {'account': <String, dynamic>{}, 'tokenType': 'TOTP'},
+          },
+        ]),
+      );
       expect(result.skipped.single.reason, SkipReason.invalidSecret);
       expect(result.skipped.single.label, isNull);
     });

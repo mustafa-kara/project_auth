@@ -106,13 +106,19 @@ class _SettingsPageState extends State<SettingsPage> {
         await vault.disableLiveSync();
       }
       if (mounted) setState(() => _liveSync = enable);
-      messenger.showSnackBar(SnackBar(
-          content: Text(enable
-              ? 'Canlı senkron açıldı'
-              : 'Canlı senkron kapatıldı (açılışta yine senkron olur)')));
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            enable
+                ? 'Canlı senkron açıldı'
+                : 'Canlı senkron kapatıldı (açılışta yine senkron olur)',
+          ),
+        ),
+      );
     } catch (_) {
       messenger.showSnackBar(
-          const SnackBar(content: Text('İşlem başarısız — tekrar dene')));
+        const SnackBar(content: Text('İşlem başarısız — tekrar dene')),
+      );
     } finally {
       if (mounted) setState(() => _liveBusy = false);
     }
@@ -126,7 +132,9 @@ class _SettingsPageState extends State<SettingsPage> {
       if (enable) {
         await cubit.enableBiometric();
         messenger.showSnackBar(
-          const SnackBar(content: Text('Biyometrik kilit açma etkinleştirildi')),
+          const SnackBar(
+            content: Text('Biyometrik kilit açma etkinleştirildi'),
+          ),
         );
       } else {
         await cubit.disableBiometric();
@@ -140,7 +148,9 @@ class _SettingsPageState extends State<SettingsPage> {
       );
     } on BiometricLockout {
       messenger.showSnackBar(
-        const SnackBar(content: Text('Biyometri kilitlendi — sonra tekrar dene')),
+        const SnackBar(
+          content: Text('Biyometri kilitlendi — sonra tekrar dene'),
+        ),
       );
     } catch (_) {
       messenger.showSnackBar(
@@ -153,10 +163,12 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final enrolled = context
-        .select<VaultLockCubit, bool>((c) => c.state.biometricEnrolled);
-    final deviceAvailable = context
-        .select<VaultLockCubit, bool>((c) => c.state.deviceBiometricAvailable);
+    final enrolled = context.select<VaultLockCubit, bool>(
+      (c) => c.state.biometricEnrolled,
+    );
+    final deviceAvailable = context.select<VaultLockCubit, bool>(
+      (c) => c.state.deviceBiometricAvailable,
+    );
 
     return Scaffold(
       appBar: AppBar(title: const Text('Ayarlar')),
@@ -171,11 +183,11 @@ class _SettingsPageState extends State<SettingsPage> {
                 // kapatmaya yönlendir; aksi halde availability durumuna göre açıklama.
                 enrolled && !deviceAvailable
                     ? 'Biyometri artık kullanılamıyor (cihaz ayarların değişmiş '
-                        'olabilir). Kapatıp gerekirse tekrar açabilirsin.'
+                          'olabilir). Kapatıp gerekirse tekrar açabilirsin.'
                     : deviceAvailable
-                        ? 'Vault\'u parola yerine biyometriyle aç. Master parola + '
-                            'recovery key her zaman çalışmaya devam eder.'
-                        : 'Bu cihazda güçlü biyometri (parmak izi / yüz) kullanılamıyor.',
+                    ? 'Vault\'u parola yerine biyometriyle aç. Master parola + '
+                          'recovery key her zaman çalışmaya devam eder.'
+                    : 'Bu cihazda güçlü biyometri (parmak izi / yüz) kullanılamıyor.',
               ),
               // AÇMA (kapalı→açık) yalnız cihaz uygunsa (yoksa enroll/read fail eder).
               // KAPATMA (açık→kapalı) availability'den BAĞIMSIZ — enrolled iken cihaz
@@ -185,8 +197,8 @@ class _SettingsPageState extends State<SettingsPage> {
               onChanged: _busy
                   ? null
                   : (enrolled || deviceAvailable)
-                      ? (v) => _toggleBiometric(v)
-                      : null,
+                  ? (v) => _toggleBiometric(v)
+                  : null,
             ),
             // enrolled ama cihaz uygun değil → "kullanılamıyor" rozeti (warning,
             // ikon+metin; color-not-only — settings.md §4/§10). Anahtar yine
@@ -222,15 +234,19 @@ class _SettingsPageState extends State<SettingsPage> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.info_outline,
-              size: 18, color: theme.colorScheme.onSurfaceVariant),
+          Icon(
+            Icons.info_outline,
+            size: 18,
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
           const SizedBox(width: Gap.sm),
           Expanded(
             child: Text(
               'Biyometri yalnız bir kısayoldur. Parolan ve kurtarma anahtarın '
               'her zaman çalışır.',
-              style: theme.textTheme.bodySmall
-                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
             ),
           ),
         ],
@@ -249,8 +265,9 @@ class _SettingsPageState extends State<SettingsPage> {
         padding: const EdgeInsets.fromLTRB(Gap.lg, Gap.lg, Gap.lg, Gap.sm),
         child: Text(
           'YEDEKLEME VE AKTARIM',
-          style: theme.textTheme.labelLarge
-              ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+          style: theme.textTheme.labelLarge?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
         ),
       ),
       ListTile(
@@ -263,7 +280,8 @@ class _SettingsPageState extends State<SettingsPage> {
         leading: const Icon(Icons.lock_outline),
         title: const Text('Şifreli yedek al'),
         subtitle: const Text(
-            'Tokenlarını ayrı bir parolayla şifrelenmiş dosyaya aktar'),
+          'Tokenlarını ayrı bir parolayla şifrelenmiş dosyaya aktar',
+        ),
         onTap: () => context.push(Routes.exportData),
       ),
     ];
@@ -281,8 +299,9 @@ class _SettingsPageState extends State<SettingsPage> {
         padding: const EdgeInsets.fromLTRB(Gap.lg, Gap.lg, Gap.lg, Gap.sm),
         child: Text(
           'YENİLİKLER',
-          style: theme.textTheme.labelLarge
-              ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+          style: theme.textTheme.labelLarge?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
         ),
       ),
       for (final a in items)

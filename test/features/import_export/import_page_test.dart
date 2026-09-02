@@ -31,7 +31,10 @@ import 'package:project_auth/features/vault/presentation/bloc/vault_cubit.dart';
 // --- Fakes ---
 
 OtpAccount _acc(String name) => OtpAccount(
-    secret: 'JBSWY3DPEHPK3PXP', type: OtpType.totp, accountName: name);
+  secret: 'JBSWY3DPEHPK3PXP',
+  type: OtpType.totp,
+  accountName: name,
+);
 
 class _FakeRepo implements VaultRepository {
   List<OtpAccount> stored = [];
@@ -99,8 +102,7 @@ class _FakeDocuments implements DocumentPort {
   Future<bool> saveJson({
     required String fileName,
     required Uint8List bytes,
-  }) async =>
-      true;
+  }) async => true;
 
   // Faz 5 Patch 3 — görüntüden okuma ScanPage'in yolu; burada kullanılmaz.
   @override
@@ -148,8 +150,7 @@ class _FakeImportService implements ImportService {
   ImportPreview previewParsed(
     ParsedImport parsed, {
     required List<OtpAccount> existing,
-  }) =>
-      throw UnimplementedError();
+  }) => throw UnimplementedError();
 
   @override
   BackupService get backup => throw UnimplementedError();
@@ -194,8 +195,9 @@ void main() {
   testWidgets('açılışta dosya seçme boş durumu gösterir', (tester) async {
     await _pumpPage(
       tester,
-      service: _FakeImportService(result: const ImportPreview(
-          source: ImportSource.aegis, toAdd: [])),
+      service: _FakeImportService(
+        result: const ImportPreview(source: ImportSource.aegis, toAdd: []),
+      ),
       documents: _FakeDocuments(),
       lock: lock,
     );
@@ -203,10 +205,13 @@ void main() {
     expect(find.text('Dosya seç'), findsOneWidget);
   });
 
-  testWidgets('dosya seçimi kilit muafiyetini açar VE kapatır (plan §3.2)',
-      (tester) async {
+  testWidgets('dosya seçimi kilit muafiyetini açar VE kapatır (plan §3.2)', (
+    tester,
+  ) async {
     final preview = ImportPreview(
-        source: ImportSource.aegis, toAdd: [_acc('a')]);
+      source: ImportSource.aegis,
+      toAdd: [_acc('a')],
+    );
     final docs = _FakeDocuments(document: _doc());
     await _pumpPage(
       tester,
@@ -223,13 +228,17 @@ void main() {
     expect(lock.ends, 1, reason: 'finally her yolda end çağırmalı');
   });
 
-  testWidgets('picker hata atsa bile kilit muafiyeti kapatılır', (tester) async {
+  testWidgets('picker hata atsa bile kilit muafiyeti kapatılır', (
+    tester,
+  ) async {
     final docs = _FakeDocuments(
-        pickError: const ImportFileTooLargeException(9000000, 8388608));
+      pickError: const ImportFileTooLargeException(9000000, 8388608),
+    );
     await _pumpPage(
       tester,
-      service: _FakeImportService(result: const ImportPreview(
-          source: ImportSource.aegis, toAdd: [])),
+      service: _FakeImportService(
+        result: const ImportPreview(source: ImportSource.aegis, toAdd: []),
+      ),
       documents: docs,
       lock: lock,
     );
@@ -242,21 +251,27 @@ void main() {
     expect(find.text('Dosya çok büyük (max 8 MB).'), findsOneWidget);
   });
 
-  testWidgets('önizleme: kaynak rozeti + sayılar render edilir', (tester) async {
+  testWidgets('önizleme: kaynak rozeti + sayılar render edilir', (
+    tester,
+  ) async {
     final preview = ImportPreview(
       source: ImportSource.twofas,
       toAdd: [_acc('a'), _acc('b')],
       skipped: const [
         SkippedEntry(reason: SkipReason.alreadyInVault, label: 'GitHub (me)'),
         SkippedEntry(
-            reason: SkipReason.unsupportedType,
-            label: 'Yandex (x)',
-            detail: 'yandex'),
+          reason: SkipReason.unsupportedType,
+          label: 'Yandex (x)',
+          detail: 'yandex',
+        ),
       ],
     );
     await _pumpPage(
       tester,
-      service: _FakeImportService(detected: ImportSource.twofas, result: preview),
+      service: _FakeImportService(
+        detected: ImportSource.twofas,
+        result: preview,
+      ),
       documents: _FakeDocuments(document: _doc()),
       lock: lock,
     );
@@ -271,16 +286,18 @@ void main() {
     expect(find.widgetWithText(FilledButton, 'İçe aktar'), findsOneWidget);
   });
 
-  testWidgets('atlananlar ExpansionTile\'da etiket + neden ile listelenir',
-      (tester) async {
+  testWidgets('atlananlar ExpansionTile\'da etiket + neden ile listelenir', (
+    tester,
+  ) async {
     final preview = ImportPreview(
       source: ImportSource.aegis,
       toAdd: [_acc('a')],
       skipped: const [
         SkippedEntry(
-            reason: SkipReason.unsupportedType,
-            label: 'Yandex (x)',
-            detail: 'yandex'),
+          reason: SkipReason.unsupportedType,
+          label: 'Yandex (x)',
+          detail: 'yandex',
+        ),
       ],
     );
     await _pumpPage(
@@ -301,14 +318,16 @@ void main() {
     expect(find.text('Desteklenmeyen token türü — yandex'), findsOneWidget);
   });
 
-  testWidgets('"İçe aktar" → VaultCubit.addAll çağrılır + SnackBar',
-      (tester) async {
+  testWidgets('"İçe aktar" → VaultCubit.addAll çağrılır + SnackBar', (
+    tester,
+  ) async {
     final toAdd = [_acc('a'), _acc('b')];
     final repo = _FakeRepo();
     final vault = await _pumpPage(
       tester,
       service: _FakeImportService(
-          result: ImportPreview(source: ImportSource.aegis, toAdd: toAdd)),
+        result: ImportPreview(source: ImportSource.aegis, toAdd: toAdd),
+      ),
       documents: _FakeDocuments(document: _doc()),
       lock: lock,
       repo: repo,
@@ -328,7 +347,8 @@ void main() {
     await _pumpPage(
       tester,
       service: _FakeImportService(
-          result: const ImportPreview(source: ImportSource.aegis, toAdd: [])),
+        result: const ImportPreview(source: ImportSource.aegis, toAdd: []),
+      ),
       documents: _FakeDocuments(document: _doc()),
       lock: lock,
     );
@@ -337,7 +357,8 @@ void main() {
     await tester.pumpAndSettle();
 
     final button = tester.widget<FilledButton>(
-        find.widgetWithText(FilledButton, 'İçe aktar'));
+      find.widgetWithText(FilledButton, 'İçe aktar'),
+    );
     expect(button.onPressed, isNull);
   });
 
@@ -346,12 +367,16 @@ void main() {
     final service = _FakeImportService(
       detected: ImportSource.projectauthBackup,
       result: ImportPreview(
-          source: ImportSource.projectauthBackup, toAdd: [_acc('a')]),
+        source: ImportSource.projectauthBackup,
+        toAdd: [_acc('a')],
+      ),
     );
     await _pumpPage(
       tester,
       service: service,
-      documents: _FakeDocuments(document: _doc('{"format":"projectauth-backup"}')),
+      documents: _FakeDocuments(
+        document: _doc('{"format":"projectauth-backup"}'),
+      ),
       lock: lock,
     );
 
@@ -369,8 +394,9 @@ void main() {
     expect(find.text('1 token içe aktarılacak'), findsOneWidget);
   });
 
-  testWidgets('yanlış yedek parolası → Türkçe hata, adım değişmez',
-      (tester) async {
+  testWidgets('yanlış yedek parolası → Türkçe hata, adım değişmez', (
+    tester,
+  ) async {
     final service = _FakeImportService(
       detected: ImportSource.projectauthBackup,
       previewError: const WrongBackupPasswordException(),
@@ -378,7 +404,9 @@ void main() {
     await _pumpPage(
       tester,
       service: service,
-      documents: _FakeDocuments(document: _doc('{"format":"projectauth-backup"}')),
+      documents: _FakeDocuments(
+        document: _doc('{"format":"projectauth-backup"}'),
+      ),
       lock: lock,
     );
 
@@ -392,11 +420,14 @@ void main() {
     expect(find.text('Bu dosya şifreli bir yedek'), findsOneWidget);
   });
 
-  testWidgets('desteklenmeyen biçim → yönlendirici Türkçe hata', (tester) async {
+  testWidgets('desteklenmeyen biçim → yönlendirici Türkçe hata', (
+    tester,
+  ) async {
     await _pumpPage(
       tester,
       service: _FakeImportService(
-          detectError: const UnsupportedImportFormatException()),
+        detectError: const UnsupportedImportFormatException(),
+      ),
       documents: _FakeDocuments(document: _doc('{"baska":1}')),
       lock: lock,
     );
@@ -410,11 +441,14 @@ void main() {
     );
   });
 
-  testWidgets('şifreli Aegis kaynağı → kaynağa özel yönlendirme', (tester) async {
+  testWidgets('şifreli Aegis kaynağı → kaynağa özel yönlendirme', (
+    tester,
+  ) async {
     await _pumpPage(
       tester,
       service: _FakeImportService(
-          detectError: const EncryptedSourceException(ImportSource.aegis)),
+        detectError: const EncryptedSourceException(ImportSource.aegis),
+      ),
       documents: _FakeDocuments(document: _doc()),
       lock: lock,
     );
@@ -422,17 +456,21 @@ void main() {
     await tester.tap(find.text('Dosya seç'));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('Aegis yedeği parolayla şifrelenmiş'),
-        findsOneWidget);
+    expect(
+      find.textContaining('Aegis yedeği parolayla şifrelenmiş'),
+      findsOneWidget,
+    );
   });
 
-  testWidgets('kullanıcı iptal ederse adım değişmez, hata gösterilmez',
-      (tester) async {
+  testWidgets('kullanıcı iptal ederse adım değişmez, hata gösterilmez', (
+    tester,
+  ) async {
     final docs = _FakeDocuments(); // document null = iptal
     await _pumpPage(
       tester,
-      service: _FakeImportService(result: const ImportPreview(
-          source: ImportSource.aegis, toAdd: [])),
+      service: _FakeImportService(
+        result: const ImportPreview(source: ImportSource.aegis, toAdd: []),
+      ),
       documents: docs,
       lock: lock,
     );
@@ -444,14 +482,16 @@ void main() {
     expect(lock.ends, 1);
   });
 
-  testWidgets('picker AÇIKKEN sayfa sökülürse muafiyet dispose\'ta kapanır',
-      (tester) async {
+  testWidgets('picker AÇIKKEN sayfa sökülürse muafiyet dispose\'ta kapanır', (
+    tester,
+  ) async {
     final gate = Completer<PickedDocument?>();
     final docs = _FakeDocuments(gate: gate);
     await _pumpPage(
       tester,
-      service: _FakeImportService(result: const ImportPreview(
-          source: ImportSource.aegis, toAdd: [])),
+      service: _FakeImportService(
+        result: const ImportPreview(source: ImportSource.aegis, toAdd: []),
+      ),
       documents: docs,
       lock: lock,
     );
@@ -498,63 +538,73 @@ void main() {
   });
 
   testWidgets(
-      'Faz 5 Patch 2 — "Google Authenticator (QR)" → yönerge sheet\'i → /scan',
-      (tester) async {
-    final vault = VaultCubit(_FakeRepo());
-    await vault.load();
-    addTearDown(vault.close);
+    'Faz 5 Patch 2 — "Google Authenticator (QR)" → yönerge sheet\'i → /scan',
+    (tester) async {
+      final vault = VaultCubit(_FakeRepo());
+      await vault.load();
+      addTearDown(vault.close);
 
-    final router = GoRouter(
-      routes: [
-        GoRoute(
-          path: '/',
-          builder: (_, _) => ImportPage(
-            service: _FakeImportService(
+      final router = GoRouter(
+        routes: [
+          GoRoute(
+            path: '/',
+            builder: (_, _) => ImportPage(
+              service: _FakeImportService(
                 result: const ImportPreview(
-                    source: ImportSource.aegis, toAdd: [])),
-            documents: _FakeDocuments(),
+                  source: ImportSource.aegis,
+                  toAdd: [],
+                ),
+              ),
+              documents: _FakeDocuments(),
+            ),
           ),
-        ),
-        // Gerçek ScanPage kamera ister → rota varlığını yer tutucuyla doğrula.
-        GoRoute(
+          // Gerçek ScanPage kamera ister → rota varlığını yer tutucuyla doğrula.
+          GoRoute(
             path: Routes.scan,
-            builder: (_, _) => const Scaffold(body: Text('SCAN-ROUTE'))),
-      ],
-    );
-    addTearDown(router.dispose);
+            builder: (_, _) => const Scaffold(body: Text('SCAN-ROUTE')),
+          ),
+        ],
+      );
+      addTearDown(router.dispose);
 
-    await tester.pumpWidget(MultiBlocProvider(
-      providers: [
-        BlocProvider<VaultLockCubit>.value(value: lock),
-        BlocProvider<VaultCubit>.value(value: vault),
-      ],
-      child: MaterialApp.router(routerConfig: router),
-    ));
-    await tester.pumpAndSettle();
+      await tester.pumpWidget(
+        MultiBlocProvider(
+          providers: [
+            BlocProvider<VaultLockCubit>.value(value: lock),
+            BlocProvider<VaultCubit>.value(value: vault),
+          ],
+          child: MaterialApp.router(routerConfig: router),
+        ),
+      );
+      await tester.pumpAndSettle();
 
-    // Dosya seçme aksiyonu YERİNDE kalır (mevcut akış bozulmadı).
-    expect(find.text('Dosya seç'), findsOneWidget);
+      // Dosya seçme aksiyonu YERİNDE kalır (mevcut akış bozulmadı).
+      expect(find.text('Dosya seç'), findsOneWidget);
 
-    await tester.tap(find.text('Google Authenticator (QR)'));
-    await tester.pumpAndSettle();
+      await tester.tap(find.text('Google Authenticator (QR)'));
+      await tester.pumpAndSettle();
 
-    expect(find.textContaining('Hesapları dışa aktar'), findsOneWidget);
+      expect(find.textContaining('Hesapları dışa aktar'), findsOneWidget);
 
-    await tester.tap(find.text('Kamerayı aç'));
-    await tester.pumpAndSettle();
+      await tester.tap(find.text('Kamerayı aç'));
+      await tester.pumpAndSettle();
 
-    expect(find.text('SCAN-ROUTE'), findsOneWidget);
-  });
+      expect(find.text('SCAN-ROUTE'), findsOneWidget);
+    },
+  );
 
   testWidgets('UTF-8 olmayan dosya → "okunamadı" hatası', (tester) async {
     final docs = _FakeDocuments(
       document: PickedDocument(
-          'bozuk.json', Uint8List.fromList([0xC3, 0x28, 0xA0, 0xA1])),
+        'bozuk.json',
+        Uint8List.fromList([0xC3, 0x28, 0xA0, 0xA1]),
+      ),
     );
     await _pumpPage(
       tester,
-      service: _FakeImportService(result: const ImportPreview(
-          source: ImportSource.aegis, toAdd: [])),
+      service: _FakeImportService(
+        result: const ImportPreview(source: ImportSource.aegis, toAdd: []),
+      ),
       documents: docs,
       lock: lock,
     );
@@ -562,16 +612,20 @@ void main() {
     await tester.tap(find.text('Dosya seç'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Dosya okunamadı — geçerli bir JSON yedeği değil.'),
-        findsOneWidget);
+    expect(
+      find.text('Dosya okunamadı — geçerli bir JSON yedeği değil.'),
+      findsOneWidget,
+    );
   });
 
-  testWidgets('A3: giriş tavanı aşılırsa Türkçe "çok fazla kayıt" hatası',
-      (tester) async {
+  testWidgets('A3: giriş tavanı aşılırsa Türkçe "çok fazla kayıt" hatası', (
+    tester,
+  ) async {
     await _pumpPage(
       tester,
       service: _FakeImportService(
-          previewError: const ImportTooManyEntriesException(5000, 1024)),
+        previewError: const ImportTooManyEntriesException(5000, 1024),
+      ),
       documents: _FakeDocuments(document: _doc()),
       lock: lock,
     );
@@ -579,12 +633,15 @@ void main() {
     await tester.tap(find.text('Dosya seç'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Dosyada çok fazla kayıt var (en fazla 1024).'),
-        findsOneWidget);
+    expect(
+      find.text('Dosyada çok fazla kayıt var (en fazla 1024).'),
+      findsOneWidget,
+    );
   });
 
-  testWidgets('C3: atlananlar 50 satırla sınırlı, kalanı "+k tane daha"',
-      (tester) async {
+  testWidgets('C3: atlananlar 50 satırla sınırlı, kalanı "+k tane daha"', (
+    tester,
+  ) async {
     // 1024 tavanına yakın bir dosya: eager `ExpansionTile` hepsini tek karede
     // inşa ederdi. Sayılar (üstteki satırlar) TAM kalmalı, liste kısalmalı.
     final skipped = [
@@ -606,8 +663,11 @@ void main() {
     await tester.tap(find.text('Dosya seç'));
     await tester.pumpAndSettle();
 
-    expect(find.text('130 desteklenmiyor'), findsOneWidget,
-        reason: 'sayılar kısaltmadan ETKİLENMEZ');
+    expect(
+      find.text('130 desteklenmiyor'),
+      findsOneWidget,
+      reason: 'sayılar kısaltmadan ETKİLENMEZ',
+    );
     await tester.tap(find.text('Atlananlar (130)'));
     await tester.pumpAndSettle();
 
@@ -641,16 +701,18 @@ void main() {
     expect(find.textContaining('tane daha'), findsNothing);
   });
 
-  testWidgets('C6: parola adımında "Başka dosya seç" → pick adımına döner',
-      (tester) async {
+  testWidgets('C6: parola adımında "Başka dosya seç" → pick adımına döner', (
+    tester,
+  ) async {
     final docs = _FakeDocuments(document: _doc());
     await _pumpPage(
       tester,
       service: _FakeImportService(
         detected: ImportSource.projectauthBackup,
-        result: ImportPreview(source: ImportSource.projectauthBackup, toAdd: [
-          _acc('a'),
-        ]),
+        result: ImportPreview(
+          source: ImportSource.projectauthBackup,
+          toAdd: [_acc('a')],
+        ),
       ),
       documents: docs,
       lock: lock,
@@ -663,8 +725,11 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Yedek dosyası seç'), findsOneWidget);
-    expect(find.text('Başka dosya seç'), findsNothing,
-        reason: 'pick adımında ikincil aksiyon gösterilmez');
+    expect(
+      find.text('Başka dosya seç'),
+      findsNothing,
+      reason: 'pick adımında ikincil aksiyon gösterilmez',
+    );
 
     // Ve gerçekten yeniden seçilebiliyor.
     await tester.tap(find.text('Dosya seç'));
@@ -672,8 +737,9 @@ void main() {
     expect(docs.pickCount, 2);
   });
 
-  testWidgets('C6: önizleme adımından da dosya seçimine dönülür',
-      (tester) async {
+  testWidgets('C6: önizleme adımından da dosya seçimine dönülür', (
+    tester,
+  ) async {
     await _pumpPage(
       tester,
       service: _FakeImportService(
@@ -693,8 +759,9 @@ void main() {
     expect(find.text('1 token içe aktarılacak'), findsNothing);
   });
 
-  testWidgets('C4: onaydan sonra tüketilmiş önizleme EKRANDA KALMAZ',
-      (tester) async {
+  testWidgets('C4: onaydan sonra tüketilmiş önizleme EKRANDA KALMAZ', (
+    tester,
+  ) async {
     // GoRouter yok → `maybePop` false döner ve sayfa açık kalır: eski kodda
     // kullanıcı zaten uygulanmış bir önizlemeye tekrar basabilirdi.
     final repo = _FakeRepo();

@@ -54,8 +54,11 @@ import 'migration_scan_controller.dart';
 /// Kamera widget'ının yerine geçen test kurucusu: [onDetect]'i çağırmak, bir
 /// kameranın kare yayınlamasıyla birebir aynı yola girer — tek karede birden
 /// çok barkod taşıyan `BarcodeCapture` dâhil.
-typedef ScannerBuilder = Widget Function(
-    BuildContext context, void Function(BarcodeCapture capture) onDetect);
+typedef ScannerBuilder =
+    Widget Function(
+      BuildContext context,
+      void Function(BarcodeCapture capture) onDetect,
+    );
 
 /// Kameranın `stop()`/`start()` çağrılarının test tohumu. İkisi AYRI alan:
 /// test ikisini ayrı sayabilmeli ve yalnız `stop()`'u hatalandırabilmeli
@@ -267,7 +270,8 @@ class _ScanPageState extends State<ScanPage> {
       return;
     }
 
-    _handled = true; // yalnızca geçerli QR'da kilitle — geçersizde taramaya devam
+    _handled =
+        true; // yalnızca geçerli QR'da kilitle — geçersizde taramaya devam
     try {
       // Kalıcılığı BEKLE: yazma başarılıysa kapat. Hata olursa kullanıcı token
       // eklenmiş sanmasın → hatayı göster ve yeniden taramaya izin ver.
@@ -293,7 +297,7 @@ class _ScanPageState extends State<ScanPage> {
     final event = _migrationController.handleRaw(raw);
     switch (event) {
       case MigrationBatchAdded(:final scanned, :final total) ||
-            MigrationScanComplete(:final scanned, :final total):
+          MigrationScanComplete(:final scanned, :final total):
         setState(() {
           _scanned = scanned;
           _total = total;
@@ -304,7 +308,9 @@ class _ScanPageState extends State<ScanPage> {
         unawaited(_askRestart());
       case MigrationInvalidBatch() || MigrationMalformedQr():
         // Neden ayrımı KASITLI olarak gösterilmez (secret'tan türer).
-        _showError('Bu QR bir Google Authenticator aktarım kodu değil ya da bozuk.');
+        _showError(
+          'Bu QR bir Google Authenticator aktarım kodu değil ya da bozuk.',
+        );
       case MigrationScanFull():
         _showError('Bu aktarımda çok fazla hesap var.');
     }
@@ -326,7 +332,8 @@ class _ScanPageState extends State<ScanPage> {
         context: context,
         builder: (ctx) => AlertDialog(
           content: const Text(
-              'Bu QR farklı bir dışa aktarmaya ait. Baştan başlansın mı?'),
+            'Bu QR farklı bir dışa aktarmaya ait. Baştan başlansın mı?',
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(false),
@@ -509,8 +516,9 @@ class _ScanPageState extends State<ScanPage> {
         context: context,
         builder: (ctx) => AlertDialog(
           title: const Text('Bu kadar yeter'),
-          content:
-              const Text('Yalnız taradığın kodlardaki hesaplar aktarılacak.'),
+          content: const Text(
+            'Yalnız taradığın kodlardaki hesaplar aktarılacak.',
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(false),
@@ -593,13 +601,15 @@ class _ScanPageState extends State<ScanPage> {
     final messenger = ScaffoldMessenger.maybeOf(context);
     messenger
       ?..clearSnackBars()
-      ..showSnackBar(SnackBar(
-        content: Text(message),
-        // Bant `bottomNavigationBar`'da duruyor; floating SnackBar Scaffold'un
-        // alt widget'larının ÜSTÜNE yerleşir (`_ScaffoldLayout` floating için
-        // `contentBottom` kullanır) → ilerleme ve aksiyonlar örtülmez.
-        behavior: SnackBarBehavior.floating,
-      ));
+      ..showSnackBar(
+        SnackBar(
+          content: Text(message),
+          // Bant `bottomNavigationBar`'da duruyor; floating SnackBar Scaffold'un
+          // alt widget'larının ÜSTÜNE yerleşir (`_ScaffoldLayout` floating için
+          // `contentBottom` kullanır) → ilerleme ve aksiyonlar örtülmez.
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
   }
 
   @override
@@ -608,7 +618,9 @@ class _ScanPageState extends State<ScanPage> {
     final inMigration = _total > 0;
     final page = Scaffold(
       appBar: AppBar(
-        title: Text(_total > 0 ? 'Google Authenticator kodunu tara' : 'QR Tara'),
+        title: Text(
+          _total > 0 ? 'Google Authenticator kodunu tara' : 'QR Tara',
+        ),
         // Önizleme adımında kamera zaten durdurulmuştur → aksiyonlar gizlenir.
         actions: inPreview
             ? null
@@ -656,27 +668,27 @@ class _ScanPageState extends State<ScanPage> {
   /// cihazda (`TorchState.unavailable`) düğme hiç gösterilmez: eklenti orada
   /// sessizce hiçbir şey yapmıyor, yani buton yalanmış olurdu.
   Widget _cameraActions() => ValueListenableBuilder<MobileScannerState>(
-        valueListenable: widget.debugScannerState ?? _controller,
-        builder: (context, state, _) {
-          final ready = state.isInitialized;
-          return Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (state.torchState != TorchState.unavailable)
-                IconButton(
-                  tooltip: 'Flaş',
-                  icon: const Icon(Icons.flash_on),
-                  onPressed: ready ? _toggleTorch : null,
-                ),
-              IconButton(
-                tooltip: 'Kamera değiştir',
-                icon: const Icon(Icons.cameraswitch),
-                onPressed: ready ? _switchCamera : null,
-              ),
-            ],
-          );
-        },
+    valueListenable: widget.debugScannerState ?? _controller,
+    builder: (context, state, _) {
+      final ready = state.isInitialized;
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (state.torchState != TorchState.unavailable)
+            IconButton(
+              tooltip: 'Flaş',
+              icon: const Icon(Icons.flash_on),
+              onPressed: ready ? _toggleTorch : null,
+            ),
+          IconButton(
+            tooltip: 'Kamera değiştir',
+            icon: const Icon(Icons.cameraswitch),
+            onPressed: ready ? _switchCamera : null,
+          ),
+        ],
       );
+    },
+  );
 
   /// Kamera kontrolü çağrıları best-effort: hata kullanıcıya SnackBar olarak
   /// döner, ekran çalışmaya devam eder (bkz. [_stopCamera]/[_startCamera]).
@@ -697,13 +709,13 @@ class _ScanPageState extends State<ScanPage> {
   }
 
   Widget _buildPreview(BuildContext context) => ImportPreviewView(
-        preview: _preview!,
-        headerLabel: 'Google Authenticator',
-        headerDetail: '$_scanned/$_total kod',
-        error: _importError,
-        busy: _busy,
-        onConfirm: _confirmImport,
-      );
+    preview: _preview!,
+    headerLabel: 'Google Authenticator',
+    headerDetail: '$_scanned/$_total kod',
+    error: _importError,
+    busy: _busy,
+    onConfirm: _confirmImport,
+  );
 
   Widget _buildCamera(BuildContext context) =>
       widget.debugScannerBuilder?.call(context, _onDetect) ??
@@ -758,7 +770,9 @@ class _ScanReticle extends StatelessWidget {
           const SizedBox(height: Gap.xl),
           Container(
             padding: const EdgeInsets.symmetric(
-                horizontal: Gap.lg, vertical: Gap.sm),
+              horizontal: Gap.lg,
+              vertical: Gap.sm,
+            ),
             decoration: BoxDecoration(
               // Kamera üstünde okunabilirlik: scrim karartma (Design.md §4 scrim
               // kuralı — scan ekranı tek izinli yüksek-kontrast istisnası §1.2).

@@ -60,7 +60,8 @@ class _RestoreFailedPageState extends State<RestoreFailedPage> {
           'Güvenlik için bu adım tamamlanmadan yeni bir vault kurulmaz '
           '(mevcut yedeğinin üzerine yazılmasını önler).',
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: Theme.of(context).colorScheme.onSurfaceVariant),
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
         ),
       ],
       actions: [

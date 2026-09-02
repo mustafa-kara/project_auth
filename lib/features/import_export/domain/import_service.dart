@@ -41,9 +41,11 @@ class ImportPreview {
   /// Entries dropped because we already have them (in this file or in the vault)
   /// — reported separately from real failures, since they are not a problem.
   int get duplicateCount => skipped
-      .where((e) =>
-          e.reason == SkipReason.duplicateInFile ||
-          e.reason == SkipReason.alreadyInVault)
+      .where(
+        (e) =>
+            e.reason == SkipReason.duplicateInFile ||
+            e.reason == SkipReason.alreadyInVault,
+      )
       .length;
 
   /// Entries dropped because we could not import them (unsupported/invalid).
@@ -90,10 +92,10 @@ class ImportService {
     ImportSource Function(Map<String, dynamic> json)? detector,
     String Function(OtpAccount account)? keyOf,
     AccountCanonicalizer Function()? canonicalizeResolver,
-  })  : parsers = parsers ?? const <ImportParser>[],
-        _detector = detector ?? detectSource,
-        _keyOf = keyOf ?? dedupeKey,
-        _canonicalizeResolver = canonicalizeResolver;
+  }) : parsers = parsers ?? const <ImportParser>[],
+       _detector = detector ?? detectSource,
+       _keyOf = keyOf ?? dedupeKey,
+       _canonicalizeResolver = canonicalizeResolver;
 
   /// Hard ceiling on file size (8 MiB): a real export is orders of magnitude
   /// smaller, and the whole file is decoded in memory.
@@ -136,13 +138,18 @@ class ImportService {
 
     if (source == ImportSource.projectauthBackup) {
       if (backupPassword == null || backupPassword.isEmpty) {
-        throw ArgumentError.value(backupPassword, 'backupPassword',
-            'required for ${BackupService.formatId} files — call detect() first');
+        throw ArgumentError.value(
+          backupPassword,
+          'backupPassword',
+          'required for ${BackupService.formatId} files — call detect() first',
+        );
       }
       // Decryption cannot move to a worker isolate: the crypto service holds
       // native handles. Argon2id itself already runs isolated inside sodium.
-      final payload =
-          await backup.importDetailed(json: raw, password: backupPassword);
+      final payload = await backup.importDetailed(
+        json: raw,
+        password: backupPassword,
+      );
       return dedupeSync(
         ParsedImport(
           source: source,
@@ -159,14 +166,16 @@ class ImportService {
     // isolate. Only sendable values are captured (no `this`, no plugins).
     final selected = parsers.where((p) => p.source == source).toList();
     final keyOf = _keyOf;
-    return Isolate.run(() => parseAndDedupeSync(
-          root: root,
-          source: source,
-          parsers: selected,
-          existing: existing,
-          keyOf: keyOf,
-          canonicalize: canonicalize,
-        ));
+    return Isolate.run(
+      () => parseAndDedupeSync(
+        root: root,
+        source: source,
+        parsers: selected,
+        existing: existing,
+        keyOf: keyOf,
+        canonicalize: canonicalize,
+      ),
+    );
   }
 
   /// Dedupes an already-parsed import (no file, no JSON, no isolate).
@@ -181,13 +190,12 @@ class ImportService {
   ImportPreview previewParsed(
     ParsedImport parsed, {
     required List<OtpAccount> existing,
-  }) =>
-      dedupeSync(
-        parsed,
-        existing: existing,
-        keyOf: _keyOf,
-        canonicalize: _canonicalizeResolver?.call(),
-      );
+  }) => dedupeSync(
+    parsed,
+    existing: existing,
+    keyOf: _keyOf,
+    canonicalize: _canonicalizeResolver?.call(),
+  );
 
   /// Size guard (UTF-8 bytes) → root JSON object. Shared by [detect] and
   /// [preview] so an oversized or unreadable file is rejected on both entries.
@@ -239,8 +247,12 @@ class ImportService {
       // outcome as an unrecognized file.
       throw const UnsupportedImportFormatException();
     }
-    return dedupeSync(parser.parse(root),
-        existing: existing, keyOf: keyOf, canonicalize: canonicalize);
+    return dedupeSync(
+      parser.parse(root),
+      existing: existing,
+      keyOf: keyOf,
+      canonicalize: canonicalize,
+    );
   }
 
   /// Drops accounts already present in [existing] ([SkipReason.alreadyInVault])
@@ -291,16 +303,18 @@ class ImportService {
     // matching forms make `alreadyInVault` fire (audit A2). The accounts kept
     // in `toAdd` are the canonicalized ones, so what the preview shows is what
     // `VaultCubit.addAll` will store.
-    final vaultAccounts =
-        canonicalize == null ? existing : existing.map(canonicalize).toList();
+    final vaultAccounts = canonicalize == null
+        ? existing
+        : existing.map(canonicalize).toList();
     final parsedAccounts = canonicalize == null
         ? parsed.accounts
         : parsed.accounts.map(canonicalize).toList();
 
     final matchIds = parsed.source == ImportSource.projectauthBackup;
     final existingKeys = vaultAccounts.map(keyOf).toSet();
-    final existingIds =
-        matchIds ? vaultAccounts.map((a) => a.id).toSet() : const <String>{};
+    final existingIds = matchIds
+        ? vaultAccounts.map((a) => a.id).toSet()
+        : const <String>{};
 
     final seenKeys = <String>{};
     final seenIds = <String>{};
@@ -311,13 +325,19 @@ class ImportService {
       final key = keyOf(account);
       if (existingKeys.contains(key) ||
           (matchIds && existingIds.contains(account.id))) {
-        skipped.add(SkippedEntry(
-            reason: SkipReason.alreadyInVault, label: account.label));
+        skipped.add(
+          SkippedEntry(reason: SkipReason.alreadyInVault, label: account.label),
+        );
         continue;
       }
-      if (seenKeys.contains(key) || (matchIds && seenIds.contains(account.id))) {
-        skipped.add(SkippedEntry(
-            reason: SkipReason.duplicateInFile, label: account.label));
+      if (seenKeys.contains(key) ||
+          (matchIds && seenIds.contains(account.id))) {
+        skipped.add(
+          SkippedEntry(
+            reason: SkipReason.duplicateInFile,
+            label: account.label,
+          ),
+        );
         continue;
       }
       seenKeys.add(key);

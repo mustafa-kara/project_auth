@@ -67,8 +67,9 @@ class AppBanner extends StatelessWidget {
               Expanded(
                 child: Text(
                   message,
-                  style: theme.textTheme.bodyMedium
-                      ?.copyWith(color: scheme.onSurface),
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: scheme.onSurface,
+                  ),
                 ),
               ),
             ],
@@ -83,8 +84,9 @@ class AppBanner extends StatelessWidget {
                   TextButton(
                     onPressed: a.onPressed,
                     style: TextButton.styleFrom(
-                      foregroundColor:
-                          a.destructive ? scheme.error : scheme.primary,
+                      foregroundColor: a.destructive
+                          ? scheme.error
+                          : scheme.primary,
                     ),
                     child: Text(a.label),
                   ),

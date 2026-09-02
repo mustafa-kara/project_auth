@@ -112,7 +112,8 @@ class AegisParser implements ImportParser {
     final entries = db['entries'];
     if (entries is! List) {
       throw const MalformedImportFileException(
-          'Aegis: "db.entries" is not a list');
+        'Aegis: "db.entries" is not a list',
+      );
     }
     // A missing / wrongly typed `db.groups` yields an empty index, not an
     // error: the entries are still perfectly importable without their labels.
@@ -123,10 +124,12 @@ class AegisParser implements ImportParser {
 
     for (final raw in entries) {
       if (raw is! Map) {
-        skipped.add(const SkippedEntry(
-          reason: SkipReason.invalidFields,
-          detail: 'entry is not a JSON object',
-        ));
+        skipped.add(
+          const SkippedEntry(
+            reason: SkipReason.invalidFields,
+            detail: 'entry is not a JSON object',
+          ),
+        );
         continue;
       }
       // The label is built before parsing so a failing entry is still
@@ -135,26 +138,28 @@ class AegisParser implements ImportParser {
       try {
         accounts.add(_parseEntry(raw, groups));
       } on _Skip catch (skip) {
-        skipped.add(SkippedEntry(
-          label: label,
-          reason: skip.reason,
-          detail: skip.detail,
-        ));
+        skipped.add(
+          SkippedEntry(label: label, reason: skip.reason, detail: skip.detail),
+        );
       } on FormatException {
         // Raised by OtpAccount.validate() / OtpAlgorithm.fromName for values we
         // did not screen ourselves. The message is NOT propagated: this parser
         // controls every string that reaches the UI.
-        skipped.add(SkippedEntry(
-          label: label,
-          reason: SkipReason.invalidFields,
-          detail: 'entry rejected by validation',
-        ));
+        skipped.add(
+          SkippedEntry(
+            label: label,
+            reason: SkipReason.invalidFields,
+            detail: 'entry rejected by validation',
+          ),
+        );
       } on ArgumentError {
-        skipped.add(SkippedEntry(
-          label: label,
-          reason: SkipReason.invalidFields,
-          detail: 'entry rejected by validation',
-        ));
+        skipped.add(
+          SkippedEntry(
+            label: label,
+            reason: SkipReason.invalidFields,
+            detail: 'entry rejected by validation',
+          ),
+        );
       }
     }
 
@@ -203,7 +208,10 @@ class AegisParser implements ImportParser {
   /// The result is handed to [OtpAccount] unfiltered; its `normalizeTags` does
   /// the trimming, clipping and de-duplication, so an export with a 40-rune
   /// group name or twelve groups on one entry still imports.
-  List<String> _tagsOf(Map<Object?, Object?> entry, Map<String, String> groups) {
+  List<String> _tagsOf(
+    Map<Object?, Object?> entry,
+    Map<String, String> groups,
+  ) {
     final tags = <String>[];
     final refs = entry['groups'];
     if (refs is List) {
@@ -221,15 +229,16 @@ class AegisParser implements ImportParser {
   }
 
   OtpAccount _parseEntry(
-      Map<Object?, Object?> entry, Map<String, String> groups) {
+    Map<Object?, Object?> entry,
+    Map<String, String> groups,
+  ) {
     final typeName = (_string(entry['type']) ?? '').trim();
     if (typeName.isEmpty) {
       throw const _Skip(SkipReason.invalidFields, 'entry has no "type"');
     }
     final declared = _typeFromName(typeName);
     if (declared == null) {
-      throw _Skip(
-          SkipReason.unsupportedType, 'type=${_fragment(typeName)}');
+      throw _Skip(SkipReason.unsupportedType, 'type=${_fragment(typeName)}');
     }
 
     final info = entry['info'];
@@ -244,8 +253,9 @@ class AegisParser implements ImportParser {
     final issuer = issuerRaw.isEmpty ? null : issuerRaw;
     // Plan D4: empty name falls back to the issuer, then to a placeholder, so
     // the vault never shows a blank row.
-    final accountName =
-        nameRaw.isNotEmpty ? nameRaw : (issuer ?? _unnamedAccount);
+    final accountName = nameRaw.isNotEmpty
+        ? nameRaw
+        : (issuer ?? _unnamedAccount);
 
     final secret = (_string(info['secret']) ?? '').trim();
     if (secret.isEmpty) {
@@ -276,8 +286,10 @@ class AegisParser implements ImportParser {
     if (type == OtpType.hotp) {
       final parsed = _counter(info);
       if (parsed == null) {
-        throw const _Skip(SkipReason.invalidFields,
-            'HOTP entry has no counter (tried "counter", "initialCounter")');
+        throw const _Skip(
+          SkipReason.invalidFields,
+          'HOTP entry has no counter (tried "counter", "initialCounter")',
+        );
       }
       counter = parsed;
     } else {
@@ -299,8 +311,10 @@ class AegisParser implements ImportParser {
     } on FormatException {
       // Out-of-contract numbers (digits 9, period 0, ...). The detail lists the
       // offending values only — never the secret.
-      throw _Skip(SkipReason.invalidFields,
-          'digits=$digits period=$period counter=$counter');
+      throw _Skip(
+        SkipReason.invalidFields,
+        'digits=$digits period=$period counter=$counter',
+      );
     }
   }
 
@@ -329,8 +343,10 @@ class AegisParser implements ImportParser {
       if (_knownUnsupportedAlgorithms.contains(canonical)) {
         throw _Skip(SkipReason.unsupportedType, 'algorithm=$canonical');
       }
-      throw _Skip(SkipReason.invalidFields,
-          'unsupported algorithm ${_fragment(name)}');
+      throw _Skip(
+        SkipReason.invalidFields,
+        'unsupported algorithm ${_fragment(name)}',
+      );
     }
   }
 
@@ -340,7 +356,9 @@ class AegisParser implements ImportParser {
     try {
       if (Base32.decode(secret).isEmpty) {
         throw const _Skip(
-            SkipReason.invalidSecret, 'secret decodes to zero bytes');
+          SkipReason.invalidSecret,
+          'secret decodes to zero bytes',
+        );
       }
     } on FormatException {
       throw const _Skip(SkipReason.invalidSecret, 'secret is not valid Base32');
@@ -349,11 +367,11 @@ class AegisParser implements ImportParser {
 }
 
 OtpType? _typeFromName(String raw) => switch (raw.toLowerCase()) {
-      'totp' => OtpType.totp,
-      'hotp' => OtpType.hotp,
-      'steam' => OtpType.steam,
-      _ => null,
-    };
+  'totp' => OtpType.totp,
+  'hotp' => OtpType.hotp,
+  'steam' => OtpType.steam,
+  _ => null,
+};
 
 /// String-or-nothing accessor: a wrongly typed JSON value becomes `null`
 /// instead of a `TypeError`, so label building can never throw.
@@ -365,7 +383,9 @@ String? _string(Object? value) => value is String ? value : null;
 int? _integer(Object? value, String field) {
   if (value == null) return null;
   if (value is int) return value;
-  if (value is double && value == value.truncateToDouble()) return value.toInt();
+  if (value is double && value == value.truncateToDouble()) {
+    return value.toInt();
+  }
   if (value is String) {
     final parsed = int.tryParse(value.trim());
     if (parsed != null) return parsed;
@@ -379,7 +399,9 @@ int? _integer(Object? value, String field) {
 void _requireStringCap(String value, String field) {
   if (utf8.encode(value).length > _maxStringBytes) {
     throw _Skip(
-        SkipReason.invalidFields, '"$field" is over $_maxStringBytes bytes');
+      SkipReason.invalidFields,
+      '"$field" is over $_maxStringBytes bytes',
+    );
   }
 }
 

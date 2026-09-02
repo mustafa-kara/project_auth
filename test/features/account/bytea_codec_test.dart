@@ -9,10 +9,14 @@ import 'package:project_auth/features/account/data/bytea_codec.dart';
 void main() {
   group('ByteaCodec', () {
     test('encode → \\x + lowercase hex', () {
-      expect(ByteaCodec.encode(Uint8List.fromList([0xde, 0xad, 0xbe, 0xef])),
-          r'\xdeadbeef');
-      expect(ByteaCodec.encode(Uint8List.fromList([0x00, 0x01, 0x0f, 0xff])),
-          r'\x00010fff');
+      expect(
+        ByteaCodec.encode(Uint8List.fromList([0xde, 0xad, 0xbe, 0xef])),
+        r'\xdeadbeef',
+      );
+      expect(
+        ByteaCodec.encode(Uint8List.fromList([0x00, 0x01, 0x0f, 0xff])),
+        r'\x00010fff',
+      );
     });
 
     test('encode boş liste → \\x', () {
@@ -36,10 +40,14 @@ void main() {
 
     test('round-trip (16B salt, 24B nonce, uzun ciphertext)', () {
       for (final len in [16, 24, 48, 200]) {
-        final bytes =
-            Uint8List.fromList(List.generate(len, (i) => (i * 37 + 11) & 0xff));
-        expect(ByteaCodec.decode(ByteaCodec.encode(bytes)), bytes,
-            reason: 'len=$len round-trip kayıpsız olmalı');
+        final bytes = Uint8List.fromList(
+          List.generate(len, (i) => (i * 37 + 11) & 0xff),
+        );
+        expect(
+          ByteaCodec.decode(ByteaCodec.encode(bytes)),
+          bytes,
+          reason: 'len=$len round-trip kayıpsız olmalı',
+        );
       }
     });
 

@@ -31,21 +31,21 @@ const String _goldenBPayloadHex =
     '10011801200028feffffffffffffffff01';
 
 Uint8List _goldenAEntry() => encodeOtpParameters(
-      secret: fromHex('48656c6c6f21deadbeef'),
-      name: 'alice@example.com',
-      issuer: 'Example',
-      algorithm: ProtoAlgorithm.sha1,
-      digits: ProtoDigits.six,
-      type: ProtoOtpType.totp,
-    );
+  secret: fromHex('48656c6c6f21deadbeef'),
+  name: 'alice@example.com',
+  issuer: 'Example',
+  algorithm: ProtoAlgorithm.sha1,
+  digits: ProtoDigits.six,
+  type: ProtoOtpType.totp,
+);
 
 Uint8List _goldenBEntry() => encodeOtpParameters(
-      secret: fromHex('3e3ffbefbefa00112233'),
-      name: 'bob',
-      algorithm: ProtoAlgorithm.sha1,
-      digits: ProtoDigits.six,
-      type: ProtoOtpType.totp,
-    );
+  secret: fromHex('3e3ffbefbefa00112233'),
+  name: 'bob',
+  algorithm: ProtoAlgorithm.sha1,
+  digits: ProtoDigits.six,
+  type: ProtoOtpType.totp,
+);
 
 /// Reads every field of [bytes] and returns them as `field:wireType` pairs,
 /// skipping anything it does not need. Exercises the reader end to end.
@@ -91,27 +91,31 @@ void main() {
       );
     });
 
-    test('vector B MigrationPayload (negative batch_id) matches the plan hex',
-        () {
-      final payload = encodeMigrationPayload(
-        entries: [_goldenBEntry()],
-        version: 1,
-        batchSize: 1,
-        batchIndex: 0,
-        batchId: -2,
-      );
-      expect(toHex(payload), _goldenBPayloadHex);
-    });
+    test(
+      'vector B MigrationPayload (negative batch_id) matches the plan hex',
+      () {
+        final payload = encodeMigrationPayload(
+          entries: [_goldenBEntry()],
+          version: 1,
+          batchSize: 1,
+          batchIndex: 0,
+          batchId: -2,
+        );
+        expect(toHex(payload), _goldenBPayloadHex);
+      },
+    );
 
-    test('vector B base64 carries the "+" and "/" that break queryParameters',
-        () {
-      final b64 = migrationUri(
-        encodeMigrationPayload(entries: [_goldenBEntry()], batchId: -2),
-        percentEncode: false,
-      );
-      expect(b64.contains('+'), isTrue);
-      expect(b64.contains('/'), isTrue);
-    });
+    test(
+      'vector B base64 carries the "+" and "/" that break queryParameters',
+      () {
+        final b64 = migrationUri(
+          encodeMigrationPayload(entries: [_goldenBEntry()], batchId: -2),
+          percentEncode: false,
+        );
+        expect(b64.contains('+'), isTrue);
+        expect(b64.contains('/'), isTrue);
+      },
+    );
   });
 
   group('readVarint', () {
@@ -142,8 +146,11 @@ void main() {
 
     test('every negative int32 round-trips', () {
       for (final value in const [-1, -2, -128, -2147483648, -1234567]) {
-        expect(ProtobufReader(encodeVarint(value)).readVarint(), value,
-            reason: 'varint $value');
+        expect(
+          ProtobufReader(encodeVarint(value)).readVarint(),
+          value,
+          reason: 'varint $value',
+        );
       }
     });
 
@@ -151,8 +158,10 @@ void main() {
       // Ten bytes is the maximum, and on the tenth `shift` is 63 → only bit 63
       // can legally be contributed, so its payload must be 0x00 or 0x01.
       // 0x7F there is protobuf-illegal and would otherwise wrap silently.
-      final bytes = Uint8List.fromList(
-          [...List<int>.filled(ProtobufLimits.maxVarintBytes - 1, 0x80), 0x7F]);
+      final bytes = Uint8List.fromList([
+        ...List<int>.filled(ProtobufLimits.maxVarintBytes - 1, 0x80),
+        0x7F,
+      ]);
       expect(() => ProtobufReader(bytes).readVarint(), throwsFormatException);
     });
 
@@ -162,15 +171,20 @@ void main() {
           ...List<int>.filled(ProtobufLimits.maxVarintBytes - 1, 0x80),
           last,
         ]);
-        expect(ProtobufReader(bytes).readVarint(), last == 0 ? 0 : 1 << 63,
-            reason: 'tenth byte 0x${last.toRadixString(16)}');
+        expect(
+          ProtobufReader(bytes).readVarint(),
+          last == 0 ? 0 : 1 << 63,
+          reason: 'tenth byte 0x${last.toRadixString(16)}',
+        );
       }
     });
 
     test('an 11-byte varint is rejected', () {
       // Eleven continuation bytes: the reader must stop at ten, not keep going.
-      final bytes = Uint8List.fromList(
-          [...List<int>.filled(ProtobufLimits.maxVarintBytes, 0xFF), 0x01]);
+      final bytes = Uint8List.fromList([
+        ...List<int>.filled(ProtobufLimits.maxVarintBytes, 0xFF),
+        0x01,
+      ]);
       expect(() => ProtobufReader(bytes).readVarint(), throwsFormatException);
     });
 
@@ -180,7 +194,9 @@ void main() {
     });
 
     test('a truncated varint throws instead of returning a partial value', () {
-      final bytes = Uint8List.fromList([0xAC]); // continuation set, no next byte
+      final bytes = Uint8List.fromList([
+        0xAC,
+      ]); // continuation set, no next byte
       expect(() => ProtobufReader(bytes).readVarint(), throwsFormatException);
     });
 
@@ -200,16 +216,22 @@ void main() {
 
     test('field number 0 is illegal', () {
       // Tag 0x00 → field 0, wire type 0.
-      expect(() => ProtobufReader(Uint8List.fromList([0x00])).readTag(),
-          throwsFormatException);
+      expect(
+        () => ProtobufReader(Uint8List.fromList([0x00])).readTag(),
+        throwsFormatException,
+      );
       // Tag 0x02 → field 0, wire type 2 (a plausible-looking prefix).
-      expect(() => ProtobufReader(Uint8List.fromList([0x02, 0x00])).readTag(),
-          throwsFormatException);
+      expect(
+        () => ProtobufReader(Uint8List.fromList([0x02, 0x00])).readTag(),
+        throwsFormatException,
+      );
     });
 
     test('a tag wider than 32 bits is rejected, not silently truncated', () {
-      expect(() => ProtobufReader(encodeVarint(-1)).readTag(),
-          throwsFormatException);
+      expect(
+        () => ProtobufReader(encodeVarint(-1)).readTag(),
+        throwsFormatException,
+      );
     });
   });
 
@@ -241,8 +263,7 @@ void main() {
     });
 
     test('a negative (sign-extended) length is rejected', () {
-      final bytes = Uint8List.fromList(
-          [0x0a, ...encodeVarint(-1), 1, 2, 3]);
+      final bytes = Uint8List.fromList([0x0a, ...encodeVarint(-1), 1, 2, 3]);
       final reader = ProtobufReader(bytes);
       reader.readTag();
       expect(reader.readLengthDelimited, throwsFormatException);
@@ -258,7 +279,10 @@ void main() {
 
     test('an end past the buffer is rejected at construction', () {
       expect(() => ProtobufReader(Uint8List(2), end: 5), throwsFormatException);
-      expect(() => ProtobufReader(Uint8List(2), end: -1), throwsFormatException);
+      expect(
+        () => ProtobufReader(Uint8List(2), end: -1),
+        throwsFormatException,
+      );
     });
   });
 
@@ -278,16 +302,21 @@ void main() {
       for (final wireType in const [3, 4]) {
         final reader = ProtobufReader(encodeTag(1, wireType));
         final tag = reader.readTag();
-        expect(() => reader.skipField(tag.wireType), throwsFormatException,
-            reason: 'wire type $wireType');
+        expect(
+          () => reader.skipField(tag.wireType),
+          throwsFormatException,
+          reason: 'wire type $wireType',
+        );
       }
     });
 
     test('wire types 6 and 7 do not exist and are rejected', () {
       for (final wireType in const [6, 7]) {
-        expect(() => ProtobufReader(Uint8List(0)).skipField(wireType),
-            throwsFormatException,
-            reason: 'wire type $wireType');
+        expect(
+          () => ProtobufReader(Uint8List(0)).skipField(wireType),
+          throwsFormatException,
+          reason: 'wire type $wireType',
+        );
       }
     });
 
@@ -311,52 +340,61 @@ void main() {
     });
 
     test(
-        'EVERY truncated prefix of a real payload throws — never a hang, never '
-        'a crash', () {
-      final payload = encodeMigrationPayload(
-        entries: [_goldenAEntry(), _goldenBEntry()],
-        batchSize: 2,
-        batchIndex: 1,
-        batchId: -2,
-      );
-      for (var length = 1; length < payload.length; length++) {
-        final prefix = Uint8List.sublistView(payload, 0, length);
-        try {
-          // The full drain either consumes the prefix cleanly (a prefix can
-          // land exactly on a field boundary) or fails with FormatException.
-          // What it must never do is throw anything else or loop forever.
-          _drain(prefix);
-        } on FormatException {
-          continue;
-        } catch (error) {
-          fail('prefix of $length bytes threw ${error.runtimeType}, '
-              'expected FormatException');
+      'EVERY truncated prefix of a real payload throws — never a hang, never '
+      'a crash',
+      () {
+        final payload = encodeMigrationPayload(
+          entries: [_goldenAEntry(), _goldenBEntry()],
+          batchSize: 2,
+          batchIndex: 1,
+          batchId: -2,
+        );
+        for (var length = 1; length < payload.length; length++) {
+          final prefix = Uint8List.sublistView(payload, 0, length);
+          try {
+            // The full drain either consumes the prefix cleanly (a prefix can
+            // land exactly on a field boundary) or fails with FormatException.
+            // What it must never do is throw anything else or loop forever.
+            _drain(prefix);
+          } on FormatException {
+            continue;
+          } catch (error) {
+            fail(
+              'prefix of $length bytes threw ${error.runtimeType}, '
+              'expected FormatException',
+            );
+          }
         }
-      }
-    });
+      },
+    );
 
-    test('a fuzz sweep of random bytes only ever fails with FormatException',
-        () {
-      // Deterministic pseudo-random bytes: no seed drift between CI runs.
-      var state = 0x2545F491;
-      int next() {
-        state = (state * 1103515245 + 12345) & 0x7FFFFFFF;
-        return (state >> 16) & 0xFF;
-      }
-
-      for (var round = 0; round < 200; round++) {
-        final bytes =
-            Uint8List.fromList(List<int>.generate(1 + round % 40, (_) => next()));
-        try {
-          _drain(bytes);
-        } on FormatException {
-          continue;
-        } catch (error) {
-          fail('round $round threw ${error.runtimeType}, '
-              'expected FormatException');
+    test(
+      'a fuzz sweep of random bytes only ever fails with FormatException',
+      () {
+        // Deterministic pseudo-random bytes: no seed drift between CI runs.
+        var state = 0x2545F491;
+        int next() {
+          state = (state * 1103515245 + 12345) & 0x7FFFFFFF;
+          return (state >> 16) & 0xFF;
         }
-      }
-    });
+
+        for (var round = 0; round < 200; round++) {
+          final bytes = Uint8List.fromList(
+            List<int>.generate(1 + round % 40, (_) => next()),
+          );
+          try {
+            _drain(bytes);
+          } on FormatException {
+            continue;
+          } catch (error) {
+            fail(
+              'round $round threw ${error.runtimeType}, '
+              'expected FormatException',
+            );
+          }
+        }
+      },
+    );
   });
 
   group('limits', () {

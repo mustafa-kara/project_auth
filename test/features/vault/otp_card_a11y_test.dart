@@ -11,26 +11,31 @@ import 'package:project_auth/core/otp/otp_account.dart';
 import 'package:project_auth/core/otp/otp_generator.dart';
 import 'package:project_auth/features/vault/presentation/widgets/otp_card.dart';
 
-OtpAccount _acc({String issuer = 'GitHub', String name = 'octocat@example.com'}) =>
-    OtpAccount(
-      secret: 'JBSWY3DPEHPK3PXP',
-      type: OtpType.totp,
-      issuer: issuer,
-      accountName: name,
-    );
+OtpAccount _acc({
+  String issuer = 'GitHub',
+  String name = 'octocat@example.com',
+}) => OtpAccount(
+  secret: 'JBSWY3DPEHPK3PXP',
+  type: OtpType.totp,
+  issuer: issuer,
+  accountName: name,
+);
 
-Widget _host(Widget child, {double textScale = 1.0, bool reduceMotion = false}) =>
-    MaterialApp(
-      home: Scaffold(
-        body: MediaQuery(
-          data: MediaQueryData(
-            textScaler: TextScaler.linear(textScale),
-            disableAnimations: reduceMotion,
-          ),
-          child: SizedBox(width: 360, child: child),
-        ),
+Widget _host(
+  Widget child, {
+  double textScale = 1.0,
+  bool reduceMotion = false,
+}) => MaterialApp(
+  home: Scaffold(
+    body: MediaQuery(
+      data: MediaQueryData(
+        textScaler: TextScaler.linear(textScale),
+        disableAnimations: reduceMotion,
       ),
-    );
+      child: SizedBox(width: 360, child: child),
+    ),
+  ),
+);
 
 void main() {
   setUp(() {
@@ -63,13 +68,16 @@ void main() {
 
   testWidgets('textScaler 2.0 — taşma yok (kompakt)', (tester) async {
     await tester.pumpWidget(
-        _host(OtpCard(account: _acc(), compact: true), textScale: 2.0));
+      _host(OtpCard(account: _acc(), compact: true), textScale: 2.0),
+    );
     await tester.pump();
     expect(tester.takeException(), isNull);
   });
 
   testWidgets('reduced-motion — sayaç çökmeden render olur', (tester) async {
-    await tester.pumpWidget(_host(OtpCard(account: _acc()), reduceMotion: true));
+    await tester.pumpWidget(
+      _host(OtpCard(account: _acc()), reduceMotion: true),
+    );
     await tester.pump();
     expect(tester.takeException(), isNull);
     // Sayaç metni (kalan saniye) görünür — color-not-only sinyali korunur.
@@ -85,11 +93,15 @@ void main() {
     testWidgets('onLongPress verildiğinde silme ÇAĞRILMAZ', (tester) async {
       var longPressed = 0;
       var deleted = 0;
-      await tester.pumpWidget(_host(OtpCard(
-        account: _acc(),
-        onLongPress: () => longPressed++,
-        onDelete: () => deleted++,
-      )));
+      await tester.pumpWidget(
+        _host(
+          OtpCard(
+            account: _acc(),
+            onLongPress: () => longPressed++,
+            onDelete: () => deleted++,
+          ),
+        ),
+      );
       await tester.pump();
 
       await tester.longPress(find.byType(OtpCard));
@@ -99,35 +111,40 @@ void main() {
       expect(deleted, 0, reason: 'onaysız silme yolu kapandı');
     });
 
-    testWidgets('onLongPress yoksa uzun basış HİÇBİR ŞEY yapmaz (onDelete DEĞİL)',
-        (tester) async {
-      var deleted = 0;
-      await tester.pumpWidget(_host(OtpCard(
-        account: _acc(),
-        onDelete: () => deleted++,
-      )));
-      await tester.pump();
+    testWidgets(
+      'onLongPress yoksa uzun basış HİÇBİR ŞEY yapmaz (onDelete DEĞİL)',
+      (tester) async {
+        var deleted = 0;
+        await tester.pumpWidget(
+          _host(OtpCard(account: _acc(), onDelete: () => deleted++)),
+        );
+        await tester.pump();
 
-      await tester.longPress(find.byType(OtpCard));
-      await tester.pump();
+        await tester.longPress(find.byType(OtpCard));
+        await tester.pump();
 
-      expect(
-        deleted,
-        0,
-        reason: 'onDelete geri düşüşü kaldırıldı → onaysız silme yolu yok',
-      );
-      expect(tester.takeException(), isNull);
-    });
+        expect(
+          deleted,
+          0,
+          reason: 'onDelete geri düşüşü kaldırıldı → onaysız silme yolu yok',
+        );
+        expect(tester.takeException(), isNull);
+      },
+    );
 
     testWidgets('customSemanticsActions: Düzenle + Sil', (tester) async {
       var edited = 0;
       var deleted = 0;
-      await tester.pumpWidget(_host(OtpCard(
-        account: _acc(),
-        onEdit: () => edited++,
-        onDelete: () => deleted++,
-        onLongPress: () {},
-      )));
+      await tester.pumpWidget(
+        _host(
+          OtpCard(
+            account: _acc(),
+            onEdit: () => edited++,
+            onDelete: () => deleted++,
+            onLongPress: () {},
+          ),
+        ),
+      );
       await tester.pump();
 
       final props = tester
@@ -147,8 +164,9 @@ void main() {
       expect(deleted, 1);
     });
 
-    testWidgets('geri çağrı yoksa assistive eylem de YAYINLANMAZ',
-        (tester) async {
+    testWidgets('geri çağrı yoksa assistive eylem de YAYINLANMAZ', (
+      tester,
+    ) async {
       await tester.pumpWidget(_host(OtpCard(account: _acc())));
       await tester.pump();
 
@@ -166,25 +184,24 @@ void main() {
     late String? clipboard;
     setUp(() {
       clipboard = null;
-      TestWidgetsFlutterBinding.ensureInitialized()
-          .defaultBinaryMessenger
+      TestWidgetsFlutterBinding.ensureInitialized().defaultBinaryMessenger
           .setMockMethodCallHandler(SystemChannels.platform, (call) async {
-        if (call.method == 'Clipboard.setData') {
-          clipboard = (call.arguments as Map)['text'] as String?;
-        } else if (call.method == 'Clipboard.getData') {
-          return <String, dynamic>{'text': clipboard};
-        }
-        return null;
-      });
+            if (call.method == 'Clipboard.setData') {
+              clipboard = (call.arguments as Map)['text'] as String?;
+            } else if (call.method == 'Clipboard.getData') {
+              return <String, dynamic>{'text': clipboard};
+            }
+            return null;
+          });
     });
     tearDown(() {
-      TestWidgetsFlutterBinding.ensureInitialized()
-          .defaultBinaryMessenger
+      TestWidgetsFlutterBinding.ensureInitialized().defaultBinaryMessenger
           .setMockMethodCallHandler(SystemChannels.platform, null);
     });
 
-    testWidgets('tap copies the code, then clears it after the window',
-        (tester) async {
+    testWidgets('tap copies the code, then clears it after the window', (
+      tester,
+    ) async {
       await tester.pumpWidget(_host(OtpCard(account: _acc())));
       await tester.pump();
 
@@ -201,8 +218,9 @@ void main() {
       expect(copied, isNot(''));
     });
 
-    testWidgets('does NOT wipe if the user copied something else meanwhile',
-        (tester) async {
+    testWidgets('does NOT wipe if the user copied something else meanwhile', (
+      tester,
+    ) async {
       await tester.pumpWidget(_host(OtpCard(account: _acc())));
       await tester.pump();
 
@@ -213,8 +231,11 @@ void main() {
       // User copies their own content before the window elapses.
       clipboard = 'user-copied-something';
       await tester.pump(const Duration(seconds: 31));
-      expect(clipboard, 'user-copied-something',
-          reason: 'we never overwrite the user\'s own clipboard data');
+      expect(
+        clipboard,
+        'user-copied-something',
+        reason: 'we never overwrite the user\'s own clipboard data',
+      );
     });
   });
 }

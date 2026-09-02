@@ -59,43 +59,47 @@ class VaultLockState extends Equatable {
   const VaultLockState.uninitialized() : this._(VaultLockStatus.uninitialized);
 
   const VaultLockState.setupPending({required List<String> mnemonic})
-      : this._(VaultLockStatus.setupPending, mnemonic: mnemonic);
+    : this._(VaultLockStatus.setupPending, mnemonic: mnemonic);
 
   const VaultLockState.locked({
     VaultLockError? error,
     bool biometricEnrolled = false,
     bool deviceBiometricAvailable = false,
   }) : this._(
-          VaultLockStatus.locked,
-          error: error,
-          biometricEnrolled: biometricEnrolled,
-          deviceBiometricAvailable: deviceBiometricAvailable,
-        );
+         VaultLockStatus.locked,
+         error: error,
+         biometricEnrolled: biometricEnrolled,
+         deviceBiometricAvailable: deviceBiometricAvailable,
+       );
 
   const VaultLockState.unlocked({
     bool biometricEnrolled = false,
     bool deviceBiometricAvailable = false,
   }) : this._(
-          VaultLockStatus.unlocked,
-          biometricEnrolled: biometricEnrolled,
-          deviceBiometricAvailable: deviceBiometricAvailable,
-        );
+         VaultLockStatus.unlocked,
+         biometricEnrolled: biometricEnrolled,
+         deviceBiometricAvailable: deviceBiometricAvailable,
+       );
 
   const VaultLockState.locking() : this._(VaultLockStatus.locking);
 
   const VaultLockState.keyAttributesCorrupted()
-      : this._(VaultLockStatus.keyAttributesCorrupted);
+    : this._(VaultLockStatus.keyAttributesCorrupted);
 
   const VaultLockState.restoring() : this._(VaultLockStatus.restoring);
 
-  const VaultLockState.restoreFailed()
-      : this._(VaultLockStatus.restoreFailed);
+  const VaultLockState.restoreFailed() : this._(VaultLockStatus.restoreFailed);
 
   /// UnlockPage biyometri butonu görünürlüğü: enrolled VE cihaz uygun.
   bool get biometricUnlockAvailable =>
       biometricEnrolled && deviceBiometricAvailable;
 
   @override
-  List<Object?> get props =>
-      [status, mnemonic, error, biometricEnrolled, deviceBiometricAvailable];
+  List<Object?> get props => [
+    status,
+    mnemonic,
+    error,
+    biometricEnrolled,
+    deviceBiometricAvailable,
+  ];
 }

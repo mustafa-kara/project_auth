@@ -96,8 +96,10 @@ class _OtpCardState extends State<OtpCard> {
 
   void _syncTimer() {
     if (_isTimeBased) {
-      _timer ??=
-          Timer.periodic(const Duration(seconds: 1), (_) => _recompute());
+      _timer ??= Timer.periodic(
+        const Duration(seconds: 1),
+        (_) => _recompute(),
+      );
     } else {
       _timer?.cancel();
       _timer = null;
@@ -224,12 +226,14 @@ class _OtpCardState extends State<OtpCard> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(a.label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color:
-                            Theme.of(context).colorScheme.onSurfaceVariant)),
+                Text(
+                  a.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
                 const SizedBox(height: Gap.xs),
                 Text(_formattedCode, style: codeStyle),
               ],

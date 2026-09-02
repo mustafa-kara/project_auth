@@ -29,7 +29,10 @@ import 'package:project_auth/features/vault/presentation/bloc/vault_cubit.dart';
 const _goodPassword = 'Yedek-Parolam-123';
 
 OtpAccount _acc(String name) => OtpAccount(
-    secret: 'JBSWY3DPEHPK3PXP', type: OtpType.totp, accountName: name);
+  secret: 'JBSWY3DPEHPK3PXP',
+  type: OtpType.totp,
+  accountName: name,
+);
 
 class _FakeRepo implements VaultRepository {
   _FakeRepo([this.stored = const []]);
@@ -96,8 +99,7 @@ class _FakeBackup implements BackupService {
   Future<List<OtpAccount>> import({
     required String json,
     required String password,
-  }) async =>
-      const [];
+  }) async => const [];
 
   /// ExportPage never restores; an explicit throw keeps a wrong call loud
   /// instead of silently returning an empty vault.
@@ -105,8 +107,7 @@ class _FakeBackup implements BackupService {
   Future<BackupPayload> importDetailed({
     required String json,
     required String password,
-  }) async =>
-      throw UnimplementedError();
+  }) async => throw UnimplementedError();
 
   @override
   CryptoService get crypto => throw UnimplementedError();
@@ -214,53 +215,64 @@ void main() {
 
     expect(find.text('Şifreli yedek al'), findsOneWidget);
     expect(find.byType(TextFormField), findsNWidgets(2));
-    expect(find.byType(PasswordStrengthBar), findsNothing,
-        reason: 'parola boşken gösterge gizli');
+    expect(
+      find.byType(PasswordStrengthBar),
+      findsNothing,
+      reason: 'parola boşken gösterge gizli',
+    );
 
     await tester.enterText(find.byType(TextFormField).at(0), 'kisa');
     await tester.pump();
     expect(find.byType(PasswordStrengthBar), findsOneWidget);
   });
 
-  testWidgets('C7: güç göstergesi tema renklerini kullanır + tek semantik düğüm',
-      (tester) async {
-    await _pumpPage(
-      tester,
-      backup: _FakeBackup(),
-      documents: _FakeDocuments(),
-      lock: lock,
-      accounts: [_acc('a')],
-    );
+  testWidgets(
+    'C7: güç göstergesi tema renklerini kullanır + tek semantik düğüm',
+    (tester) async {
+      await _pumpPage(
+        tester,
+        backup: _FakeBackup(),
+        documents: _FakeDocuments(),
+        lock: lock,
+        accounts: [_acc('a')],
+      );
 
-    // "Orta" seviye: politikayı karşılar (12+ karakter, 3 sınıf) ama
-    // 16 karakter + 4 sınıf eşiğine ulaşmaz.
-    await tester.enterText(find.byType(TextFormField).at(0), 'Parolam12345');
-    await tester.pump();
+      // "Orta" seviye: politikayı karşılar (12+ karakter, 3 sınıf) ama
+      // 16 karakter + 4 sınıf eşiğine ulaşmaz.
+      await tester.enterText(find.byType(TextFormField).at(0), 'Parolam12345');
+      await tester.pump();
 
-    final scheme = Theme.of(tester.element(find.byType(PasswordStrengthBar)))
-        .colorScheme;
-    final bar = tester.widget<LinearProgressIndicator>(
-      find.descendant(
-        of: find.byType(PasswordStrengthBar),
-        matching: find.byType(LinearProgressIndicator),
-      ),
-    );
-    expect(bar.color, scheme.tertiary,
-        reason: 'sabit Colors.orange değil, şema rolü');
+      final scheme = Theme.of(
+        tester.element(find.byType(PasswordStrengthBar)),
+      ).colorScheme;
+      final bar = tester.widget<LinearProgressIndicator>(
+        find.descendant(
+          of: find.byType(PasswordStrengthBar),
+          matching: find.byType(LinearProgressIndicator),
+        ),
+      );
+      expect(
+        bar.color,
+        scheme.tertiary,
+        reason: 'sabit Colors.orange değil, şema rolü',
+      );
 
-    // `excludeSemantics: true` → alt düğümler (metin, ilerleme çubuğu) ayrı
-    // düğüm üretmez; ekran okuyucu tek bir "Parola gücü: Orta" duyurur.
-    final node = tester.getSemantics(find.byType(PasswordStrengthBar));
-    expect(node.label, 'Parola gücü: Orta');
-    var children = 0;
-    node.visitChildren((_) {
-      children++;
-      return true;
-    });
-    expect(children, 0, reason: 'alt semantik düğümler dışlanmalı');
-  });
+      // `excludeSemantics: true` → alt düğümler (metin, ilerleme çubuğu) ayrı
+      // düğüm üretmez; ekran okuyucu tek bir "Parola gücü: Orta" duyurur.
+      final node = tester.getSemantics(find.byType(PasswordStrengthBar));
+      expect(node.label, 'Parola gücü: Orta');
+      var children = 0;
+      node.visitChildren((_) {
+        children++;
+        return true;
+      });
+      expect(children, 0, reason: 'alt semantik düğümler dışlanmalı');
+    },
+  );
 
-  testWidgets('zayıf parola → politika hatası, export ÇAĞRILMAZ', (tester) async {
+  testWidgets('zayıf parola → politika hatası, export ÇAĞRILMAZ', (
+    tester,
+  ) async {
     final backup = _FakeBackup();
     final docs = _FakeDocuments();
     await _pumpPage(
@@ -290,8 +302,11 @@ void main() {
       accounts: [_acc('a')],
     );
 
-    await _fillForm(tester,
-        password: _goodPassword, confirm: 'Baska-Parola-999');
+    await _fillForm(
+      tester,
+      password: _goodPassword,
+      confirm: 'Baska-Parola-999',
+    );
     await tester.tap(find.widgetWithText(FilledButton, 'Yedek oluştur'));
     await tester.pumpAndSettle();
 
@@ -330,14 +345,17 @@ void main() {
 
     expect(find.text('Yedek oluşturuldu'), findsOneWidget);
     expect(
-      find.textContaining('master parolan ya da kurtarma anahtarın bu '
-          'dosyayı açmaz'),
+      find.textContaining(
+        'master parolan ya da kurtarma anahtarın bu '
+        'dosyayı açmaz',
+      ),
       findsOneWidget,
     );
   });
 
-  testWidgets('kaydetme iptal edilirse başarı diyaloğu GÖSTERİLMEZ',
-      (tester) async {
+  testWidgets('kaydetme iptal edilirse başarı diyaloğu GÖSTERİLMEZ', (
+    tester,
+  ) async {
     final backup = _FakeBackup();
     await _pumpPage(
       tester,
@@ -356,27 +374,32 @@ void main() {
     expect(lock.ends, 1, reason: 'iptalde de muafiyet kapanmalı');
   });
 
-  testWidgets('export patlarsa jenerik hata + muafiyet kapalı (secret sızmaz)',
-      (tester) async {
-    final backup = _FakeBackup(exportError: StateError('crypto patladı'));
-    final docs = _FakeDocuments();
-    await _pumpPage(
-      tester,
-      backup: backup,
-      documents: docs,
-      lock: lock,
-      accounts: [_acc('a')],
-    );
+  testWidgets(
+    'export patlarsa jenerik hata + muafiyet kapalı (secret sızmaz)',
+    (tester) async {
+      final backup = _FakeBackup(exportError: StateError('crypto patladı'));
+      final docs = _FakeDocuments();
+      await _pumpPage(
+        tester,
+        backup: backup,
+        documents: docs,
+        lock: lock,
+        accounts: [_acc('a')],
+      );
 
-    await _fillForm(tester, password: _goodPassword);
-    await tester.tap(find.widgetWithText(FilledButton, 'Yedek oluştur'));
-    await tester.pumpAndSettle();
+      await _fillForm(tester, password: _goodPassword);
+      await tester.tap(find.widgetWithText(FilledButton, 'Yedek oluştur'));
+      await tester.pumpAndSettle();
 
-    expect(docs.saveCount, 0);
-    expect(find.text('Yedek oluşturulamadı — tekrar dene.'), findsOneWidget);
-    expect(find.textContaining('crypto patladı'), findsNothing,
-        reason: 'teknik detay UI\'a sızmamalı');
-  });
+      expect(docs.saveCount, 0);
+      expect(find.text('Yedek oluşturulamadı — tekrar dene.'), findsOneWidget);
+      expect(
+        find.textContaining('crypto patladı'),
+        findsNothing,
+        reason: 'teknik detay UI\'a sızmamalı',
+      );
+    },
+  );
 
   testWidgets('kaydetme diyaloğu AÇIKKEN sayfa sökülürse muafiyet dispose\'ta '
       'kapanır', (tester) async {
@@ -410,9 +433,13 @@ void main() {
   });
 
   test('yedek dosya adı tarih damgalı', () {
-    expect(backupFileName(DateTime.utc(2026, 9, 2)),
-        'projectauth-backup-20260902.json');
-    expect(backupFileName(DateTime.utc(2026, 12, 31)),
-        'projectauth-backup-20261231.json');
+    expect(
+      backupFileName(DateTime.utc(2026, 9, 2)),
+      'projectauth-backup-20260902.json',
+    );
+    expect(
+      backupFileName(DateTime.utc(2026, 12, 31)),
+      'projectauth-backup-20261231.json',
+    );
   });
 }

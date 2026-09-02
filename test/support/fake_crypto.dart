@@ -32,7 +32,7 @@ class FakeKeyHandle implements KeyHandle {
   bool disposed = false;
 
   FakeKeyHandle([Uint8List? material])
-      : material = Uint8List.fromList(material ?? Uint8List(0));
+    : material = Uint8List.fromList(material ?? Uint8List(0));
 
   @override
   void dispose() => disposed = true;
@@ -133,7 +133,9 @@ class FakeCrypto implements CryptoService {
   /// Stand-in for the Poly1305 tag: any edit to the key id, the AAD or the
   /// ciphertext body is detected, so tamper tests behave as they do with sodium.
   static List<int> _tag(List<int> keyId, List<int> aad, List<int> plaintext) =>
-      sha256.convert(<int>[...keyId, 0, ...aad, 0, ...plaintext]).bytes
+      sha256
+          .convert(<int>[...keyId, 0, ...aad, 0, ...plaintext])
+          .bytes
           .sublist(0, 16);
 
   @override
@@ -141,23 +143,22 @@ class FakeCrypto implements CryptoService {
     required KeyHandle keyToWrap,
     required KeyHandle wrappingKey,
     required Uint8List aad,
-  }) =>
-      encrypt(plaintext: _keyId(keyToWrap), key: wrappingKey, aad: aad);
+  }) => encrypt(plaintext: _keyId(keyToWrap), key: wrappingKey, aad: aad);
 
   @override
   KeyHandle unwrapKey({
     required EncryptedBlob blob,
     required KeyHandle wrappingKey,
     required Uint8List aad,
-  }) =>
-      FakeKeyHandle(decrypt(blob: blob, key: wrappingKey, aad: aad));
+  }) => FakeKeyHandle(decrypt(blob: blob, key: wrappingKey, aad: aad));
 
   /// Deterministic "random": byte i = (counter + i) mod 256.
   @override
   Uint8List randomBytes(int n) {
     final seed = ++_counter;
     return Uint8List.fromList(
-        List<int>.generate(n, (i) => (seed + i) & 0xff, growable: false));
+      List<int>.generate(n, (i) => (seed + i) & 0xff, growable: false),
+    );
   }
 
   /// A handle with no material is a wildcard (empty id) → matches any other
@@ -166,7 +167,9 @@ class FakeCrypto implements CryptoService {
       key is FakeKeyHandle ? key.material : Uint8List(0);
 
   static List<int> _len(int n) {
-    if (n > 0xffff) throw ArgumentError.value(n, 'length', 'too long for the fake');
+    if (n > 0xffff) {
+      throw ArgumentError.value(n, 'length', 'too long for the fake');
+    }
     return <int>[(n >> 8) & 0xff, n & 0xff];
   }
 

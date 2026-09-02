@@ -19,6 +19,7 @@ import 'encrypted_blob.dart';
 /// Değişmez anahtar metadata değer nesnesi.
 class KeyAttributes {
   final Uint8List _kdfSalt;
+
   /// Desteklenen en yüksek şema versiyonu. İleri sürüm → [FormatException].
   static const int supportedVersion = 1;
 
@@ -58,11 +59,13 @@ class KeyAttributes {
   static void _validate(int version, Uint8List salt, int ops, int mem) {
     if (version < 1 || version > supportedVersion) {
       throw FormatException(
-          'KeyAttributes: desteklenmeyen version $version (beklenen 1..$supportedVersion)');
+        'KeyAttributes: desteklenmeyen version $version (beklenen 1..$supportedVersion)',
+      );
     }
     if (salt.length != saltBytes) {
       throw FormatException(
-          'KeyAttributes: kdfSalt $saltBytes byte olmalı (${salt.length})');
+        'KeyAttributes: kdfSalt $saltBytes byte olmalı (${salt.length})',
+      );
     }
     if (ops <= 0) {
       throw FormatException('KeyAttributes: kdfOps pozitif olmalı ($ops)');
@@ -108,15 +111,15 @@ class KeyAttributes {
   }
 
   Map<String, dynamic> toJson() => {
-        'v': version,
-        'salt': base64Encode(_kdfSalt),
-        'ops': kdfOps,
-        'mem': kdfMem,
-        'emk': encryptedMasterKey.toJson(),
-        'remk': recoveryEncryptedMasterKey.toJson(),
-        if (biometricEncryptedMasterKey != null)
-          'bmk': biometricEncryptedMasterKey!.toJson(),
-      };
+    'v': version,
+    'salt': base64Encode(_kdfSalt),
+    'ops': kdfOps,
+    'mem': kdfMem,
+    'emk': encryptedMasterKey.toJson(),
+    'remk': recoveryEncryptedMasterKey.toJson(),
+    if (biometricEncryptedMasterKey != null)
+      'bmk': biometricEncryptedMasterKey!.toJson(),
+  };
 
   /// [toJson] çıktısından geri kurar. Eksik/yanlış tip/geçersiz base64 →
   /// [FormatException] (bozuk metadata'dan sessizce hatalı attrs üretmemek için).
@@ -126,9 +129,14 @@ class KeyAttributes {
     final mem = _asInt(json['mem'], 'mem');
     final emk = _asMap(json['emk'], 'emk');
     final remk = _asMap(json['remk'], 'remk');
-    if (saltStr == null || ops == null || mem == null || emk == null || remk == null) {
+    if (saltStr == null ||
+        ops == null ||
+        mem == null ||
+        emk == null ||
+        remk == null) {
       throw const FormatException(
-          'KeyAttributes.fromJson: zorunlu alan eksik (salt/ops/mem/emk/remk)');
+        'KeyAttributes.fromJson: zorunlu alan eksik (salt/ops/mem/emk/remk)',
+      );
     }
     // bmk opsiyonel: yoksa null (eski/biyometrisiz vault). Doluysa EncryptedBlob.
     final bmk = _asMap(json['bmk'], 'bmk');
@@ -136,7 +144,9 @@ class KeyAttributes {
     try {
       salt = base64Decode(saltStr);
     } on FormatException {
-      throw const FormatException('KeyAttributes.fromJson: salt geçersiz base64');
+      throw const FormatException(
+        'KeyAttributes.fromJson: salt geçersiz base64',
+      );
     }
     return KeyAttributes(
       kdfSalt: salt,
@@ -144,7 +154,9 @@ class KeyAttributes {
       kdfMem: mem,
       encryptedMasterKey: EncryptedBlob.fromJson(emk),
       recoveryEncryptedMasterKey: EncryptedBlob.fromJson(remk),
-      biometricEncryptedMasterKey: bmk == null ? null : EncryptedBlob.fromJson(bmk),
+      biometricEncryptedMasterKey: bmk == null
+          ? null
+          : EncryptedBlob.fromJson(bmk),
       version: _asInt(json['v'], 'v') ?? supportedVersion,
     );
   }
@@ -152,7 +164,9 @@ class KeyAttributes {
   static String? _asString(Object? v, String name) {
     if (v == null) return null;
     if (v is String) return v;
-    throw FormatException('KeyAttributes.fromJson: "$name" String olmalı (${v.runtimeType})');
+    throw FormatException(
+      'KeyAttributes.fromJson: "$name" String olmalı (${v.runtimeType})',
+    );
   }
 
   /// Tamsayı bekler. `1.5` gibi kesirli `num` sessizce truncate EDİLMEZ → reddedilir.
@@ -160,16 +174,24 @@ class KeyAttributes {
     if (v == null) return null;
     if (v is int) return v;
     if (v is double) {
-      if (v == v.roundToDouble()) return v.toInt(); // tamsayı değerli double (JSON 3.0)
-      throw FormatException('KeyAttributes.fromJson: "$name" tamsayı olmalı, kesirli ($v)');
+      if (v == v.roundToDouble()) {
+        return v.toInt(); // tamsayı değerli double (JSON 3.0)
+      }
+      throw FormatException(
+        'KeyAttributes.fromJson: "$name" tamsayı olmalı, kesirli ($v)',
+      );
     }
-    throw FormatException('KeyAttributes.fromJson: "$name" sayı olmalı (${v.runtimeType})');
+    throw FormatException(
+      'KeyAttributes.fromJson: "$name" sayı olmalı (${v.runtimeType})',
+    );
   }
 
   static Map<String, dynamic>? _asMap(Object? v, String name) {
     if (v == null) return null;
     if (v is Map<String, dynamic>) return v;
     if (v is Map) return Map<String, dynamic>.from(v);
-    throw FormatException('KeyAttributes.fromJson: "$name" nesne olmalı (${v.runtimeType})');
+    throw FormatException(
+      'KeyAttributes.fromJson: "$name" nesne olmalı (${v.runtimeType})',
+    );
   }
 }

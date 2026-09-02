@@ -31,10 +31,14 @@ import 'package:project_auth/features/vault/presentation/bloc/vault_cubit.dart';
 /// Migration QR'ları (içerik önemsiz — parse enjekte edilmiş fake'te).
 const _qrA = 'otpauth-migration://offline?data=AAAA';
 const _qrB = 'otpauth-migration://offline?data=BBBB';
-const _singleToken = 'otpauth://totp/Example:me@example.com?secret=JBSWY3DPEHPK3PXP';
+const _singleToken =
+    'otpauth://totp/Example:me@example.com?secret=JBSWY3DPEHPK3PXP';
 
 OtpAccount _acc(String name) => OtpAccount(
-    secret: 'JBSWY3DPEHPK3PXP', type: OtpType.totp, accountName: name);
+  secret: 'JBSWY3DPEHPK3PXP',
+  type: OtpType.totp,
+  accountName: name,
+);
 
 class _FakeRepo implements VaultRepository {
   _FakeRepo({this.saveError});
@@ -101,29 +105,29 @@ class _FakeMigration implements MigrationScanController {
 }
 
 /// Tek kameradan gelen bir kare: istenen ham değerleri taşıyan `BarcodeCapture`.
-BarcodeCapture _capture(List<String> raws) => BarcodeCapture(
-      barcodes: [for (final raw in raws) Barcode(rawValue: raw)],
-    );
+BarcodeCapture _capture(List<String> raws) =>
+    BarcodeCapture(barcodes: [for (final raw in raws) Barcode(rawValue: raw)]);
 
 /// Yer tutucu "kamera": her QR için bir düğme. Basmak = o kareyi okumak.
 /// `scan:iki` TEK karede iki migration QR'ı yayınlar (kullanıcı iki kodu yan
 /// yana tutmuş).
 Widget _fakeScanner(
-        BuildContext context, void Function(BarcodeCapture capture) onDetect) =>
-    Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        for (final raw in const [_qrA, _qrB, _singleToken])
-          TextButton(
-            onPressed: () => onDetect(_capture([raw])),
-            child: Text('scan:${raw.substring(raw.length - 4)}'),
-          ),
-        TextButton(
-          onPressed: () => onDetect(_capture(const [_qrA, _qrB])),
-          child: const Text('scan:iki'),
-        ),
-      ],
-    );
+  BuildContext context,
+  void Function(BarcodeCapture capture) onDetect,
+) => Column(
+  mainAxisSize: MainAxisSize.min,
+  children: [
+    for (final raw in const [_qrA, _qrB, _singleToken])
+      TextButton(
+        onPressed: () => onDetect(_capture([raw])),
+        child: Text('scan:${raw.substring(raw.length - 4)}'),
+      ),
+    TextButton(
+      onPressed: () => onDetect(_capture(const [_qrA, _qrB])),
+      child: const Text('scan:iki'),
+    ),
+  ],
+);
 
 Finder _scan(String suffix) => find.text('scan:$suffix');
 
@@ -146,10 +150,7 @@ Future<VaultCubit> _pumpScan(
   final page = ScanPage(
     debugMigration: migration,
     debugScannerBuilder: _fakeScanner,
-    debugCamera: (
-      stop: onStop ?? () async {},
-      start: onStart ?? () async {},
-    ),
+    debugCamera: (stop: onStop ?? () async {}, start: onStart ?? () async {}),
     debugNow: now,
     debugScannerState: scannerState,
   );
@@ -161,8 +162,9 @@ Future<VaultCubit> _pumpScan(
         home: Scaffold(
           body: Builder(
             builder: (c) => TextButton(
-              onPressed: () => Navigator.of(c)
-                  .push(MaterialPageRoute<void>(builder: (_) => page)),
+              onPressed: () => Navigator.of(
+                c,
+              ).push(MaterialPageRoute<void>(builder: (_) => page)),
               child: const Text('tarayıcıyı aç'),
             ),
           ),
@@ -177,8 +179,9 @@ Future<VaultCubit> _pumpScan(
 
 void main() {
   testWidgets('migration QR → alt bantta sayaç ve yönerge', (tester) async {
-    final migration =
-        _FakeMigration(script: const {_qrA: MigrationBatchAdded(1, 3)});
+    final migration = _FakeMigration(
+      script: const {_qrA: MigrationBatchAdded(1, 3)},
+    );
     await _pumpScan(tester, migration: migration);
 
     // Migration moduna girmeden bant yok.
@@ -196,8 +199,9 @@ void main() {
   });
 
   testWidgets('tüm kodlar okununca "Devam" öne çıkar', (tester) async {
-    final migration =
-        _FakeMigration(script: const {_qrA: MigrationScanComplete(3, 3)});
+    final migration = _FakeMigration(
+      script: const {_qrA: MigrationScanComplete(3, 3)},
+    );
     await _pumpScan(tester, migration: migration);
 
     await tester.tap(_scan('AAAA'));
@@ -210,10 +214,12 @@ void main() {
   });
 
   testWidgets('tekrar okunan kod → uyarı, sayaç değişmez', (tester) async {
-    final migration = _FakeMigration(script: const {
-      _qrA: MigrationBatchAdded(1, 2),
-      _qrB: MigrationDuplicateScan(),
-    });
+    final migration = _FakeMigration(
+      script: const {
+        _qrA: MigrationBatchAdded(1, 2),
+        _qrB: MigrationDuplicateScan(),
+      },
+    );
     await _pumpScan(tester, migration: migration);
 
     await tester.tap(_scan('AAAA'));
@@ -226,10 +232,12 @@ void main() {
   });
 
   testWidgets('bozuk QR → sabit mesaj (neden açıklanmaz)', (tester) async {
-    final migration = _FakeMigration(script: const {
-      _qrA: MigrationBatchAdded(1, 2),
-      _qrB: MigrationMalformedQr(),
-    });
+    final migration = _FakeMigration(
+      script: const {
+        _qrA: MigrationBatchAdded(1, 2),
+        _qrB: MigrationMalformedQr(),
+      },
+    );
     await _pumpScan(tester, migration: migration);
 
     await tester.tap(_scan('AAAA'));
@@ -238,16 +246,21 @@ void main() {
     await tester.pump();
 
     expect(
-        find.text('Bu QR bir Google Authenticator aktarım kodu değil ya da bozuk.'),
-        findsOneWidget);
+      find.text(
+        'Bu QR bir Google Authenticator aktarım kodu değil ya da bozuk.',
+      ),
+      findsOneWidget,
+    );
     expect(find.text('1/2 kod tarandı'), findsOneWidget);
   });
 
   testWidgets('kapasite aşımı → "çok fazla hesap" uyarısı', (tester) async {
-    final migration = _FakeMigration(script: const {
-      _qrA: MigrationBatchAdded(1, 2),
-      _qrB: MigrationScanFull(),
-    });
+    final migration = _FakeMigration(
+      script: const {
+        _qrA: MigrationBatchAdded(1, 2),
+        _qrB: MigrationScanFull(),
+      },
+    );
     await _pumpScan(tester, migration: migration);
 
     await tester.tap(_scan('AAAA'));
@@ -259,16 +272,23 @@ void main() {
   });
 
   group('farklı dışa aktarma diyaloğu', () {
-    _FakeMigration build() => _FakeMigration(script: const {
-          _qrA: MigrationBatchAdded(1, 3),
-          _qrB: MigrationDifferentBatch(),
-        });
+    _FakeMigration build() => _FakeMigration(
+      script: const {
+        _qrA: MigrationBatchAdded(1, 3),
+        _qrB: MigrationDifferentBatch(),
+      },
+    );
 
-    testWidgets('"Vazgeç" → toplanan kodlar korunur, reset yok', (tester) async {
+    testWidgets('"Vazgeç" → toplanan kodlar korunur, reset yok', (
+      tester,
+    ) async {
       final migration = build();
       var starts = 0;
-      await _pumpScan(tester,
-          migration: migration, onStart: () async => starts++);
+      await _pumpScan(
+        tester,
+        migration: migration,
+        onStart: () async => starts++,
+      );
 
       await tester.tap(_scan('AAAA'));
       await tester.pumpAndSettle();
@@ -276,8 +296,9 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-          find.text('Bu QR farklı bir dışa aktarmaya ait. Baştan başlansın mı?'),
-          findsOneWidget);
+        find.text('Bu QR farklı bir dışa aktarmaya ait. Baştan başlansın mı?'),
+        findsOneWidget,
+      );
 
       await tester.tap(find.text('Vazgeç'));
       await tester.pumpAndSettle();
@@ -287,8 +308,9 @@ void main() {
       expect(find.text('1/3 kod tarandı'), findsOneWidget);
     });
 
-    testWidgets('"Baştan başla" → reset + kamera yeniden başlatılır',
-        (tester) async {
+    testWidgets('"Baştan başla" → reset + kamera yeniden başlatılır', (
+      tester,
+    ) async {
       final migration = build();
       var stops = 0;
       var starts = 0;
@@ -345,8 +367,9 @@ void main() {
     });
   });
 
-  testWidgets('"Bu kadar yeter" → uyarı → önizleme (kısmi aktarım)',
-      (tester) async {
+  testWidgets('"Bu kadar yeter" → uyarı → önizleme (kısmi aktarım)', (
+    tester,
+  ) async {
     final migration = _FakeMigration(
       script: const {_qrA: MigrationBatchAdded(1, 3)},
       previewResult: ImportPreview(
@@ -364,8 +387,10 @@ void main() {
     await tester.tap(find.text('Bu kadar yeter'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Yalnız taradığın kodlardaki hesaplar aktarılacak.'),
-        findsOneWidget);
+    expect(
+      find.text('Yalnız taradığın kodlardaki hesaplar aktarılacak.'),
+      findsOneWidget,
+    );
     await tester.tap(find.widgetWithText(FilledButton, 'Devam'));
     await tester.pumpAndSettle();
 
@@ -380,8 +405,10 @@ void main() {
   testWidgets('"Bu kadar yeter" → "Vazgeç" → önizleme AÇILMAZ', (tester) async {
     final migration = _FakeMigration(
       script: const {_qrA: MigrationBatchAdded(1, 3)},
-      previewResult:
-          const ImportPreview(source: ImportSource.googleAuth, toAdd: []),
+      previewResult: const ImportPreview(
+        source: ImportSource.googleAuth,
+        toAdd: [],
+      ),
     );
     await _pumpScan(tester, migration: migration);
 
@@ -396,17 +423,19 @@ void main() {
     expect(find.text('1/3 kod tarandı'), findsOneWidget);
   });
 
-  testWidgets('onay → VaultCubit.addAll + SnackBar + sayfa kapanır',
-      (tester) async {
+  testWidgets('onay → VaultCubit.addAll + SnackBar + sayfa kapanır', (
+    tester,
+  ) async {
     final toAdd = [_acc('a'), _acc('b')];
     final repo = _FakeRepo();
     final migration = _FakeMigration(
       script: const {_qrA: MigrationScanComplete(1, 1)},
-      previewResult:
-          ImportPreview(source: ImportSource.googleAuth, toAdd: toAdd),
+      previewResult: ImportPreview(
+        source: ImportSource.googleAuth,
+        toAdd: toAdd,
+      ),
     );
-    final vault =
-        await _pumpScan(tester, migration: migration, repo: repo);
+    final vault = await _pumpScan(tester, migration: migration, repo: repo);
 
     await tester.tap(_scan('AAAA'));
     await tester.pumpAndSettle();
@@ -419,17 +448,23 @@ void main() {
     expect(repo.stored.length, 2, reason: 'addAll persist etmeli');
     expect(find.text('2 token eklendi'), findsOneWidget);
     expect(find.text('tarayıcıyı aç'), findsOneWidget, reason: 'sayfa kapandı');
-    expect(migration.resets, greaterThanOrEqualTo(1),
-        reason: 'secret\'lar bellekte kalmamalı');
+    expect(
+      migration.resets,
+      greaterThanOrEqualTo(1),
+      reason: 'secret\'lar bellekte kalmamalı',
+    );
   });
 
-  testWidgets('addAll hata verirse sayfa KAPANMAZ, hata gösterilir',
-      (tester) async {
+  testWidgets('addAll hata verirse sayfa KAPANMAZ, hata gösterilir', (
+    tester,
+  ) async {
     final repo = _FakeRepo(saveError: StateError('disk dolu'));
     final migration = _FakeMigration(
       script: const {_qrA: MigrationScanComplete(1, 1)},
-      previewResult:
-          ImportPreview(source: ImportSource.googleAuth, toAdd: [_acc('a')]),
+      previewResult: ImportPreview(
+        source: ImportSource.googleAuth,
+        toAdd: [_acc('a')],
+      ),
     );
     await _pumpScan(tester, migration: migration, repo: repo);
 
@@ -441,7 +476,11 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Tokenlar kaydedilemedi — tekrar dene.'), findsOneWidget);
-    expect(find.text('tarayıcıyı aç'), findsNothing, reason: 'sayfa açık kalmalı');
+    expect(
+      find.text('tarayıcıyı aç'),
+      findsNothing,
+      reason: 'sayfa açık kalmalı',
+    );
   });
 
   testWidgets('boş sonuç → önizlemeye GEÇMEZ, uyarı gösterir', (tester) async {
@@ -456,8 +495,10 @@ void main() {
     await tester.tap(find.widgetWithText(FilledButton, 'Devam'));
     await tester.pump();
 
-    expect(find.text('Bu kodlarda içe aktarılacak token bulunamadı.'),
-        findsOneWidget);
+    expect(
+      find.text('Bu kodlarda içe aktarılacak token bulunamadı.'),
+      findsOneWidget,
+    );
     expect(find.text('1/1 kod tarandı'), findsOneWidget);
   });
 
@@ -484,13 +525,16 @@ void main() {
     expect(find.text('1 token içe aktarılacak'), findsOneWidget);
   });
 
-  testWidgets('vault\'taki mevcut tokenlar dedupe girdisi olarak geçer',
-      (tester) async {
+  testWidgets('vault\'taki mevcut tokenlar dedupe girdisi olarak geçer', (
+    tester,
+  ) async {
     final existing = [_acc('mevcut')];
     final migration = _FakeMigration(
       script: const {_qrA: MigrationScanComplete(1, 1)},
-      previewResult:
-          const ImportPreview(source: ImportSource.googleAuth, toAdd: []),
+      previewResult: const ImportPreview(
+        source: ImportSource.googleAuth,
+        toAdd: [],
+      ),
     );
     await _pumpScan(tester, migration: migration, existing: existing);
 
@@ -502,15 +546,19 @@ void main() {
     expect(migration.lastExisting?.map((a) => a.id), existing.map((a) => a.id));
     // toAdd boş → onay pasif.
     final button = tester.widget<FilledButton>(
-        find.widgetWithText(FilledButton, 'İçe aktar'));
+      find.widgetWithText(FilledButton, 'İçe aktar'),
+    );
     expect(button.onPressed, isNull);
   });
 
   group('tek token yolu korunur', () {
     testWidgets('otpauth:// QR → vault.add + sayfa kapanır', (tester) async {
       final repo = _FakeRepo();
-      final vault = await _pumpScan(tester,
-          migration: _FakeMigration(), repo: repo);
+      final vault = await _pumpScan(
+        tester,
+        migration: _FakeMigration(),
+        repo: repo,
+      );
 
       await tester.tap(_scan('3PXP'));
       await tester.pumpAndSettle();
@@ -520,8 +568,9 @@ void main() {
     });
 
     testWidgets('migration yarıdayken tek token QR EKLENMEZ', (tester) async {
-      final migration =
-          _FakeMigration(script: const {_qrA: MigrationBatchAdded(1, 3)});
+      final migration = _FakeMigration(
+        script: const {_qrA: MigrationBatchAdded(1, 3)},
+      );
       final vault = await _pumpScan(tester, migration: migration);
 
       await tester.tap(_scan('AAAA'));
@@ -535,12 +584,15 @@ void main() {
   });
 
   group('tek karede birden çok barkod', () {
-    testWidgets('migration modunda karedeki TÜM kodlar işlenir',
-        (tester) async {
-      final migration = _FakeMigration(script: const {
-        _qrA: MigrationBatchAdded(1, 2),
-        _qrB: MigrationScanComplete(2, 2),
-      });
+    testWidgets('migration modunda karedeki TÜM kodlar işlenir', (
+      tester,
+    ) async {
+      final migration = _FakeMigration(
+        script: const {
+          _qrA: MigrationBatchAdded(1, 2),
+          _qrB: MigrationScanComplete(2, 2),
+        },
+      );
       await _pumpScan(tester, migration: migration);
 
       await tester.tap(_scan('AAAA'));
@@ -556,10 +608,12 @@ void main() {
       expect(find.text('2/2 kod tarandı'), findsOneWidget);
     });
 
-    testWidgets('tek-token modunda karenin yalnız ilk barkodu işlenir',
-        (tester) async {
-      final migration =
-          _FakeMigration(script: const {_qrA: MigrationBatchAdded(1, 2)});
+    testWidgets('tek-token modunda karenin yalnız ilk barkodu işlenir', (
+      tester,
+    ) async {
+      final migration = _FakeMigration(
+        script: const {_qrA: MigrationBatchAdded(1, 2)},
+      );
       await _pumpScan(tester, migration: migration);
 
       await tester.tap(find.text('scan:iki'));
@@ -577,10 +631,16 @@ void main() {
         _qrA: MigrationScanComplete(1, 1),
         _qrB: MigrationBatchAdded(2, 2),
       },
-      previewResult:
-          ImportPreview(source: ImportSource.googleAuth, toAdd: [_acc('a')]),
+      previewResult: ImportPreview(
+        source: ImportSource.googleAuth,
+        toAdd: [_acc('a')],
+      ),
     );
-    await _pumpScan(tester, migration: migration, onStop: () => stopGate.future);
+    await _pumpScan(
+      tester,
+      migration: migration,
+      onStop: () => stopGate.future,
+    );
 
     await tester.tap(_scan('AAAA'));
     await tester.pumpAndSettle();
@@ -593,21 +653,27 @@ void main() {
     await tester.tap(_scan('BBBB'));
     await tester.pump();
 
-    expect(migration.seen, [_qrA],
-        reason: 'önizleme istendikten sonra gelen kare koleksiyona girmemeli');
+    expect(
+      migration.seen,
+      [_qrA],
+      reason: 'önizleme istendikten sonra gelen kare koleksiyona girmemeli',
+    );
 
     stopGate.complete();
     await tester.pumpAndSettle();
     expect(find.text('1 token içe aktarılacak'), findsOneWidget);
   });
 
-  testWidgets('aynı hata üst üste → tek SnackBar, pencere dolunca yeniden',
-      (tester) async {
+  testWidgets('aynı hata üst üste → tek SnackBar, pencere dolunca yeniden', (
+    tester,
+  ) async {
     var now = DateTime(2026, 1, 1);
-    final migration = _FakeMigration(script: const {
-      _qrA: MigrationBatchAdded(1, 2),
-      _qrB: MigrationDuplicateScan(),
-    });
+    final migration = _FakeMigration(
+      script: const {
+        _qrA: MigrationBatchAdded(1, 2),
+        _qrB: MigrationDuplicateScan(),
+      },
+    );
     await _pumpScan(tester, migration: migration, now: () => now);
 
     double snackBarValue() =>
@@ -632,8 +698,11 @@ void main() {
     expect(find.byType(SnackBar), findsOneWidget);
     // Yeniden gösterilseydi `clearSnackBars()` gizlenme animasyonunu
     // başlatırdı ve değer 1.0'ın altına düşerdi.
-    expect(snackBarValue(), 1.0,
-        reason: 'throttle: SnackBar hiç yeniden gösterilmedi');
+    expect(
+      snackBarValue(),
+      1.0,
+      reason: 'throttle: SnackBar hiç yeniden gösterilmedi',
+    );
     expect(migration.seen.length, 6, reason: 'kareler yine de işlendi');
 
     // Pencere dolunca aynı mesaj yeniden gösterilir.
@@ -641,8 +710,11 @@ void main() {
     await tester.tap(_scan('BBBB'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 60));
-    expect(snackBarValue(), lessThan(1.0),
-        reason: 'pencere doldu → eski SnackBar gizlenip yenisi kuyruğa girdi');
+    expect(
+      snackBarValue(),
+      lessThan(1.0),
+      reason: 'pencere doldu → eski SnackBar gizlenip yenisi kuyruğa girdi',
+    );
 
     await tester.pumpAndSettle();
     expect(find.text('Bu kod zaten okundu'), findsOneWidget);
@@ -657,9 +729,9 @@ void main() {
       SecureScreen.debugReset();
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(channel, (call) async {
-        calls.add(call.method);
-        return null;
-      });
+            calls.add(call.method);
+            return null;
+          });
     });
 
     tearDown(() {
@@ -668,7 +740,9 @@ void main() {
       SecureScreen.debugReset();
     });
 
-    testWidgets('ScanPage hassas ekran korumasını açar/kapatır', (tester) async {
+    testWidgets('ScanPage hassas ekran korumasını açar/kapatır', (
+      tester,
+    ) async {
       final migration = _FakeMigration();
       await _pumpScan(tester, migration: migration);
 
@@ -680,8 +754,11 @@ void main() {
 
       expect(calls, ['enable', 'disable']);
       expect(SecureScreen.holderCount, 0);
-      expect(migration.resets, 1,
-          reason: 'dispose toplanan secret\'ları düşürmeli');
+      expect(
+        migration.resets,
+        1,
+        reason: 'dispose toplanan secret\'ları düşürmeli',
+      );
     });
   });
 
@@ -718,11 +795,7 @@ void main() {
 
     testWidgets('kamera hazır olunca aksiyonlar aktifleşir', (tester) async {
       final state = notifier(initialized: false);
-      await _pumpScan(
-        tester,
-        migration: _FakeMigration(),
-        scannerState: state,
-      );
+      await _pumpScan(tester, migration: _FakeMigration(), scannerState: state);
       expect(tester.widget<IconButton>(swapBtn()).onPressed, isNull);
 
       state.value = state.value.copyWith(isInitialized: true);
@@ -736,8 +809,10 @@ void main() {
       await _pumpScan(
         tester,
         migration: _FakeMigration(),
-        scannerState:
-            notifier(initialized: true, torch: TorchState.unavailable),
+        scannerState: notifier(
+          initialized: true,
+          torch: TorchState.unavailable,
+        ),
       );
 
       expect(torchBtn(), findsNothing);
@@ -748,7 +823,9 @@ void main() {
       final migration = _FakeMigration(
         script: const {_qrA: MigrationScanComplete(1, 1)},
         previewResult: ImportPreview(
-            source: ImportSource.googleAuth, toAdd: [_acc('a')]),
+          source: ImportSource.googleAuth,
+          toAdd: [_acc('a')],
+        ),
       );
       await _pumpScan(
         tester,
@@ -768,10 +845,12 @@ void main() {
   });
 
   group('C5 — migration sırasındaki uyarılar', () {
-    testWidgets('araya giren tek-token QR\'ı kendi mesajını alır',
-        (tester) async {
-      final migration =
-          _FakeMigration(script: const {_qrA: MigrationBatchAdded(1, 3)});
+    testWidgets('araya giren tek-token QR\'ı kendi mesajını alır', (
+      tester,
+    ) async {
+      final migration = _FakeMigration(
+        script: const {_qrA: MigrationBatchAdded(1, 3)},
+      );
       await _pumpScan(tester, migration: migration);
 
       await tester.tap(_scan('AAAA'));
@@ -780,25 +859,33 @@ void main() {
       await tester.pump();
 
       expect(
-        find.text('Aktarım sürüyor — önce kalan kodları okut ya da Baştan '
-            'başla.'),
+        find.text(
+          'Aktarım sürüyor — önce kalan kodları okut ya da Baştan '
+          'başla.',
+        ),
         findsOneWidget,
       );
       expect(
         find.text(
-            'Bu QR bir Google Authenticator aktarım kodu değil ya da bozuk.'),
+          'Bu QR bir Google Authenticator aktarım kodu değil ya da bozuk.',
+        ),
         findsNothing,
         reason: 'geçerli bir kod "bozuk" diye etiketlenmemeli',
       );
-      expect(find.text('1/3 kod tarandı'), findsOneWidget,
-          reason: 'toplananlar korunur');
+      expect(
+        find.text('1/3 kod tarandı'),
+        findsOneWidget,
+        reason: 'toplananlar korunur',
+      );
     });
 
     testWidgets('diyalog AÇIKKEN gelen aynı QR sessiz kalmaz', (tester) async {
-      final migration = _FakeMigration(script: const {
-        _qrA: MigrationBatchAdded(1, 3),
-        _qrB: MigrationDifferentBatch(),
-      });
+      final migration = _FakeMigration(
+        script: const {
+          _qrA: MigrationBatchAdded(1, 3),
+          _qrB: MigrationDifferentBatch(),
+        },
+      );
       await _pumpScan(tester, migration: migration);
 
       await tester.tap(_scan('AAAA'));
@@ -806,8 +893,9 @@ void main() {
       await tester.tap(_scan('BBBB'));
       await tester.pumpAndSettle();
       expect(
-          find.text('Bu QR farklı bir dışa aktarmaya ait. Baştan başlansın mı?'),
-          findsOneWidget);
+        find.text('Bu QR farklı bir dışa aktarmaya ait. Baştan başlansın mı?'),
+        findsOneWidget,
+      );
 
       // iOS'ta kadrajda duran QR her karede yeniden gelir → ikinci kare.
       // Yer tutucu "kamera" diyalogun ALTINDA kaldığı için tap modal bariyere
@@ -820,9 +908,10 @@ void main() {
 
       expect(find.text('Bu kod için soru zaten açık.'), findsOneWidget);
       expect(
-          find.text('Bu QR farklı bir dışa aktarmaya ait. Baştan başlansın mı?'),
-          findsOneWidget,
-          reason: 'ikinci diyalog YIĞILMAZ');
+        find.text('Bu QR farklı bir dışa aktarmaya ait. Baştan başlansın mı?'),
+        findsOneWidget,
+        reason: 'ikinci diyalog YIĞILMAZ',
+      );
 
       await tester.tap(find.text('Vazgeç'));
       await tester.pumpAndSettle();

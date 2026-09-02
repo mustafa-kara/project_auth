@@ -24,14 +24,14 @@ class AuthInvalidCredentials extends AuthError {
 
 /// Hesap var ama e-posta onaylanmamış (`email_not_confirmed`).
 class AuthEmailNotConfirmed extends AuthError {
-  const AuthEmailNotConfirmed(
-      [super.message = 'E-posta adresin henüz onaylanmadı.']);
+  const AuthEmailNotConfirmed([
+    super.message = 'E-posta adresin henüz onaylanmadı.',
+  ]);
 }
 
 /// Bu e-posta zaten kayıtlı (`email_exists` / `user_already_exists`).
 class AuthEmailAlreadyInUse extends AuthError {
-  const AuthEmailAlreadyInUse(
-      [super.message = 'Bu e-posta zaten kayıtlı.']);
+  const AuthEmailAlreadyInUse([super.message = 'Bu e-posta zaten kayıtlı.']);
 }
 
 /// Parola politikası karşılanmadı (`weak_password`).
@@ -41,8 +41,9 @@ class AuthWeakPassword extends AuthError {
 
 /// Ağ/bağlantı hatası (`AuthRetryableFetchException` veya stream error).
 class AuthNetworkError extends AuthError {
-  const AuthNetworkError(
-      [super.message = 'Bağlantı hatası. İnternetini kontrol et.']);
+  const AuthNetworkError([
+    super.message = 'Bağlantı hatası. İnternetini kontrol et.',
+  ]);
 }
 
 /// Eşleştirilemeyen diğer hatalar.

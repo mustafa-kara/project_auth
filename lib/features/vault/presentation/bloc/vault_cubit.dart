@@ -53,17 +53,22 @@ class VaultState extends Equatable {
     Object? error,
     bool clearError = false,
     SyncState? syncState,
-  }) =>
-      VaultState(
-        loaded: loaded ?? this.loaded,
-        accounts: accounts ?? this.accounts,
-        corruptedCount: corruptedCount ?? this.corruptedCount,
-        error: clearError ? null : (error ?? this.error),
-        syncState: syncState ?? this.syncState,
-      );
+  }) => VaultState(
+    loaded: loaded ?? this.loaded,
+    accounts: accounts ?? this.accounts,
+    corruptedCount: corruptedCount ?? this.corruptedCount,
+    error: clearError ? null : (error ?? this.error),
+    syncState: syncState ?? this.syncState,
+  );
 
   @override
-  List<Object?> get props => [loaded, accounts, corruptedCount, error, syncState];
+  List<Object?> get props => [
+    loaded,
+    accounts,
+    corruptedCount,
+    error,
+    syncState,
+  ];
 }
 
 class VaultCubit extends Cubit<VaultState> {
@@ -94,12 +99,12 @@ class VaultCubit extends Cubit<VaultState> {
     bool Function()? tokenSyncEnabled,
     Future<void> Function()? ensureTokenSyncReady,
     IssuerCatalog Function()? issuerCatalogResolver,
-  })  : _sync = sync,
-        _rawStore = rawStore,
-        _tokenSyncEnabled = tokenSyncEnabled,
-        _ensureTokenSyncReady = ensureTokenSyncReady,
-        _issuerCatalogResolver = issuerCatalogResolver,
-        super(const VaultState());
+  }) : _sync = sync,
+       _rawStore = rawStore,
+       _tokenSyncEnabled = tokenSyncEnabled,
+       _ensureTokenSyncReady = ensureTokenSyncReady,
+       _issuerCatalogResolver = issuerCatalogResolver,
+       super(const VaultState());
 
   /// Issuer'ı katalog kanonik adına hizalar; eşleşme yok/katalog yok → DEĞİŞTİRMEZ.
   ///
@@ -157,12 +162,14 @@ class VaultCubit extends Cubit<VaultState> {
       if (!_firstLoad.isCompleted) _firstLoad.complete();
       return;
     }
-    emit(state.copyWith(
-      loaded: true,
-      accounts: result.accounts,
-      corruptedCount: result.corruptedCount,
-      clearError: true,
-    ));
+    emit(
+      state.copyWith(
+        loaded: true,
+        accounts: result.accounts,
+        corruptedCount: result.corruptedCount,
+        clearError: true,
+      ),
+    );
     if (!_firstLoad.isCompleted) _firstLoad.complete();
 
     // Faz 3 Patch 3 — ilk load BİTTİKTEN sonra sync başlat (post-unlock; key_attributes
@@ -175,7 +182,9 @@ class VaultCubit extends Cubit<VaultState> {
       // fallback=true (sync çalışır). key_attributes bundan ETKİLENMEZ (VaultLockCubit ayrı).
       try {
         await (_ensureTokenSyncReady?.call() ?? Future<void>.value());
-      } catch (_) {/* timeout/hata → fallback (isEnabled true) */}
+      } catch (_) {
+        /* timeout/hata → fallback (isEnabled true) */
+      }
       if (isClosed) return;
       if (!_syncFlagOn) return; // kill-switch: token sync başlamaz
 
@@ -212,18 +221,19 @@ class VaultCubit extends Cubit<VaultState> {
   /// satırlar diske yazılmadan cursor ilerler → sonraki pull onları atlar). Non-null
   /// (boş pull'da `none` dahil) = merge ÇALIŞTI, disk tutarlı → cursor ilerleyebilir.
   Future<TokenMergeOutcome?> applyRemoteMerge(
-          List<RemoteTokenRow> rows, String? pullCursorIso) =>
-      _sequenceValue<TokenMergeOutcome?>(() async {
-        final raw = _rawStore;
-        if (raw == null || !_firstLoad.isCompleted || isClosed) {
-          return null; // merge YAPILAMADI → cursor ilerletilmemeli
-        }
-        final outcome = await raw.importRemote(rows, pullCursorIso: pullCursorIso);
-        if (outcome.changed && !isClosed) {
-          await _reloadFromStoreUnsequenced(); // ZATEN sequencer içindeyiz
-        }
-        return outcome;
-      });
+    List<RemoteTokenRow> rows,
+    String? pullCursorIso,
+  ) => _sequenceValue<TokenMergeOutcome?>(() async {
+    final raw = _rawStore;
+    if (raw == null || !_firstLoad.isCompleted || isClosed) {
+      return null; // merge YAPILAMADI → cursor ilerletilmemeli
+    }
+    final outcome = await raw.importRemote(rows, pullCursorIso: pullCursorIso);
+    if (outcome.changed && !isClosed) {
+      await _reloadFromStoreUnsequenced(); // ZATEN sequencer içindeyiz
+    }
+    return outcome;
+  });
 
   /// Canlı senkron desteği var mı (sync bağlı + uid'li + token_sync_enabled flag açık).
   /// UI toggle'ı bununla gizlenir/gösterilir (flag false → toggle gizli — Adım F).
@@ -264,12 +274,14 @@ class VaultCubit extends Cubit<VaultState> {
       return;
     }
     if (isClosed) return;
-    emit(state.copyWith(
-      loaded: true,
-      accounts: result.accounts,
-      corruptedCount: result.corruptedCount,
-      clearError: true,
-    ));
+    emit(
+      state.copyWith(
+        loaded: true,
+        accounts: result.accounts,
+        corruptedCount: result.corruptedCount,
+        clearError: true,
+      ),
+    );
   }
 
   /// Bozuk/çözülemeyen kayıtları KALICI siler (yalnız açık kullanıcı onayıyla
@@ -331,15 +343,18 @@ class VaultCubit extends Cubit<VaultState> {
     return _sequence(() async {
       _guardIntegrity();
       final existingIds = state.accounts.map((a) => a.id).toSet();
-      final existingKeys =
-          keyOf == null ? <String>{} : state.accounts.map(keyOf).toSet();
+      final existingKeys = keyOf == null
+          ? <String>{}
+          : state.accounts.map(keyOf).toSet();
       final fresh = <OtpAccount>[];
       for (final account in normalized) {
         if (!existingIds.add(account.id)) continue;
         if (keyOf != null && !existingKeys.add(keyOf(account))) continue;
         fresh.add(account);
       }
-      if (fresh.isEmpty) return; // hepsi bu arada eklenmiş → yazma da push da yok
+      if (fresh.isEmpty) {
+        return; // hepsi bu arada eklenmiş → yazma da push da yok
+      }
       await _emitAndPersist([...state.accounts, ...fresh]);
       _pushAfterMutation();
     });
@@ -510,9 +525,13 @@ class VaultCubit extends Cubit<VaultState> {
         // `normalizeTags` keeps the FIRST occurrence — so the survivor sits
         // where the earlier of the two sat, which is the renamed tag's own slot
         // when it came first.
-        next.add(account.copyWith(tags: [
-          for (final tag in account.tags) tag == source ? target : tag,
-        ]));
+        next.add(
+          account.copyWith(
+            tags: [
+              for (final tag in account.tags) tag == source ? target : tag,
+            ],
+          ),
+        );
       }
       if (!changed) return; // nobody carries it → no write, no push
       await _emitAndPersist(next);
@@ -541,10 +560,14 @@ class VaultCubit extends Cubit<VaultState> {
         changed = true;
         // An empty list CLEARS the tags (`OtpAccount.copyWith` semantics); the
         // account itself is untouched.
-        next.add(account.copyWith(tags: [
-          for (final t in account.tags)
-            if (t != target) t,
-        ]));
+        next.add(
+          account.copyWith(
+            tags: [
+              for (final t in account.tags)
+                if (t != target) t,
+            ],
+          ),
+        );
       }
       if (!changed) return; // nobody carries it → no write, no push
       await _emitAndPersist(next);
@@ -591,8 +614,9 @@ class VaultCubit extends Cubit<VaultState> {
   void _guardIntegrity() {
     if (state.error != null) {
       throw StateError(
-          'Vault bütünlük hatası state\'inde — değişiklik kaydedilemez. '
-          'Önce vault\'u yeniden aç veya sıfırla.');
+        'Vault bütünlük hatası state\'inde — değişiklik kaydedilemez. '
+        'Önce vault\'u yeniden aç veya sıfırla.',
+      );
     }
   }
 

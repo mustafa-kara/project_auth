@@ -13,12 +13,11 @@ class ActiveAccountStore {
   final FlutterSecureStorage _storage;
 
   ActiveAccountStore({FlutterSecureStorage? storage})
-      : _storage = storage ?? const FlutterSecureStorage();
+    : _storage = storage ?? const FlutterSecureStorage();
 
   Future<String?> read() => _storage.read(key: storageKey);
 
-  Future<void> write(String uid) =>
-      _storage.write(key: storageKey, value: uid);
+  Future<void> write(String uid) => _storage.write(key: storageKey, value: uid);
 
   Future<void> clear() => _storage.delete(key: storageKey);
 }

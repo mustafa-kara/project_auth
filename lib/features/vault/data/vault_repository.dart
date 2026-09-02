@@ -40,7 +40,7 @@ class SecureStorageVaultRepository implements VaultRepository {
   final FlutterSecureStorage _storage;
 
   SecureStorageVaultRepository({FlutterSecureStorage? storage})
-      : _storage = storage ?? const FlutterSecureStorage();
+    : _storage = storage ?? const FlutterSecureStorage();
 
   @override
   Future<VaultLoadResult> load() async {
@@ -96,6 +96,7 @@ class SecureStorageVaultRepository implements VaultRepository {
 
   /// JSON map'in anahtarlarını String'e çevirir (jsonDecode zaten String anahtar
   /// üretir; bu, doğrudan kurcalanmış veriye karşı ek savunma).
-  static Map<String, dynamic> _coerceStringKeys(Map<dynamic, dynamic> m) =>
-      {for (final e in m.entries) e.key.toString(): e.value};
+  static Map<String, dynamic> _coerceStringKeys(Map<dynamic, dynamic> m) => {
+    for (final e in m.entries) e.key.toString(): e.value,
+  };
 }

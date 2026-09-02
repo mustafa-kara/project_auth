@@ -19,7 +19,9 @@ class OtpAuthUri {
   static OtpAccount parse(String input) {
     final uri = Uri.tryParse(input.trim());
     if (uri == null || uri.scheme.toLowerCase() != 'otpauth') {
-      throw const FormatException('Geçersiz otpauth URI: şema "otpauth" olmalı');
+      throw const FormatException(
+        'Geçersiz otpauth URI: şema "otpauth" olmalı',
+      );
     }
 
     final host = uri.host.toLowerCase();
@@ -31,8 +33,9 @@ class OtpAuthUri {
     };
 
     // LABEL: path'in baş "/" sonrası, URL-decode edilmiş "issuer:account".
-    final rawLabel =
-        uri.path.startsWith('/') ? uri.path.substring(1) : uri.path;
+    final rawLabel = uri.path.startsWith('/')
+        ? uri.path.substring(1)
+        : uri.path;
     final label = Uri.decodeComponent(rawLabel);
     String? labelIssuer;
     String accountName = label;
@@ -60,7 +63,9 @@ class OtpAuthUri {
     }
 
     // issuer parametresi label'daki issuer'ı geçersiz kılar (spec önceliği query'de).
-    final issuer = (q['issuer']?.isNotEmpty ?? false) ? q['issuer'] : labelIssuer;
+    final issuer = (q['issuer']?.isNotEmpty ?? false)
+        ? q['issuer']
+        : labelIssuer;
 
     // Steam: host=steam ise SHA1/period=30 sabit; digits Steam kodlamasında kullanılmaz.
     //
@@ -72,20 +77,39 @@ class OtpAuthUri {
     // sezgi KALDIRILDI, çünkü o formatların birinci sınıf bir Steam tipi var
     // (`type:"steam"`, `tokenType:"STEAM"`) → orada issuer'a bakmak, kullanıcının
     // yalnızca "Steam" diye ADLANDIRDIĞI sıradan bir TOTP'yi bozar.
-    final isSteam = type == OtpType.steam ||
+    final isSteam =
+        type == OtpType.steam ||
         (issuer?.toLowerCase() == 'steam' && host == 'totp');
 
     // Sayısal parametreler MAKUL ARALIKTA olmalı (yoksa kod üretiminde bölme hatası /
     // anlamsız çıktı). Eksik → güvenli varsayılan; verilmiş ama geçersiz → reddet.
-    final digits = _parseBounded(q['digits'], 'digits',
-        fallback: isSteam ? 5 : 6, min: 6, max: 8, allow: isSteam ? const [5] : null);
-    final period = _parseBounded(q['period'], 'period', fallback: 30, min: 1, max: 600);
+    final digits = _parseBounded(
+      q['digits'],
+      'digits',
+      fallback: isSteam ? 5 : 6,
+      min: 6,
+      max: 8,
+      allow: isSteam ? const [5] : null,
+    );
+    final period = _parseBounded(
+      q['period'],
+      'period',
+      fallback: 30,
+      min: 1,
+      max: 600,
+    );
     // HOTP'te `counter` Key URI Format'a göre ZORUNLUDUR (hareketli operasyonel
     // state). Eksik counter'ı 0 varsaymak yanlış sayaçla token ekletir → reddet.
     // TOTP/Steam için counter kullanılmaz; eksikse 0 varsayılır.
-    final bool counterRequired = (isSteam ? OtpType.steam : type) == OtpType.hotp;
-    final counter = _parseBounded(q['counter'], 'counter',
-        fallback: 0, min: 0, required: counterRequired);
+    final bool counterRequired =
+        (isSteam ? OtpType.steam : type) == OtpType.hotp;
+    final counter = _parseBounded(
+      q['counter'],
+      'counter',
+      fallback: 0,
+      min: 0,
+      required: counterRequired,
+    );
 
     return OtpAccount(
       secret: secret,
@@ -125,7 +149,8 @@ class OtpAuthUri {
     if (allow != null && allow.contains(v)) return v;
     if (v < min || (max != null && v > max)) {
       throw FormatException(
-          'otpauth URI: "$name" aralık dışı ($v); beklenen $min..${max ?? '∞'}');
+        'otpauth URI: "$name" aralık dışı ($v); beklenen $min..${max ?? '∞'}',
+      );
     }
     return v;
   }
@@ -159,8 +184,10 @@ class OtpAuthUri {
     }
 
     final query = params.entries
-        .map((e) =>
-            '${Uri.encodeQueryComponent(e.key)}=${Uri.encodeQueryComponent(e.value)}')
+        .map(
+          (e) =>
+              '${Uri.encodeQueryComponent(e.key)}=${Uri.encodeQueryComponent(e.value)}',
+        )
         .join('&');
 
     return 'otpauth://$typeHost/${Uri.encodeComponent(label)}?$query';

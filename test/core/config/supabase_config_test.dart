@@ -16,23 +16,27 @@ void main() {
   group('SupabaseConfig.validate', () {
     test('geçerli url + publishable key kabul edilir', () {
       expect(
-        () => SupabaseConfig.validate(url: _validUrl, publishableKey: _validKey),
+        () =>
+            SupabaseConfig.validate(url: _validUrl, publishableKey: _validKey),
         returnsNormally,
       );
     });
 
-    test('legacy eyJ... JWT reddedilir (anon ve service_role ayırt edilemez)',
-        () {
+    test('legacy eyJ... JWT reddedilir (anon ve service_role ayırt edilemez)', () {
       // Şekil kontrolü (eyJ + 3 segment) service_role anahtarını da geçirirdi →
       // istemci build'ine tam yetkili sır sızabilirdi. Yalnız publishable geçerli.
       expect(
         () => SupabaseConfig.validate(
-            url: _validUrl, publishableKey: _legacyAnonJwt),
+          url: _validUrl,
+          publishableKey: _legacyAnonJwt,
+        ),
         throwsA(isA<StateError>()),
       );
       expect(
         () => SupabaseConfig.validate(
-            url: _validUrl, publishableKey: _legacyServiceRoleJwt),
+          url: _validUrl,
+          publishableKey: _legacyServiceRoleJwt,
+        ),
         throwsA(isA<StateError>()),
       );
     });
@@ -47,8 +51,9 @@ void main() {
     test('http:// URL reddedilir', () {
       expect(
         () => SupabaseConfig.validate(
-            url: 'http://abcdefghijklmnop.supabase.co',
-            publishableKey: _validKey),
+          url: 'http://abcdefghijklmnop.supabase.co',
+          publishableKey: _validKey,
+        ),
         throwsA(isA<StateError>()),
       );
     });
@@ -63,12 +68,16 @@ void main() {
     test('yanlış prefix key reddedilir (secret key dahil)', () {
       expect(
         () => SupabaseConfig.validate(
-            url: _validUrl, publishableKey: 'sb_secret_AbCdEf0123456789'),
+          url: _validUrl,
+          publishableKey: 'sb_secret_AbCdEf0123456789',
+        ),
         throwsA(isA<StateError>()),
       );
       expect(
         () => SupabaseConfig.validate(
-            url: _validUrl, publishableKey: 'not-a-key'),
+          url: _validUrl,
+          publishableKey: 'not-a-key',
+        ),
         throwsA(isA<StateError>()),
       );
     });

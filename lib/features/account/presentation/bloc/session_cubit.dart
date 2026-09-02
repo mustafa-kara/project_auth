@@ -25,10 +25,10 @@ class SessionCubit extends Cubit<SessionState> {
     required PendingConfirmationStore pendingStore,
     LinkRequiredResolver? linkRequiredResolver,
     this.onAuthSignedOut,
-  })  : _auth = auth,
-        _pending = pendingStore,
-        _linkRequiredResolver = linkRequiredResolver,
-        super(const SessionState());
+  }) : _auth = auth,
+       _pending = pendingStore,
+       _linkRequiredResolver = linkRequiredResolver,
+       super(const SessionState());
 
   final AuthRepository _auth;
   final PendingConfirmationStore _pending;
@@ -51,8 +51,12 @@ class SessionCubit extends Cubit<SessionState> {
     } else {
       final pendingEmail = await _pending.read();
       if (pendingEmail != null && pendingEmail.isNotEmpty) {
-        emit(SessionState(
-            status: SessionStatus.emailConfirmPending, email: pendingEmail));
+        emit(
+          SessionState(
+            status: SessionStatus.emailConfirmPending,
+            email: pendingEmail,
+          ),
+        );
       } else {
         emit(const SessionState(status: SessionStatus.signedOut));
       }
@@ -66,11 +70,14 @@ class SessionCubit extends Cubit<SessionState> {
           await _pending.clear();
           await _emitSignedIn();
         } else {
-          emit(state.copyWith(
+          emit(
+            state.copyWith(
               status: SessionStatus.signedOut,
               linkRequired: false,
               clearError: true,
-              busy: false));
+              busy: false,
+            ),
+          );
         }
       },
       onError: (Object e) {
@@ -85,8 +92,9 @@ class SessionCubit extends Cubit<SessionState> {
       final outcome = await _auth.signUp(email: email, password: password);
       if (outcome == SignUpOutcome.confirmPending) {
         await _pending.write(email);
-        emit(SessionState(
-            status: SessionStatus.emailConfirmPending, email: email));
+        emit(
+          SessionState(status: SessionStatus.emailConfirmPending, email: email),
+        );
       } else {
         await _emitSignedIn();
       }
@@ -109,10 +117,13 @@ class SessionCubit extends Cubit<SessionState> {
       // resend çalışır (yoksa email=null → resend no-op + kullanıcı sıkışırdı).
       if (err is AuthEmailNotConfirmed) {
         await _pending.write(email);
-        emit(SessionState(
+        emit(
+          SessionState(
             status: SessionStatus.emailConfirmPending,
             email: email,
-            error: err));
+            error: err,
+          ),
+        );
         return;
       }
       emit(state.copyWith(error: err, busy: false));
@@ -166,8 +177,13 @@ class SessionCubit extends Cubit<SessionState> {
         link = false; // resolver hatası login'i bloklamasın
       }
     }
-    emit(SessionState(
-        status: SessionStatus.signedIn, linkRequired: link, busy: false));
+    emit(
+      SessionState(
+        status: SessionStatus.signedIn,
+        linkRequired: link,
+        busy: false,
+      ),
+    );
   }
 
   /// account-link kararı verildi (Adım 3b UI çağırır): `linkRequired` yeniden

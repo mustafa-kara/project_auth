@@ -47,15 +47,16 @@ class _FakeAuth implements AuthRepository {
   void emitStreamError(Object e) => _controller.addError(e);
 
   @override
-  Future<SignUpOutcome> signUp(
-      {required String email, required String password}) async {
+  Future<SignUpOutcome> signUp({
+    required String email,
+    required String password,
+  }) async {
     if (signUpOutcome == SignUpOutcome.signedIn) signedInAtStart = true;
     return signUpOutcome;
   }
 
   @override
-  Future<void> signIn(
-      {required String email, required String password}) async {
+  Future<void> signIn({required String email, required String password}) async {
     if (signInError != null) throw signInError!;
     signedInAtStart = true;
   }
@@ -77,10 +78,26 @@ class _FakeAuth implements AuthRepository {
 class _FakeStorage implements FlutterSecureStorage {
   final Map<String, String> data = {};
   @override
-  Future<String?> read({required String key, dynamic iOptions, dynamic aOptions, dynamic lOptions, dynamic webOptions, dynamic mOptions, dynamic wOptions}) async =>
-      data[key];
+  Future<String?> read({
+    required String key,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async => data[key];
   @override
-  Future<void> write({required String key, required String? value, dynamic iOptions, dynamic aOptions, dynamic lOptions, dynamic webOptions, dynamic mOptions, dynamic wOptions}) async {
+  Future<void> write({
+    required String key,
+    required String? value,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async {
     if (value == null) {
       data.remove(key);
     } else {
@@ -89,8 +106,15 @@ class _FakeStorage implements FlutterSecureStorage {
   }
 
   @override
-  Future<void> delete({required String key, dynamic iOptions, dynamic aOptions, dynamic lOptions, dynamic webOptions, dynamic mOptions, dynamic wOptions}) async =>
-      data.remove(key);
+  Future<void> delete({
+    required String key,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async => data.remove(key);
   @override
   noSuchMethod(Invocation i) => throw UnimplementedError('$i');
 }
@@ -143,16 +167,19 @@ void main() {
     await cubit.close();
   });
 
-  test('bootstrap: current=signedIn ama pending dolu → pending temizlenir + signedIn '
-      '(reviewer [P2] sıra)', () async {
-    auth.signedInAtStart = true;
-    seedPending('a@b.com');
-    final cubit = build();
-    await cubit.bootstrap();
-    expect(cubit.state.status, SessionStatus.signedIn);
-    expect(readPending(), isNull); // temizlendi
-    await cubit.close();
-  });
+  test(
+    'bootstrap: current=signedIn ama pending dolu → pending temizlenir + signedIn '
+    '(reviewer [P2] sıra)',
+    () async {
+      auth.signedInAtStart = true;
+      seedPending('a@b.com');
+      final cubit = build();
+      await cubit.bootstrap();
+      expect(cubit.state.status, SessionStatus.signedIn);
+      expect(readPending(), isNull); // temizlendi
+      await cubit.close();
+    },
+  );
 
   test('signIn başarı → signedIn', () async {
     final cubit = build();
@@ -172,18 +199,21 @@ void main() {
     await cubit.close();
   });
 
-  test('signIn onaysız e-posta → emailConfirmPending + email PERSIST + email dolu '
-      '(resend çalışır — reviewer [P2])', () async {
-    auth.signInError = const AuthEmailNotConfirmed();
-    final cubit = build();
-    await cubit.bootstrap();
-    await cubit.signIn(email: 'a@b.com', password: 'x');
-    expect(cubit.state.status, SessionStatus.emailConfirmPending);
-    expect(cubit.state.email, 'a@b.com'); // confirm ekranı email null görmez
-    expect(readPending(), 'a@b.com'); // persist
-    expect(cubit.state.error, isA<AuthEmailNotConfirmed>());
-    await cubit.close();
-  });
+  test(
+    'signIn onaysız e-posta → emailConfirmPending + email PERSIST + email dolu '
+    '(resend çalışır — reviewer [P2])',
+    () async {
+      auth.signInError = const AuthEmailNotConfirmed();
+      final cubit = build();
+      await cubit.bootstrap();
+      await cubit.signIn(email: 'a@b.com', password: 'x');
+      expect(cubit.state.status, SessionStatus.emailConfirmPending);
+      expect(cubit.state.email, 'a@b.com'); // confirm ekranı email null görmez
+      expect(readPending(), 'a@b.com'); // persist
+      expect(cubit.state.error, isA<AuthEmailNotConfirmed>());
+      await cubit.close();
+    },
+  );
 
   test('signUp → emailConfirmPending + pending store\'a yazıldı', () async {
     final cubit = build();
@@ -206,17 +236,19 @@ void main() {
     await cubit.close();
   });
 
-  test('signOut → signedOut + onAuthSignedOut çağrıldı (vault kilit bağı, reviewer [P1])',
-      () async {
-    var calledOnSignedOut = false;
-    final cubit = build(onSignedOut: () => calledOnSignedOut = true);
-    auth.signedInAtStart = true;
-    await cubit.bootstrap();
-    await cubit.signOut();
-    expect(cubit.state.status, SessionStatus.signedOut);
-    expect(calledOnSignedOut, isTrue);
-    await cubit.close();
-  });
+  test(
+    'signOut → signedOut + onAuthSignedOut çağrıldı (vault kilit bağı, reviewer [P1])',
+    () async {
+      var calledOnSignedOut = false;
+      final cubit = build(onSignedOut: () => calledOnSignedOut = true);
+      auth.signedInAtStart = true;
+      await cubit.bootstrap();
+      await cubit.signOut();
+      expect(cubit.state.status, SessionStatus.signedOut);
+      expect(calledOnSignedOut, isTrue);
+      await cubit.close();
+    },
+  );
 
   test('signOut THROWS (ağ hatası) → onAuthSignedOut YİNE çağrıldı + signedOut '
       '(asla signedIn\'de kalmaz — reviewer [P2], #683)', () async {
@@ -231,27 +263,31 @@ void main() {
     await cubit.close();
   });
 
-  test('stream onError → SessionState.error, cubit crash etmez (reviewer [P2])',
-      () async {
-    final cubit = build();
-    await cubit.bootstrap();
-    auth.emitStreamError(const AuthNetworkError());
-    await Future<void>.delayed(Duration.zero);
-    expect(cubit.state.error, isA<AuthNetworkError>());
-    await cubit.close();
-  });
+  test(
+    'stream onError → SessionState.error, cubit crash etmez (reviewer [P2])',
+    () async {
+      final cubit = build();
+      await cubit.bootstrap();
+      auth.emitStreamError(const AuthNetworkError());
+      await Future<void>.delayed(Duration.zero);
+      expect(cubit.state.error, isA<AuthNetworkError>());
+      await cubit.close();
+    },
+  );
 
-  test('cancelPendingConfirmation → pending temiz + signedOut (confirm trap çıkışı)',
-      () async {
-    seedPending('a@b.com');
-    final cubit = build();
-    await cubit.bootstrap();
-    expect(cubit.state.status, SessionStatus.emailConfirmPending);
-    await cubit.cancelPendingConfirmation();
-    expect(cubit.state.status, SessionStatus.signedOut);
-    expect(readPending(), isNull);
-    await cubit.close();
-  });
+  test(
+    'cancelPendingConfirmation → pending temiz + signedOut (confirm trap çıkışı)',
+    () async {
+      seedPending('a@b.com');
+      final cubit = build();
+      await cubit.bootstrap();
+      expect(cubit.state.status, SessionStatus.emailConfirmPending);
+      await cubit.cancelPendingConfirmation();
+      expect(cubit.state.status, SessionStatus.signedOut);
+      expect(readPending(), isNull);
+      await cubit.close();
+    },
+  );
 
   group('linkRequired hydrate köprüsü (reviewer [P3])', () {
     test('bootstrap signedIn + resolver true → linkRequired:true', () async {
@@ -263,18 +299,20 @@ void main() {
       await cubit.close();
     });
 
-    test('refreshLinkRequired (karar sonrası) → linkRequired:false yeniden emit',
-        () async {
-      auth.signedInAtStart = true;
-      var decided = false;
-      final cubit = build(linkResolver: (uid) async => !decided);
-      await cubit.bootstrap();
-      expect(cubit.state.linkRequired, isTrue);
-      decided = true; // account-link kararı verildi
-      await cubit.refreshLinkRequired();
-      expect(cubit.state.linkRequired, isFalse);
-      await cubit.close();
-    });
+    test(
+      'refreshLinkRequired (karar sonrası) → linkRequired:false yeniden emit',
+      () async {
+        auth.signedInAtStart = true;
+        var decided = false;
+        final cubit = build(linkResolver: (uid) async => !decided);
+        await cubit.bootstrap();
+        expect(cubit.state.linkRequired, isTrue);
+        decided = true; // account-link kararı verildi
+        await cubit.refreshLinkRequired();
+        expect(cubit.state.linkRequired, isFalse);
+        await cubit.close();
+      },
+    );
 
     test('resolver hatası login\'i bloklamaz → linkRequired:false', () async {
       auth.signedInAtStart = true;

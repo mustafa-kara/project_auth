@@ -84,8 +84,8 @@ class OtpAccount extends Equatable {
     this.period = 30,
     this.counter = 0,
     List<String> tags = const [],
-  })  : id = id ?? _uuid.v4(),
-        tags = normalizeTags(tags) {
+  }) : id = id ?? _uuid.v4(),
+       tags = normalizeTags(tags) {
     // TEK doğrulama noktası: parse, fromJson ve doğrudan kurulum hepsi buradan
     // geçer → geçersiz bir OtpAccount HİÇBİR yoldan oluşamaz (kart render/timer'da
     // geç crash yerine kaynakta FormatException). otpauth:// parser'ı ayrıca
@@ -111,19 +111,27 @@ class OtpAccount extends Equatable {
     // digits: Steam 5 (kendi kodlaması), aksi halde 6–8.
     if (type == OtpType.steam) {
       if (digits != 5) {
-        throw FormatException('OtpAccount: Steam "digits" 5 olmalı (verilen $digits)');
+        throw FormatException(
+          'OtpAccount: Steam "digits" 5 olmalı (verilen $digits)',
+        );
       }
     } else if (digits < 6 || digits > 8) {
-      throw FormatException('OtpAccount: "digits" 6..8 olmalı (verilen $digits)');
+      throw FormatException(
+        'OtpAccount: "digits" 6..8 olmalı (verilen $digits)',
+      );
     }
     // period: TOTP/Steam için >0 (secondsRemaining/totp bölme yapar). HOTP'te
     // kullanılmaz ama yine de anlamsız negatifi reddet.
     if (period < 1 || period > 600) {
-      throw FormatException('OtpAccount: "period" 1..600 olmalı (verilen $period)');
+      throw FormatException(
+        'OtpAccount: "period" 1..600 olmalı (verilen $period)',
+      );
     }
     // counter: negatif olamaz.
     if (counter < 0) {
-      throw FormatException('OtpAccount: "counter" negatif olamaz (verilen $counter)');
+      throw FormatException(
+        'OtpAccount: "counter" negatif olamaz (verilen $counter)',
+      );
     }
   }
 
@@ -176,21 +184,21 @@ class OtpAccount extends Equatable {
   /// alanları da taşır (URI bunları taşımaz). Faz 2'de bu JSON `masterKey` ile
   /// şifrelenerek saklanacak; şu an OS koruması (Keychain/Keystore) altında düz tutulur.
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'secret': secret,
-        'type': type.name,
-        if (issuer != null) 'issuer': issuer,
-        'accountName': accountName,
-        'algorithm': algorithm.name,
-        'digits': digits,
-        'period': period,
-        'counter': counter,
-        // K2: written ONLY when non-empty. An untagged account keeps producing
-        // the exact same JSON as before Patch 3, so upgrading a vault does not
-        // re-encrypt (and re-push) every record. Unknown to older clients →
-        // ignored on read, never a parse failure.
-        if (tags.isNotEmpty) 'tags': tags,
-      };
+    'id': id,
+    'secret': secret,
+    'type': type.name,
+    if (issuer != null) 'issuer': issuer,
+    'accountName': accountName,
+    'algorithm': algorithm.name,
+    'digits': digits,
+    'period': period,
+    'counter': counter,
+    // K2: written ONLY when non-empty. An untagged account keeps producing
+    // the exact same JSON as before Patch 3, so upgrading a vault does not
+    // re-encrypt (and re-push) every record. Unknown to older clients →
+    // ignored on read, never a parse failure.
+    if (tags.isNotEmpty) 'tags': tags,
+  };
 
   /// [toJson] çıktısından geri kurar. Bilinmeyen/eksik/YANLIŞ TİPLİ alan →
   /// [FormatException] (bozuk depodan sessizce yanlış token üretmemek için).
@@ -203,7 +211,9 @@ class OtpAccount extends Equatable {
     final typeName = _asString(json['type'], 'type');
     final type = OtpType.values.where((t) => t.name == typeName).firstOrNull;
     if (type == null) {
-      throw FormatException('OtpAccount.fromJson: geçersiz "type": "$typeName"');
+      throw FormatException(
+        'OtpAccount.fromJson: geçersiz "type": "$typeName"',
+      );
     }
     final secret = _asString(json['secret'], 'secret');
     if (secret == null || secret.isEmpty) {
@@ -219,7 +229,9 @@ class OtpAccount extends Equatable {
       type: type,
       issuer: _asString(json['issuer'], 'issuer'),
       accountName: accountName,
-      algorithm: OtpAlgorithm.fromName(_asString(json['algorithm'], 'algorithm')),
+      algorithm: OtpAlgorithm.fromName(
+        _asString(json['algorithm'], 'algorithm'),
+      ),
       digits: _asInt(json['digits'], 'digits') ?? 6,
       period: _asInt(json['period'], 'period') ?? 30,
       counter: _asInt(json['counter'], 'counter') ?? 0,
@@ -231,7 +243,9 @@ class OtpAccount extends Equatable {
   static String? _asString(Object? v, String name) {
     if (v == null) return null;
     if (v is String) return v;
-    throw FormatException('OtpAccount.fromJson: "$name" String olmalı (verilen ${v.runtimeType})');
+    throw FormatException(
+      'OtpAccount.fromJson: "$name" String olmalı (verilen ${v.runtimeType})',
+    );
   }
 
   /// Missing/null → `const []`; a `List` of `String` → itself; anything else →
@@ -247,14 +261,16 @@ class OtpAccount extends Equatable {
     if (v == null) return const [];
     if (v is! List) {
       throw FormatException(
-          'OtpAccount.fromJson: "tags" liste olmalı (verilen ${v.runtimeType})');
+        'OtpAccount.fromJson: "tags" liste olmalı (verilen ${v.runtimeType})',
+      );
     }
     final out = <String>[];
     for (final e in v) {
       if (e is! String) {
         throw FormatException(
-            'OtpAccount.fromJson: "tags" elemanları String olmalı '
-            '(verilen ${e.runtimeType})');
+          'OtpAccount.fromJson: "tags" elemanları String olmalı '
+          '(verilen ${e.runtimeType})',
+        );
       }
       out.add(e);
     }
@@ -272,18 +288,22 @@ class OtpAccount extends Equatable {
     if (v is double) {
       if (v == v.truncateToDouble()) return v.toInt(); // integer-valued double
       throw FormatException(
-          'OtpAccount.fromJson: "$name" tam sayı olmalı (kesirli: $v)');
+        'OtpAccount.fromJson: "$name" tam sayı olmalı (kesirli: $v)',
+      );
     }
     if (v is String) {
       final parsed = int.tryParse(v);
       if (parsed != null) return parsed;
     }
-    throw FormatException('OtpAccount.fromJson: "$name" sayı olmalı (verilen ${v.runtimeType})');
+    throw FormatException(
+      'OtpAccount.fromJson: "$name" sayı olmalı (verilen ${v.runtimeType})',
+    );
   }
 
   /// UI'da gösterilecek etiket: "Issuer (account)" veya yalnız account.
-  String get label =>
-      (issuer != null && issuer!.isNotEmpty) ? '$issuer ($accountName)' : accountName;
+  String get label => (issuer != null && issuer!.isNotEmpty)
+      ? '$issuer ($accountName)'
+      : accountName;
 
   /// [id] varsayılan olarak KORUNUR (aynı token'ın güncellenmiş hali). Klonun
   /// yeni kimlik alması gerekiyorsa açıkça `id:` geçilmeli.
@@ -318,23 +338,23 @@ class OtpAccount extends Equatable {
 
   @override
   List<Object?> get props => [
-        id,
-        secret,
-        type,
-        issuer,
-        accountName,
-        algorithm,
-        digits,
-        period,
-        counter,
-        // K3 — MANDATORY (risk R2). `EncryptedVaultRepository._writeRecords`
-        // keeps the previous ciphertext when `prev.account == account`
-        // (encrypted_vault_repository.dart:219). Omitting [tags] here would make
-        // a tags-only edit compare equal, so the new tags would never be
-        // encrypted, never reach the store and never sync — and nothing would
-        // report an error.
-        tags,
-      ];
+    id,
+    secret,
+    type,
+    issuer,
+    accountName,
+    algorithm,
+    digits,
+    period,
+    counter,
+    // K3 — MANDATORY (risk R2). `EncryptedVaultRepository._writeRecords`
+    // keeps the previous ciphertext when `prev.account == account`
+    // (encrypted_vault_repository.dart:219). Omitting [tags] here would make
+    // a tags-only edit compare equal, so the new tags would never be
+    // encrypted, never reach the store and never sync — and nothing would
+    // report an error.
+    tags,
+  ];
 
   /// SECURITY: Equatable's `stringify` defaults to ON in debug builds, which
   /// would make `toString()` print every prop — [secret] included. Any debug

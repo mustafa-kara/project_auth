@@ -27,22 +27,23 @@ enum OtpAlgorithm {
         return OtpAlgorithm.sha512;
       default:
         throw FormatException(
-            'otpauth URI: desteklenmeyen "algorithm": "$name" '
-            '(beklenen SHA1/SHA256/SHA512)');
+          'otpauth URI: desteklenmeyen "algorithm": "$name" '
+          '(beklenen SHA1/SHA256/SHA512)',
+        );
     }
   }
 
   /// `otpauth://` URI'sinde kullanılacak kanonik ad.
   String get uriName => switch (this) {
-        OtpAlgorithm.sha1 => 'SHA1',
-        OtpAlgorithm.sha256 => 'SHA256',
-        OtpAlgorithm.sha512 => 'SHA512',
-      };
+    OtpAlgorithm.sha1 => 'SHA1',
+    OtpAlgorithm.sha256 => 'SHA256',
+    OtpAlgorithm.sha512 => 'SHA512',
+  };
 
   /// crypto paketinin ilgili [crypto.Hash] nesnesi (HMAC için).
   crypto.Hash get hash => switch (this) {
-        OtpAlgorithm.sha1 => crypto.sha1,
-        OtpAlgorithm.sha256 => crypto.sha256,
-        OtpAlgorithm.sha512 => crypto.sha512,
-      };
+    OtpAlgorithm.sha1 => crypto.sha1,
+    OtpAlgorithm.sha256 => crypto.sha256,
+    OtpAlgorithm.sha512 => crypto.sha512,
+  };
 }

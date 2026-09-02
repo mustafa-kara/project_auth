@@ -24,21 +24,25 @@ class CatalogService {
   });
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'name': name,
-        if (issuer != null) 'issuer': issuer,
-        if (logoUrl != null) 'logo_url': logoUrl,
-      };
+    'id': id,
+    'name': name,
+    if (issuer != null) 'issuer': issuer,
+    if (logoUrl != null) 'logo_url': logoUrl,
+  };
 
   /// Cache JSON → model. Throws [FormatException] on bad data.
   static CatalogService fromJson(Map<String, dynamic> json) {
     final id = json['id'];
     final name = json['name'];
     if (id is! String) {
-      throw FormatException('catalog_services.id String bekleniyordu (${id.runtimeType})');
+      throw FormatException(
+        'catalog_services.id String bekleniyordu (${id.runtimeType})',
+      );
     }
     if (name is! String) {
-      throw FormatException('catalog_services.name String bekleniyordu (${name.runtimeType})');
+      throw FormatException(
+        'catalog_services.name String bekleniyordu (${name.runtimeType})',
+      );
     }
     final issuer = json['issuer'];
     final logo = json['logo_url'];

@@ -36,8 +36,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 abstract final class SecureScreen {
-  static const MethodChannel _channel =
-      MethodChannel('dev.mustafakara.project_auth/secure_screen');
+  static const MethodChannel _channel = MethodChannel(
+    'dev.mustafakara.project_auth/secure_screen',
+  );
 
   /// Şu an korumayı tutan aktif hassas ekran sayısı.
   static int _holders = 0;
@@ -117,7 +118,10 @@ abstract final class SecureScreen {
   /// yeniden deneme kendisi false ile çağırır → deneme TEK seferliktir, sonsuz
   /// döngü yok. O da başarısız olursa [_nativeOn] false kalır, yani sonraki
   /// [acquire] yine dener (mevcut davranış korunur).
-  static Future<void> _invoke(String method, {bool retryOnFailure = false}) async {
+  static Future<void> _invoke(
+    String method, {
+    bool retryOnFailure = false,
+  }) async {
     try {
       await _channel.invokeMethod<void>(method);
     } on MissingPluginException {
@@ -145,14 +149,16 @@ abstract final class SecureScreen {
     if (_retryPending) return;
     _retryPending = true;
     final generation = _resetGeneration;
-    unawaited(Future<void>.delayed(_enableRetryDelay, () {
-      _retryPending = false;
-      // Test izolasyonu ([debugReset]) ya da bu arada düzelen durum → dokunma.
-      if (generation != _resetGeneration) return null;
-      if (_holders == 0 || _nativeOn) return null;
-      _nativeOn = true;
-      return _invoke('enable');
-    }));
+    unawaited(
+      Future<void>.delayed(_enableRetryDelay, () {
+        _retryPending = false;
+        // Test izolasyonu ([debugReset]) ya da bu arada düzelen durum → dokunma.
+        if (generation != _resetGeneration) return null;
+        if (_holders == 0 || _nativeOn) return null;
+        _nativeOn = true;
+        return _invoke('enable');
+      }),
+    );
   }
 }
 

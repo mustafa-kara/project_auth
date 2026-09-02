@@ -56,15 +56,20 @@ class _CapturingKeyManager implements KeyManager {
   List<String>? capturedMnemonic;
 
   @override
-  Future<KeyHandle> recoverUnlock(KeyAttributes attrs, List<String> mnemonic) async {
+  Future<KeyHandle> recoverUnlock(
+    KeyAttributes attrs,
+    List<String> mnemonic,
+  ) async {
     capturedMnemonic = mnemonic;
     return _FakeKeyHandle();
   }
 
   @override
   Future<KeyAttributes> changePassword(
-          KeyAttributes attrs, KeyHandle masterKey, String newPassword) async =>
-      _attrs();
+    KeyAttributes attrs,
+    KeyHandle masterKey,
+    String newPassword,
+  ) async => _attrs();
 
   @override
   noSuchMethod(Invocation i) => throw UnimplementedError('$i');

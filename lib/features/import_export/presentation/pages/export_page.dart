@@ -110,10 +110,12 @@ class _ExportPageState extends State<ExportPage> {
   Future<void> _submit() async {
     final password = _passwordCtrl.text;
     if (!KeyManager.meetsPolicy(password)) {
-      setState(() => _error =
-          'Parola en az ${KeyManager.minPasswordLength} karakter ve '
-          '${KeyManager.minPasswordClasses} farklı tür (büyük/küçük harf, '
-          'rakam, sembol) içermeli.');
+      setState(
+        () => _error =
+            'Parola en az ${KeyManager.minPasswordLength} karakter ve '
+            '${KeyManager.minPasswordClasses} farklı tür (büyük/küçük harf, '
+            'rakam, sembol) içermeli.',
+      );
       return;
     }
     if (_confirmCtrl.text != password) {
@@ -162,28 +164,29 @@ class _ExportPageState extends State<ExportPage> {
 
   /// Kaybın geri dönüşsüz olduğunu AÇIKÇA söyleyen onay diyaloğu (plan §4.6).
   Future<void> _showSuccessDialog() => showDialog<void>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          icon: const Icon(Icons.verified_user_outlined),
-          title: const Text('Yedek oluşturuldu'),
-          content: const Text(
-            'Bu yedeği yalnız bu parola açar. Parolanı kaybedersen yedek geri '
-            'dönüşsüz kaybolur — master parolan ya da kurtarma anahtarın bu '
-            'dosyayı açmaz.',
-          ),
-          actions: [
-            FilledButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Anladım'),
-            ),
-          ],
+    context: context,
+    builder: (ctx) => AlertDialog(
+      icon: const Icon(Icons.verified_user_outlined),
+      title: const Text('Yedek oluşturuldu'),
+      content: const Text(
+        'Bu yedeği yalnız bu parola açar. Parolanı kaybedersen yedek geri '
+        'dönüşsüz kaybolur — master parolan ya da kurtarma anahtarın bu '
+        'dosyayı açmaz.',
+      ),
+      actions: [
+        FilledButton(
+          onPressed: () => Navigator.of(ctx).pop(),
+          child: const Text('Anladım'),
         ),
-      );
+      ],
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
-    final accounts =
-        context.select<VaultCubit, int>((c) => c.state.accounts.length);
+    final accounts = context.select<VaultCubit, int>(
+      (c) => c.state.accounts.length,
+    );
     final page = accounts == 0 ? _buildEmpty() : _buildForm(context);
 
     // Yedek parolası klavyeden giriliyor → hassas ekran (plan §4.6 / D6).
@@ -191,68 +194,69 @@ class _ExportPageState extends State<ExportPage> {
   }
 
   Widget _buildEmpty() => Scaffold(
-        appBar: AppBar(title: const Text('Şifreli yedek')),
-        body: const SafeArea(
-          child: EmptyState(
-            icon: Icons.inventory_2_outlined,
-            title: 'Yedeklenecek token yok',
-            description:
-                'Vault\'un boş. Önce bir token ekle, sonra buradan şifreli '
-                'yedeğini alabilirsin.',
-          ),
-        ),
-      );
+    appBar: AppBar(title: const Text('Şifreli yedek')),
+    body: const SafeArea(
+      child: EmptyState(
+        icon: Icons.inventory_2_outlined,
+        title: 'Yedeklenecek token yok',
+        description:
+            'Vault\'un boş. Önce bir token ekle, sonra buradan şifreli '
+            'yedeğini alabilirsin.',
+      ),
+    ),
+  );
 
   Widget _buildForm(BuildContext context) => AuthScaffold(
-        appBarTitle: 'Şifreli yedek',
-        icon: Icons.shield_outlined,
-        title: 'Şifreli yedek al',
-        description:
-            'Tüm tokenların burada belirleyeceğin AYRI bir parolayla '
-            'şifrelenip tek bir dosyaya yazılır. Dosya yalnız seçtiğin yere '
-            'kaydedilir; geçici kopya silinir.',
-        body: [
-          AppTextField(
-            controller: _passwordCtrl,
-            label: 'Yedek parolası',
-            obscure: true,
-            autofocus: true,
-            autocorrect: false,
-            enableSuggestions: false,
-            helperText: 'En az ${KeyManager.minPasswordLength} karakter, '
-                'en az ${KeyManager.minPasswordClasses} farklı tür '
-                '(büyük/küçük harf, rakam, sembol)',
-          ),
-          if (_passwordCtrl.text.isNotEmpty) ...[
-            const SizedBox(height: Gap.sm),
-            PasswordStrengthBar(password: _passwordCtrl.text),
-          ],
-          const SizedBox(height: Gap.md),
-          AppTextField(
-            controller: _confirmCtrl,
-            label: 'Parola (tekrar)',
-            obscure: true,
-            autocorrect: false,
-            enableSuggestions: false,
-          ),
-          const SizedBox(height: Gap.md),
-          Text(
-            'Bu parolayı master parolandan farklı seçebilirsin — ama '
-            'kaybedersen yedek geri dönüşsüz kaybolur.',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-          ),
-          if (_error != null) ...[
-            const SizedBox(height: Gap.md),
-            AuthErrorText(_error!),
-          ],
-        ],
-        actions: [
-          FilledButton(
-            onPressed: _busy ? null : _submit,
-            child: _busy ? const BtnSpinner() : const Text('Yedek oluştur'),
-          ),
-        ],
-      );
+    appBarTitle: 'Şifreli yedek',
+    icon: Icons.shield_outlined,
+    title: 'Şifreli yedek al',
+    description:
+        'Tüm tokenların burada belirleyeceğin AYRI bir parolayla '
+        'şifrelenip tek bir dosyaya yazılır. Dosya yalnız seçtiğin yere '
+        'kaydedilir; geçici kopya silinir.',
+    body: [
+      AppTextField(
+        controller: _passwordCtrl,
+        label: 'Yedek parolası',
+        obscure: true,
+        autofocus: true,
+        autocorrect: false,
+        enableSuggestions: false,
+        helperText:
+            'En az ${KeyManager.minPasswordLength} karakter, '
+            'en az ${KeyManager.minPasswordClasses} farklı tür '
+            '(büyük/küçük harf, rakam, sembol)',
+      ),
+      if (_passwordCtrl.text.isNotEmpty) ...[
+        const SizedBox(height: Gap.sm),
+        PasswordStrengthBar(password: _passwordCtrl.text),
+      ],
+      const SizedBox(height: Gap.md),
+      AppTextField(
+        controller: _confirmCtrl,
+        label: 'Parola (tekrar)',
+        obscure: true,
+        autocorrect: false,
+        enableSuggestions: false,
+      ),
+      const SizedBox(height: Gap.md),
+      Text(
+        'Bu parolayı master parolandan farklı seçebilirsin — ama '
+        'kaybedersen yedek geri dönüşsüz kaybolur.',
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        ),
+      ),
+      if (_error != null) ...[
+        const SizedBox(height: Gap.md),
+        AuthErrorText(_error!),
+      ],
+    ],
+    actions: [
+      FilledButton(
+        onPressed: _busy ? null : _submit,
+        child: _busy ? const BtnSpinner() : const Text('Yedek oluştur'),
+      ),
+    ],
+  );
 }

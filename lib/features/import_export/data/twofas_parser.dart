@@ -114,7 +114,8 @@ class TwoFasParser implements ImportParser {
     final services = json['services'];
     if (services is! List) {
       throw const MalformedImportFileException(
-          '2FAS: "services" is not a list');
+        '2FAS: "services" is not a list',
+      );
     }
 
     // A missing / wrongly typed root `groups` yields an empty index, not an
@@ -126,10 +127,12 @@ class TwoFasParser implements ImportParser {
 
     for (final raw in services) {
       if (raw is! Map) {
-        skipped.add(const SkippedEntry(
-          reason: SkipReason.invalidFields,
-          detail: 'service is not a JSON object',
-        ));
+        skipped.add(
+          const SkippedEntry(
+            reason: SkipReason.invalidFields,
+            detail: 'service is not a JSON object',
+          ),
+        );
         continue;
       }
       final otp = raw['otp'];
@@ -143,26 +146,28 @@ class TwoFasParser implements ImportParser {
       try {
         accounts.add(_parseService(raw, otpMap, groups));
       } on _Skip catch (skip) {
-        skipped.add(SkippedEntry(
-          label: label,
-          reason: skip.reason,
-          detail: skip.detail,
-        ));
+        skipped.add(
+          SkippedEntry(label: label, reason: skip.reason, detail: skip.detail),
+        );
       } on FormatException {
         // Raised by OtpAccount.validate() / OtpAlgorithm.fromName for values we
         // did not screen ourselves. The message is NOT propagated: this parser
         // controls every string that reaches the UI.
-        skipped.add(SkippedEntry(
-          label: label,
-          reason: SkipReason.invalidFields,
-          detail: 'entry rejected by validation',
-        ));
+        skipped.add(
+          SkippedEntry(
+            label: label,
+            reason: SkipReason.invalidFields,
+            detail: 'entry rejected by validation',
+          ),
+        );
       } on ArgumentError {
-        skipped.add(SkippedEntry(
-          label: label,
-          reason: SkipReason.invalidFields,
-          detail: 'entry rejected by validation',
-        ));
+        skipped.add(
+          SkippedEntry(
+            label: label,
+            reason: SkipReason.invalidFields,
+            detail: 'entry rejected by validation',
+          ),
+        );
       }
     }
 
@@ -230,15 +235,20 @@ class TwoFasParser implements ImportParser {
   /// The single group NAME of one service, or nothing. Never throws and never
   /// skips the service.
   List<String> _tagsOf(
-      Map<Object?, Object?> service, Map<String, String> groups) {
+    Map<Object?, Object?> service,
+    Map<String, String> groups,
+  ) {
     final id = _groupId(service['groupId']);
     if (id.isEmpty) return const [];
     final name = groups[id];
     return name == null ? const [] : <String>[name];
   }
 
-  OtpAccount _parseService(Map<Object?, Object?> service,
-      Map<Object?, Object?> otp, Map<String, String> groups) {
+  OtpAccount _parseService(
+    Map<Object?, Object?> service,
+    Map<Object?, Object?> otp,
+    Map<String, String> groups,
+  ) {
     final declared = _tokenType(otp['tokenType']);
 
     final serviceName = (_string(service['name']) ?? '').trim();
@@ -251,7 +261,7 @@ class TwoFasParser implements ImportParser {
     // Plan D4: account → label → service name → placeholder.
     final accountName =
         _firstNonEmpty([otp['account'], otp['label'], service['name']]) ??
-            _unnamedAccount;
+        _unnamedAccount;
 
     var secret = (_string(service['secret']) ?? '').trim();
     if (secret.isEmpty) {
@@ -259,8 +269,10 @@ class TwoFasParser implements ImportParser {
       if (_isRedactedPlaceholder(fromLink)) {
         // Source-specific: the file itself says the secret was withheld, so
         // "not valid Base32" would send the user looking for the wrong problem.
-        throw const _Skip(SkipReason.invalidSecret,
-            '2FAS hid this secret in the link; re-export with the secret');
+        throw const _Skip(
+          SkipReason.invalidSecret,
+          '2FAS hid this secret in the link; re-export with the secret',
+        );
       }
       secret = fromLink;
     }
@@ -292,8 +304,10 @@ class TwoFasParser implements ImportParser {
     if (type == OtpType.hotp) {
       final parsed = _counter(otp);
       if (parsed == null) {
-        throw const _Skip(SkipReason.invalidFields,
-            'HOTP entry has no counter (tried "counter", "initialCounter")');
+        throw const _Skip(
+          SkipReason.invalidFields,
+          'HOTP entry has no counter (tried "counter", "initialCounter")',
+        );
       }
       counter = parsed;
     } else {
@@ -315,8 +329,10 @@ class TwoFasParser implements ImportParser {
     } on FormatException {
       // Out-of-contract numbers (digits 9, period 0, ...). The detail lists the
       // offending values only — never the secret.
-      throw _Skip(SkipReason.invalidFields,
-          'digits=$digits period=$period counter=$counter');
+      throw _Skip(
+        SkipReason.invalidFields,
+        'digits=$digits period=$period counter=$counter',
+      );
     }
   }
 
@@ -329,7 +345,9 @@ class TwoFasParser implements ImportParser {
       'HOTP' => OtpType.hotp,
       'STEAM' => OtpType.steam,
       _ => throw _Skip(
-          SkipReason.unsupportedType, 'tokenType=${_fragment(name)}'),
+        SkipReason.unsupportedType,
+        'tokenType=${_fragment(name)}',
+      ),
     };
   }
 
@@ -360,8 +378,10 @@ class TwoFasParser implements ImportParser {
       if (_knownUnsupportedAlgorithms.contains(canonical)) {
         throw _Skip(SkipReason.unsupportedType, 'algorithm=$canonical');
       }
-      throw _Skip(SkipReason.invalidFields,
-          'unsupported algorithm ${_fragment(name)}');
+      throw _Skip(
+        SkipReason.invalidFields,
+        'unsupported algorithm ${_fragment(name)}',
+      );
     }
   }
 
@@ -391,7 +411,9 @@ class TwoFasParser implements ImportParser {
     try {
       if (Base32.decode(secret).isEmpty) {
         throw const _Skip(
-            SkipReason.invalidSecret, 'secret decodes to zero bytes');
+          SkipReason.invalidSecret,
+          'secret decodes to zero bytes',
+        );
       }
     } on FormatException {
       throw const _Skip(SkipReason.invalidSecret, 'secret is not valid Base32');
@@ -418,7 +440,9 @@ String? _firstNonEmpty(List<Object?> candidates) {
 int? _integer(Object? value, String field) {
   if (value == null) return null;
   if (value is int) return value;
-  if (value is double && value == value.truncateToDouble()) return value.toInt();
+  if (value is double && value == value.truncateToDouble()) {
+    return value.toInt();
+  }
   if (value is String) {
     final parsed = int.tryParse(value.trim());
     if (parsed != null) return parsed;
@@ -432,7 +456,9 @@ int? _integer(Object? value, String field) {
 void _requireStringCap(String value, String field) {
   if (utf8.encode(value).length > _maxStringBytes) {
     throw _Skip(
-        SkipReason.invalidFields, '"$field" is over $_maxStringBytes bytes');
+      SkipReason.invalidFields,
+      '"$field" is over $_maxStringBytes bytes',
+    );
   }
 }
 

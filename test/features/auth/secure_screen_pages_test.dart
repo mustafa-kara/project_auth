@@ -46,9 +46,9 @@ void main() {
     SecureScreen.debugReset();
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
-      calls.add(call.method);
-      return null;
-    });
+          calls.add(call.method);
+          return null;
+        });
   });
 
   tearDown(() {
@@ -66,9 +66,11 @@ void main() {
     final lock = _FakeLock(lockState);
     addTearDown(lock.close);
 
-    await tester.pumpWidget(MaterialApp(
-      home: BlocProvider<VaultLockCubit>.value(value: lock, child: page),
-    ));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: BlocProvider<VaultLockCubit>.value(value: lock, child: page),
+      ),
+    );
     await tester.pump();
     expect(calls, ['enable'], reason: 'mount → koruma açılmalı');
     expect(SecureScreen.holderCount, 1);
@@ -95,8 +97,9 @@ void main() {
     );
   });
 
-  testWidgets('RecoveryUnlockPage (24 kelime + yeni parola) korunur',
-      (tester) async {
+  testWidgets('RecoveryUnlockPage (24 kelime + yeni parola) korunur', (
+    tester,
+  ) async {
     await expectProtected(
       tester,
       page: const RecoveryUnlockPage(),
@@ -104,13 +107,15 @@ void main() {
     );
   });
 
-  testWidgets('RecoveryVerifyPage (recovery kelime girişi) korunur',
-      (tester) async {
+  testWidgets('RecoveryVerifyPage (recovery kelime girişi) korunur', (
+    tester,
+  ) async {
     await expectProtected(
       tester,
       page: const RecoveryVerifyPage(),
       lockState: VaultLockState.setupPending(
-          mnemonic: List.generate(24, (i) => 'word$i')),
+        mnemonic: List.generate(24, (i) => 'word$i'),
+      ),
     );
   });
 
@@ -124,7 +129,8 @@ void main() {
       tester,
       page: const RecoveryShowPage(),
       lockState: VaultLockState.setupPending(
-          mnemonic: List.generate(24, (i) => 'word$i')),
+        mnemonic: List.generate(24, (i) => 'word$i'),
+      ),
     );
   });
 
@@ -136,9 +142,11 @@ void main() {
     final session = _FakeSession(const SessionState());
     addTearDown(session.close);
 
-    await tester.pumpWidget(MaterialApp(
-      home: BlocProvider<SessionCubit>.value(value: session, child: page),
-    ));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: BlocProvider<SessionCubit>.value(value: session, child: page),
+      ),
+    );
     await tester.pump();
     expect(calls, ['enable'], reason: 'mount → koruma açılmalı');
     expect(SecureScreen.holderCount, 1);

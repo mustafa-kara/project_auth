@@ -34,13 +34,15 @@ class SupabaseTokenRepository implements RemoteTokenRepository {
           .select('id,ciphertext,nonce,version,updated_at,deleted')
           .eq('user_id', uid);
       // sinceIso null → full pull; aksi halde `updated_at > sinceIso`.
-      final filtered =
-          sinceIso == null ? base : base.gt('updated_at', sinceIso);
+      final filtered = sinceIso == null
+          ? base
+          : base.gt('updated_at', sinceIso);
       final List<dynamic> rows = await filtered.order('updated_at');
 
       final out = <RemoteTokenRow>[];
       var malformed = 0;
-      String? safeCursor; // İLK malformed'dan ÖNCEki son valid updated_at (cap).
+      String?
+      safeCursor; // İLK malformed'dan ÖNCEki son valid updated_at (cap).
       var sawMalformed = false;
 
       for (final raw in rows) {
@@ -153,13 +155,13 @@ class SupabaseTokenRepository implements RemoteTokenRepository {
   /// `created_at` GÖNDERİLMEZ (trigger ezer). Yalnız opak ciphertext/nonce + version + deleted.
   @visibleForTesting
   static Map<String, dynamic> toRow(String uid, RawTokenRecord r) => {
-        'id': r.id,
-        'user_id': uid,
-        'ciphertext': ByteaCodec.encode(r.blob.ciphertext),
-        'nonce': ByteaCodec.encode(r.blob.nonce),
-        'version': r.version,
-        'deleted': r.deleted,
-      };
+    'id': r.id,
+    'user_id': uid,
+    'ciphertext': ByteaCodec.encode(r.blob.ciphertext),
+    'nonce': ByteaCodec.encode(r.blob.nonce),
+    'version': r.version,
+    'deleted': r.deleted,
+  };
 
   /// Sunucu satırı → RemoteTokenRow. Bozuk (bytea/nonce/eksik kolon/tarih) → null
   /// (çağıran karantina sayar). İki bytea kolon → bir `EncryptedBlob` MERGE.
@@ -198,7 +200,9 @@ class SupabaseTokenRepository implements RemoteTokenRepository {
   static String _str(Map<String, dynamic> row, String key) {
     final v = row[key];
     if (v is String) return v;
-    throw FormatException('tokens."$key" String bekleniyordu (${v.runtimeType})');
+    throw FormatException(
+      'tokens."$key" String bekleniyordu (${v.runtimeType})',
+    );
   }
 
   /// PostgREST/ağ hatasını domain [SyncError]'a eşler (Patch 2 kalıbı).

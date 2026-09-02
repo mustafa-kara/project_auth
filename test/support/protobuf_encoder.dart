@@ -48,11 +48,8 @@ Uint8List encodeTag(int field, int wireType) =>
     encodeVarint((field << 3) | wireType);
 
 /// A complete length-delimited (wire type 2) field: tag, length, payload.
-Uint8List encodeLengthDelimited(int field, List<int> payload) => _concat([
-      encodeTag(field, 2),
-      encodeVarint(payload.length),
-      payload,
-    ]);
+Uint8List encodeLengthDelimited(int field, List<int> payload) =>
+    _concat([encodeTag(field, 2), encodeVarint(payload.length), payload]);
 
 /// A complete varint (wire type 0) field.
 Uint8List encodeVarintField(int field, int value) =>
@@ -109,16 +106,15 @@ Uint8List encodeOtpParameters({
   int? digits,
   int? type,
   int? counter,
-}) =>
-    _concat([
-      if (secret != null) encodeLengthDelimited(1, secret),
-      if (name != null) encodeLengthDelimited(2, utf8.encode(name)),
-      if (issuer != null) encodeLengthDelimited(3, utf8.encode(issuer)),
-      if (algorithm != null) encodeVarintField(4, algorithm),
-      if (digits != null) encodeVarintField(5, digits),
-      if (type != null) encodeVarintField(6, type),
-      if (counter != null) encodeVarintField(7, counter),
-    ]);
+}) => _concat([
+  if (secret != null) encodeLengthDelimited(1, secret),
+  if (name != null) encodeLengthDelimited(2, utf8.encode(name)),
+  if (issuer != null) encodeLengthDelimited(3, utf8.encode(issuer)),
+  if (algorithm != null) encodeVarintField(4, algorithm),
+  if (digits != null) encodeVarintField(5, digits),
+  if (type != null) encodeVarintField(6, type),
+  if (counter != null) encodeVarintField(7, counter),
+]);
 
 /// A whole `MigrationPayload`: the [entries] (already-encoded `OtpParameters`
 /// bodies) followed by the batch coordinates.
@@ -132,14 +128,13 @@ Uint8List encodeMigrationPayload({
   int? batchSize = 1,
   int? batchIndex = 0,
   int? batchId = 0,
-}) =>
-    _concat([
-      for (final entry in entries) encodeLengthDelimited(1, entry),
-      if (version != null) encodeVarintField(2, version),
-      if (batchSize != null) encodeVarintField(3, batchSize),
-      if (batchIndex != null) encodeVarintField(4, batchIndex),
-      if (batchId != null) encodeVarintField(5, batchId),
-    ]);
+}) => _concat([
+  for (final entry in entries) encodeLengthDelimited(1, entry),
+  if (version != null) encodeVarintField(2, version),
+  if (batchSize != null) encodeVarintField(3, batchSize),
+  if (batchIndex != null) encodeVarintField(4, batchIndex),
+  if (batchId != null) encodeVarintField(5, batchId),
+]);
 
 /// `otpauth-migration://offline?data=…` around [payload].
 ///

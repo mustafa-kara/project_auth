@@ -39,10 +39,12 @@ class EditTokenSheet extends StatefulWidget {
 }
 
 class _EditTokenSheetState extends State<EditTokenSheet> {
-  late final TextEditingController _issuer =
-      TextEditingController(text: widget.account.issuer ?? '');
-  late final TextEditingController _accountName =
-      TextEditingController(text: widget.account.accountName);
+  late final TextEditingController _issuer = TextEditingController(
+    text: widget.account.issuer ?? '',
+  );
+  late final TextEditingController _accountName = TextEditingController(
+    text: widget.account.accountName,
+  );
   final TextEditingController _tagInput = TextEditingController();
 
   /// Working copy of the tags, kept normalized at every step so the UI shows
@@ -128,8 +130,9 @@ class _EditTokenSheetState extends State<EditTokenSheet> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     // Tags already on the token are not offered again.
-    final suggestions =
-        widget.cubit.allTags.where((t) => !_tags.contains(t)).toList();
+    final suggestions = widget.cubit.allTags
+        .where((t) => !_tags.contains(t))
+        .toList();
 
     return Padding(
       padding: EdgeInsets.only(
@@ -179,8 +182,9 @@ class _EditTokenSheetState extends State<EditTokenSheet> {
                 alignment: Alignment.centerLeft,
                 child: Text(
                   'Öneriler',
-                  style: theme.textTheme.labelMedium
-                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ),
               const SizedBox(height: Gap.xs),
@@ -220,25 +224,24 @@ class _EditTokenSheetState extends State<EditTokenSheet> {
   /// `OtpAccount.maxTagRunes` limits runes, so the two disagree on ZWJ emoji
   /// and combining marks — see the note on [_tags].
   Widget _tagField(ThemeData theme) => TextField(
-        controller: _tagInput,
-        enabled: !_atCap && !_saving,
-        autofocus: widget.focusTags,
-        maxLength: OtpAccount.maxTagRunes,
-        textInputAction: TextInputAction.done,
-        onSubmitted: _addTag,
-        decoration: InputDecoration(
-          labelText: 'Etiket',
-          hintText: 'Etiket ekle (en fazla ${OtpAccount.maxTags})',
-          helperText: _atCap
-              ? 'En fazla ${OtpAccount.maxTags} etiket ekleyebilirsin.'
-              : null,
-          helperStyle: TextStyle(color: theme.colorScheme.onSurfaceVariant),
-          suffixIcon: IconButton(
-            icon: const Icon(Icons.add),
-            tooltip: 'Etiketi ekle',
-            onPressed:
-                _atCap || _saving ? null : () => _addTag(_tagInput.text),
-          ),
-        ),
-      );
+    controller: _tagInput,
+    enabled: !_atCap && !_saving,
+    autofocus: widget.focusTags,
+    maxLength: OtpAccount.maxTagRunes,
+    textInputAction: TextInputAction.done,
+    onSubmitted: _addTag,
+    decoration: InputDecoration(
+      labelText: 'Etiket',
+      hintText: 'Etiket ekle (en fazla ${OtpAccount.maxTags})',
+      helperText: _atCap
+          ? 'En fazla ${OtpAccount.maxTags} etiket ekleyebilirsin.'
+          : null,
+      helperStyle: TextStyle(color: theme.colorScheme.onSurfaceVariant),
+      suffixIcon: IconButton(
+        icon: const Icon(Icons.add),
+        tooltip: 'Etiketi ekle',
+        onPressed: _atCap || _saving ? null : () => _addTag(_tagInput.text),
+      ),
+    ),
+  );
 }

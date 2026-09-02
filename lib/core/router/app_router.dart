@@ -257,8 +257,12 @@ AppRouterBundle createAppRouter(
 /// - `signedIn` → ÖNCE `linkRequired` (→ `/auth/link`), SONRA vault guard.
 @visibleForTesting
 String? sessionGuard(
-    SessionState session, VaultLockState lock, String location) {
-  final isPublicAuthRoute = location == Routes.authLogin ||
+  SessionState session,
+  VaultLockState lock,
+  String location,
+) {
+  final isPublicAuthRoute =
+      location == Routes.authLogin ||
       location == Routes.authRegister ||
       location == Routes.authConfirm ||
       location == Routes.auth;

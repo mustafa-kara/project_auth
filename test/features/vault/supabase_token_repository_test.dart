@@ -14,32 +14,37 @@ import 'package:project_auth/features/vault/data/supabase_token_repository.dart'
 import 'package:project_auth/features/vault/domain/raw_token_record.dart';
 
 EncryptedBlob _blob(int seed) => EncryptedBlob(
-      nonce: Uint8List.fromList(
-          List.generate(EncryptedBlob.nonceBytes, (i) => (i + seed) & 0xff)),
-      ciphertext: Uint8List.fromList(
-          List.generate(48, (i) => (i * 7 + seed) & 0xff)),
-    );
+  nonce: Uint8List.fromList(
+    List.generate(EncryptedBlob.nonceBytes, (i) => (i + seed) & 0xff),
+  ),
+  ciphertext: Uint8List.fromList(
+    List.generate(48, (i) => (i * 7 + seed) & 0xff),
+  ),
+);
 
 RawTokenRecord _rec(String id, {bool deleted = false}) => RawTokenRecord(
-      id: id,
-      blob: _blob(5),
-      updatedAtMs: 1000,
-      version: 1,
-      deleted: deleted,
-    );
+  id: id,
+  blob: _blob(5),
+  updatedAtMs: 1000,
+  version: 1,
+  deleted: deleted,
+);
 
 void main() {
   group('toRow', () {
     test('6 kolon; updated_at/created_at/user_id-secret GÖNDERİLMEZ', () {
       final row = SupabaseTokenRepository.toRow('uid-A', _rec('t1'));
-      expect(row.keys, containsAll(<String>{
-        'id',
-        'user_id',
-        'ciphertext',
-        'nonce',
-        'version',
-        'deleted',
-      }));
+      expect(
+        row.keys,
+        containsAll(<String>{
+          'id',
+          'user_id',
+          'ciphertext',
+          'nonce',
+          'version',
+          'deleted',
+        }),
+      );
       expect(row.containsKey('updated_at'), isFalse);
       expect(row.containsKey('created_at'), isFalse);
       // bytea \x+hex formatı.
@@ -48,7 +53,10 @@ void main() {
     });
 
     test('deleted bayrağı taşınır (tombstone push)', () {
-      final row = SupabaseTokenRepository.toRow('uid-A', _rec('t1', deleted: true));
+      final row = SupabaseTokenRepository.toRow(
+        'uid-A',
+        _rec('t1', deleted: true),
+      );
       expect(row['deleted'], isTrue);
     });
   });
@@ -57,15 +65,18 @@ void main() {
     test('1200 kayıt → 3 parça (500/500/200) = 3 upsert çağrısı', () {
       final records = [for (var i = 0; i < 1200; i++) _rec('t$i')];
       final chunks = SupabaseTokenRepository.chunkRecords(records);
-      expect(chunks, hasLength(3),
-          reason: 'pushUpsert her parça için bir upsert gönderir');
+      expect(
+        chunks,
+        hasLength(3),
+        reason: 'pushUpsert her parça için bir upsert gönderir',
+      );
       expect(chunks.map((c) => c.length), [500, 500, 200]);
     });
 
     test('sıra korunur (parçalar birleştirilince orijinal liste)', () {
       final records = [for (var i = 0; i < 1200; i++) _rec('t$i')];
       final flat = [
-        for (final c in SupabaseTokenRepository.chunkRecords(records)) ...c
+        for (final c in SupabaseTokenRepository.chunkRecords(records)) ...c,
       ];
       expect(flat.map((r) => r.id), records.map((r) => r.id));
     });
@@ -73,13 +84,15 @@ void main() {
     test('sınır boyu tek parça kalır, +1 ikiye böler', () {
       const size = SupabaseTokenRepository.upsertChunkSize;
       expect(
-        SupabaseTokenRepository.chunkRecords(
-            [for (var i = 0; i < size; i++) _rec('t$i')]),
+        SupabaseTokenRepository.chunkRecords([
+          for (var i = 0; i < size; i++) _rec('t$i'),
+        ]),
         hasLength(1),
       );
       expect(
-        SupabaseTokenRepository.chunkRecords(
-            [for (var i = 0; i < size + 1; i++) _rec('t$i')]),
+        SupabaseTokenRepository.chunkRecords([
+          for (var i = 0; i < size + 1; i++) _rec('t$i'),
+        ]),
         hasLength(2),
       );
     });

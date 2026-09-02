@@ -73,10 +73,12 @@ class _UnlockPageState extends State<UnlockPage> {
   @override
   Widget build(BuildContext context) {
     final error = context.select<VaultLockCubit, VaultLockError?>(
-        (c) => c.state.status == VaultLockStatus.locked ? c.state.error : null);
+      (c) => c.state.status == VaultLockStatus.locked ? c.state.error : null,
+    );
     // Biyometri butonu: yalnız enrolled + cihaz uygun (türetilmiş kesişim).
     final biometricAvailable = context.select<VaultLockCubit, bool>(
-        (c) => c.state.biometricUnlockAvailable);
+      (c) => c.state.biometricUnlockAvailable,
+    );
     // Parola alanı hatası yalnız parola/biyometri hata sebepleri için.
     final pwdError = _errorText(error);
 

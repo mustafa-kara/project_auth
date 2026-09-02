@@ -108,7 +108,9 @@ abstract final class GoogleAuthParser {
       throw const MalformedMigrationUriException('empty QR string');
     }
     if (trimmed.length > maxUriLength) {
-      throw const MalformedMigrationUriException('QR string over the size limit');
+      throw const MalformedMigrationUriException(
+        'QR string over the size limit',
+      );
     }
 
     final uri = Uri.tryParse(trimmed);
@@ -136,10 +138,12 @@ abstract final class GoogleAuthParser {
       decoded = Uri.decodeComponent(rawData);
     } on ArgumentError {
       throw const MalformedMigrationUriException(
-          '"data" is not valid percent-encoding');
+        '"data" is not valid percent-encoding',
+      );
     } on FormatException {
       throw const MalformedMigrationUriException(
-          '"data" is not valid percent-encoding');
+        '"data" is not valid percent-encoding',
+      );
     }
 
     return parsePayload(_decodeBase64(decoded));
@@ -177,7 +181,8 @@ abstract final class GoogleAuthParser {
           entries++;
           if (entries > maxEntriesPerBatch) {
             throw FormatException(
-                'migration payload holds more than $maxEntriesPerBatch entries');
+              'migration payload holds more than $maxEntriesPerBatch entries',
+            );
           }
           _collectEntry(bytes, accounts, skipped);
         case _fPayloadVersion:
@@ -245,8 +250,7 @@ abstract final class GoogleAuthParser {
   /// The size ceiling is applied to the *encoded* length first, so an oversized
   /// blob never becomes a byte array.
   static Uint8List _decodeBase64(String encoded) {
-    final normalized =
-        encoded.trim().replaceAll('-', '+').replaceAll('_', '/');
+    final normalized = encoded.trim().replaceAll('-', '+').replaceAll('_', '/');
     final stripped = normalized.replaceAll('=', '');
     if (stripped.isEmpty) {
       throw const MalformedMigrationUriException('"data" is empty');
@@ -259,8 +263,7 @@ abstract final class GoogleAuthParser {
     if ((stripped.length ~/ 4) * 3 > maxPayloadBytes) {
       throw const MalformedMigrationUriException('payload over the size limit');
     }
-    final padded =
-        remainder == 0 ? stripped : stripped + '=' * (4 - remainder);
+    final padded = remainder == 0 ? stripped : stripped + '=' * (4 - remainder);
 
     final Uint8List bytes;
     try {
@@ -271,7 +274,9 @@ abstract final class GoogleAuthParser {
       throw const MalformedMigrationUriException('"data" is not valid base64');
     }
     if (bytes.isEmpty) {
-      throw const MalformedMigrationUriException('"data" decoded to zero bytes');
+      throw const MalformedMigrationUriException(
+        '"data" decoded to zero bytes',
+      );
     }
     return bytes;
   }
@@ -299,11 +304,13 @@ abstract final class GoogleAuthParser {
     try {
       accounts.add(_map(raw, naming));
     } on _Skip catch (skip) {
-      skipped.add(SkippedEntry(
-        label: naming.label,
-        reason: skip.reason,
-        detail: skip.detail,
-      ));
+      skipped.add(
+        SkippedEntry(
+          label: naming.label,
+          reason: skip.reason,
+          detail: skip.detail,
+        ),
+      );
     }
   }
 
@@ -332,7 +339,8 @@ abstract final class GoogleAuthParser {
           final value = reader.readLengthDelimited();
           if (value.length > ProtobufLimits.maxSecretBytes) {
             throw FormatException(
-                'OtpParameters: secret over ${ProtobufLimits.maxSecretBytes} bytes');
+              'OtpParameters: secret over ${ProtobufLimits.maxSecretBytes} bytes',
+            );
           }
           secret = value;
         case _fEntryName:
@@ -380,13 +388,16 @@ abstract final class GoogleAuthParser {
     final bytes = reader.readLengthDelimited();
     if (bytes.length > ProtobufLimits.maxStringBytes) {
       throw FormatException(
-          'OtpParameters: string over ${ProtobufLimits.maxStringBytes} bytes');
+        'OtpParameters: string over ${ProtobufLimits.maxStringBytes} bytes',
+      );
     }
     try {
       return utf8.decode(bytes, allowMalformed: false);
     } on FormatException {
       throw const _Skip(
-          SkipReason.invalidFields, 'entry has a non-UTF-8 text field');
+        SkipReason.invalidFields,
+        'entry has a non-UTF-8 text field',
+      );
     }
   }
 
@@ -434,8 +445,7 @@ abstract final class GoogleAuthParser {
       // MD5 is in Google's enum but this app's OTP engine does not implement
       // it; mapping it to SHA1 would generate wrong codes silently.
       4 => throw const _Skip(SkipReason.unsupportedType, 'algorithm=MD5'),
-      _ => throw _Skip(
-          SkipReason.invalidFields, 'algorithm=${raw.algorithm}'),
+      _ => throw _Skip(SkipReason.invalidFields, 'algorithm=${raw.algorithm}'),
     };
 
     final digits = switch (raw.digits) {
@@ -447,8 +457,7 @@ abstract final class GoogleAuthParser {
     final type = switch (raw.type) {
       // An entry that never says what it is cannot be guessed: HOTP and TOTP
       // are not interchangeable.
-      0 => throw const _Skip(
-          SkipReason.unsupportedType, 'type=unspecified'),
+      0 => throw const _Skip(SkipReason.unsupportedType, 'type=unspecified'),
       1 => OtpType.hotp,
       2 => OtpType.totp,
       _ => throw _Skip(SkipReason.unsupportedType, 'type=${raw.type}'),
@@ -458,7 +467,9 @@ abstract final class GoogleAuthParser {
     if (type == OtpType.hotp) {
       if (!raw.hasCounter) {
         throw const _Skip(
-            SkipReason.invalidFields, 'HOTP entry has no counter');
+          SkipReason.invalidFields,
+          'HOTP entry has no counter',
+        );
       }
       if (raw.counter < 0) {
         throw const _Skip(SkipReason.invalidFields, 'counter is negative');
@@ -483,11 +494,15 @@ abstract final class GoogleAuthParser {
       // Last-resort net for values the checks above did not screen. The message
       // is NOT propagated: `OtpAccount.validate` quotes the secret on the
       // Base32 path.
-      throw _Skip(SkipReason.invalidFields,
-          'digits=$digits period=$_defaultPeriod counter=$counter');
+      throw _Skip(
+        SkipReason.invalidFields,
+        'digits=$digits period=$_defaultPeriod counter=$counter',
+      );
     } on ArgumentError {
-      throw _Skip(SkipReason.invalidFields,
-          'digits=$digits period=$_defaultPeriod counter=$counter');
+      throw _Skip(
+        SkipReason.invalidFields,
+        'digits=$digits period=$_defaultPeriod counter=$counter',
+      );
     }
   }
 }

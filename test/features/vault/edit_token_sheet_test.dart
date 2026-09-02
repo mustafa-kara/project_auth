@@ -62,17 +62,17 @@ OtpAccount _acc({
   String? issuer = 'GitHub',
   String name = 'octocat@example.com',
   List<String> tags = const [],
-}) =>
-    OtpAccount(
-      secret: _secret,
-      type: OtpType.totp,
-      issuer: issuer,
-      accountName: name,
-      tags: tags,
-    );
+}) => OtpAccount(
+  secret: _secret,
+  type: OtpType.totp,
+  issuer: issuer,
+  accountName: name,
+  tags: tags,
+);
 
 final Finder _tagField = find.byWidgetPredicate(
-    (w) => w is TextField && w.decoration?.labelText == 'Etiket');
+  (w) => w is TextField && w.decoration?.labelText == 'Etiket',
+);
 
 /// Sheet'i gerçek bir modal route içinde açar (pop davranışı test edilebilsin).
 Future<void> _open(
@@ -81,29 +81,31 @@ Future<void> _open(
   OtpAccount account, {
   bool focusTags = false,
 }) async {
-  await tester.pumpWidget(MediaQuery(
-    data: const MediaQueryData(disableAnimations: true),
-    child: MaterialApp(
-      home: Scaffold(
-        body: Builder(
-          builder: (ctx) => Center(
-            child: ElevatedButton(
-              onPressed: () => showModalBottomSheet<void>(
-                context: ctx,
-                isScrollControlled: true,
-                builder: (_) => EditTokenSheet(
-                  account: account,
-                  cubit: cubit,
-                  focusTags: focusTags,
+  await tester.pumpWidget(
+    MediaQuery(
+      data: const MediaQueryData(disableAnimations: true),
+      child: MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (ctx) => Center(
+              child: ElevatedButton(
+                onPressed: () => showModalBottomSheet<void>(
+                  context: ctx,
+                  isScrollControlled: true,
+                  builder: (_) => EditTokenSheet(
+                    account: account,
+                    cubit: cubit,
+                    focusTags: focusTags,
+                  ),
                 ),
+                child: const Text('aç'),
               ),
-              child: const Text('aç'),
             ),
           ),
         ),
       ),
     ),
-  ));
+  );
   await tester.tap(find.text('aç'));
   await tester.pumpAndSettle();
 }
@@ -150,8 +152,9 @@ void main() {
     expect(find.widgetWithText(InputChip, 'İş'), findsNothing);
   });
 
-  testWidgets('aynı etiket iki kez eklenemez (model tekilleştirir)',
-      (tester) async {
+  testWidgets('aynı etiket iki kez eklenemez (model tekilleştirir)', (
+    tester,
+  ) async {
     final cubit = _EditCubit(_FakeRepo([]))..load();
     addTearDown(cubit.close);
     await tester.pumpAndSettle();
@@ -177,19 +180,23 @@ void main() {
     expect(find.text('En fazla 8 etiket ekleyebilirsin.'), findsOneWidget);
   });
 
-  testWidgets('etiket alanı maxLength 32 (model tavanıyla aynı)',
-      (tester) async {
+  testWidgets('etiket alanı maxLength 32 (model tavanıyla aynı)', (
+    tester,
+  ) async {
     final cubit = _EditCubit(_FakeRepo([]))..load();
     addTearDown(cubit.close);
     await tester.pumpAndSettle();
     await _open(tester, cubit, _acc());
 
-    expect(tester.widget<TextField>(_tagField).maxLength,
-        OtpAccount.maxTagRunes);
+    expect(
+      tester.widget<TextField>(_tagField).maxLength,
+      OtpAccount.maxTagRunes,
+    );
   });
 
-  testWidgets('öneri çipleri allTags\'ten gelir; ekli olan önerilmez',
-      (tester) async {
+  testWidgets('öneri çipleri allTags\'ten gelir; ekli olan önerilmez', (
+    tester,
+  ) async {
     final repo = _FakeRepo([
       _acc(name: 'a@example.com', tags: ['İş']),
       _acc(name: 'b@example.com', tags: ['Kişisel']),
@@ -208,16 +215,19 @@ void main() {
     expect(find.widgetWithText(InputChip, 'Kişisel'), findsOneWidget);
   });
 
-  testWidgets('Kaydet → editMetadata (secret DEĞİL) + sheet kapanır',
-      (tester) async {
+  testWidgets('Kaydet → editMetadata (secret DEĞİL) + sheet kapanır', (
+    tester,
+  ) async {
     final cubit = _EditCubit(_FakeRepo([]))..load();
     addTearDown(cubit.close);
     await tester.pumpAndSettle();
     final account = _acc(tags: ['İş']);
     await _open(tester, cubit, account);
 
-    await tester.enterText(find.widgetWithText(TextFormField, 'GitHub'),
-        'GitHub Inc');
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'GitHub'),
+      'GitHub Inc',
+    );
     await tester.enterText(_tagField, 'Ofis');
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
@@ -237,25 +247,28 @@ void main() {
   // dokunulmadan kaydedince `issuer: ''` gönderir. Bu SÖZLEŞME: `''`'i "issuer
   // yok" olarak okuyup no-op'a çevirmek `VaultCubit.editMetadata`'nın işi
   // (bkz. vault_cubit_tags_test.dart) — sheet'in kendi normalizasyonu yok.
-  testWidgets('issuer\'sız hesap: dokunmadan Kaydet → issuer boş string gider',
-      (tester) async {
-    final cubit = _EditCubit(_FakeRepo([]))..load();
-    addTearDown(cubit.close);
-    await tester.pumpAndSettle();
-    final account = _acc(issuer: null);
-    await _open(tester, cubit, account);
+  testWidgets(
+    'issuer\'sız hesap: dokunmadan Kaydet → issuer boş string gider',
+    (tester) async {
+      final cubit = _EditCubit(_FakeRepo([]))..load();
+      addTearDown(cubit.close);
+      await tester.pumpAndSettle();
+      final account = _acc(issuer: null);
+      await _open(tester, cubit, account);
 
-    await tester.tap(find.widgetWithText(FilledButton, 'Kaydet'));
-    await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Kaydet'));
+      await tester.pumpAndSettle();
 
-    expect(cubit.calls, 1);
-    expect(cubit.lastIssuer, '');
-    expect(cubit.lastAccountName, 'octocat@example.com');
-    expect(cubit.lastTags, isEmpty);
-  });
+      expect(cubit.calls, 1);
+      expect(cubit.lastIssuer, '');
+      expect(cubit.lastAccountName, 'octocat@example.com');
+      expect(cubit.lastTags, isEmpty);
+    },
+  );
 
-  testWidgets('yazma hatası → "Kaydedilemedi: ..." + sheet AÇIK kalır',
-      (tester) async {
+  testWidgets('yazma hatası → "Kaydedilemedi: ..." + sheet AÇIK kalır', (
+    tester,
+  ) async {
     final cubit = _EditCubit(_FakeRepo([]), failWith: StateError('disk dolu'))
       ..load();
     addTearDown(cubit.close);
@@ -276,11 +289,14 @@ void main() {
     await _open(tester, cubit, _acc());
 
     await tester.enterText(
-        find.widgetWithText(TextFormField, 'octocat@example.com'), '   ');
+      find.widgetWithText(TextFormField, 'octocat@example.com'),
+      '   ',
+    );
     await tester.pumpAndSettle();
 
     expect(
-      tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Kaydet'))
+      tester
+          .widget<FilledButton>(find.widgetWithText(FilledButton, 'Kaydet'))
           .onPressed,
       isNull,
     );

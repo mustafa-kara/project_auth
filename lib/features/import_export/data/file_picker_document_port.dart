@@ -41,8 +41,8 @@ class FilePickerDocumentPort implements DocumentPort {
   const FilePickerDocumentPort({
     @visibleForTesting Future<Directory> Function()? documentsDir,
     @visibleForTesting bool Function()? isIOS,
-  })  : _documentsDir = documentsDir,
-        _isIOS = isIOS;
+  }) : _documentsDir = documentsDir,
+       _isIOS = isIOS;
 
   final Future<Directory> Function()? _documentsDir;
   final bool Function()? _isIOS;
@@ -149,13 +149,11 @@ class FilePickerDocumentPort implements DocumentPort {
     // no degraded mode to fall back to.
     final path = file.path;
     if (path == null) {
-      throw const MalformedImportFileException('picked image has no local path');
+      throw const MalformedImportFileException(
+        'picked image has no local path',
+      );
     }
-    return PickedImage(
-      path: path,
-      name: file.name,
-      sizeBytes: reportedSize,
-    );
+    return PickedImage(path: path, name: file.name, sizeBytes: reportedSize);
   }
 
   /// Public face of [_clearPickerCache], for callers that own the cache
@@ -293,8 +291,7 @@ class FilePickerDocumentPort implements DocumentPort {
     if (!onIOS()) return;
     try {
       final dir = await (_documentsDir ?? getApplicationDocumentsDirectory)();
-      final leftover =
-          File('${dir.path}${Platform.pathSeparator}$fileName');
+      final leftover = File('${dir.path}${Platform.pathSeparator}$fileName');
       // Paranoia: the app declares neither `UIFileSharingEnabled` nor
       // `LSSupportsOpeningDocumentsInPlace`, so its Documents directory is not
       // browsable in Files and the chosen destination can never BE the
@@ -320,8 +317,7 @@ class FilePickerDocumentPort implements DocumentPort {
     final raf = await file.open(mode: FileMode.writeOnlyAppend);
     try {
       await raf.setPosition(0);
-      final zeros =
-          Uint8List(length < _shredChunk ? length : _shredChunk);
+      final zeros = Uint8List(length < _shredChunk ? length : _shredChunk);
       var written = 0;
       while (written < length) {
         final remaining = length - written;

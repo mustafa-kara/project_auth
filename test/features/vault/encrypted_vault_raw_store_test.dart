@@ -23,25 +23,26 @@ import '../../support/fake_crypto.dart';
 class FakeSecureStorage implements FlutterSecureStorage {
   final Map<String, String> data = {};
   @override
-  Future<String?> read(
-          {required String key,
-          dynamic iOptions,
-          dynamic aOptions,
-          dynamic lOptions,
-          dynamic webOptions,
-          dynamic mOptions,
-          dynamic wOptions}) async =>
-      data[key];
+  Future<String?> read({
+    required String key,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async => data[key];
   @override
-  Future<void> write(
-      {required String key,
-      required String? value,
-      dynamic iOptions,
-      dynamic aOptions,
-      dynamic lOptions,
-      dynamic webOptions,
-      dynamic mOptions,
-      dynamic wOptions}) async {
+  Future<void> write({
+    required String key,
+    required String? value,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async {
     if (value == null) {
       data.remove(key);
     } else {
@@ -50,14 +51,15 @@ class FakeSecureStorage implements FlutterSecureStorage {
   }
 
   @override
-  Future<void> delete(
-      {required String key,
-      dynamic iOptions,
-      dynamic aOptions,
-      dynamic lOptions,
-      dynamic webOptions,
-      dynamic mOptions,
-      dynamic wOptions}) async {
+  Future<void> delete({
+    required String key,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async {
     data.remove(key);
   }
 
@@ -65,12 +67,14 @@ class FakeSecureStorage implements FlutterSecureStorage {
   noSuchMethod(Invocation invocation) => throw UnimplementedError();
 }
 
-EncryptedVaultRepository _repo(FakeSecureStorage storage, {FakeCrypto? crypto}) =>
-    EncryptedVaultRepository(
-      masterKey: FakeKeyHandle(),
-      crypto: crypto ?? FakeCrypto(),
-      storage: storage,
-    );
+EncryptedVaultRepository _repo(
+  FakeSecureStorage storage, {
+  FakeCrypto? crypto,
+}) => EncryptedVaultRepository(
+  masterKey: FakeKeyHandle(),
+  crypto: crypto ?? FakeCrypto(),
+  storage: storage,
+);
 
 /// `encrypt` çağrılarını sayar — "değişmemiş kayıt YENİDEN şifrelenmez"
 /// kısayolunu doğrudan ölçmek için.
@@ -93,8 +97,11 @@ List<Map<String, dynamic>> _records(FakeSecureStorage storage) =>
     (jsonDecode(storage.data[EncryptedVaultRepository.vaultKey]!) as List)
         .cast<Map<String, dynamic>>();
 
-OtpAccount _acc(String name) =>
-    OtpAccount(secret: 'JBSWY3DPEHPK3PXP', type: OtpType.totp, accountName: name);
+OtpAccount _acc(String name) => OtpAccount(
+  secret: 'JBSWY3DPEHPK3PXP',
+  type: OtpType.totp,
+  accountName: name,
+);
 
 RemoteTokenRow _row(String id, {required String iso, bool deleted = false}) =>
     RemoteTokenRow(
@@ -107,30 +114,39 @@ RemoteTokenRow _row(String id, {required String iso, bool deleted = false}) =>
 
 void main() {
   group('RawTokenStore — markDeleted + tombstone', () {
-    test('markDeleted → tombstone diskte, load() accounts dışı, exportRaw deleted=true',
-        () async {
-      final storage = FakeSecureStorage();
-      final repo = _repo(storage);
-      await repo.load();
-      await repo.save([_acc('a'), _acc('b')]);
-      final ids = (await repo.exportRaw()).map((r) => r.id).toList();
-      expect(ids.length, 2);
+    test(
+      'markDeleted → tombstone diskte, load() accounts dışı, exportRaw deleted=true',
+      () async {
+        final storage = FakeSecureStorage();
+        final repo = _repo(storage);
+        await repo.load();
+        await repo.save([_acc('a'), _acc('b')]);
+        final ids = (await repo.exportRaw()).map((r) => r.id).toList();
+        expect(ids.length, 2);
 
-      final targetId = (await repo.load()).accounts.first.id;
-      await repo.markDeleted(targetId);
+        final targetId = (await repo.load()).accounts.first.id;
+        await repo.markDeleted(targetId);
 
-      final after = await repo.load();
-      expect(after.accounts.any((a) => a.id == targetId), isFalse,
-          reason: 'tombstone load() accounts\'ta görünmez');
-      expect(after.accounts.length, 1);
+        final after = await repo.load();
+        expect(
+          after.accounts.any((a) => a.id == targetId),
+          isFalse,
+          reason: 'tombstone load() accounts\'ta görünmez',
+        );
+        expect(after.accounts.length, 1);
 
-      final raw = await repo.exportRaw();
-      final tomb = raw.firstWhere((r) => r.id == targetId);
-      expect(tomb.deleted, isTrue);
-      expect(tomb.isDirty, isTrue, reason: 'tombstone sv=null → push edilecek');
-      // Tombstone GEÇERLİ blob taşır (24B nonce / >=16B ct).
-      expect(tomb.blob.nonce.length, 24);
-    });
+        final raw = await repo.exportRaw();
+        final tomb = raw.firstWhere((r) => r.id == targetId);
+        expect(tomb.deleted, isTrue);
+        expect(
+          tomb.isDirty,
+          isTrue,
+          reason: 'tombstone sv=null → push edilecek',
+        );
+        // Tombstone GEÇERLİ blob taşır (24B nonce / >=16B ct).
+        expect(tomb.blob.nonce.length, 24);
+      },
+    );
 
     test('markDeleted sonrası save() tombstone\'u diriltmez', () async {
       final storage = FakeSecureStorage();
@@ -145,46 +161,70 @@ void main() {
       await repo.save([...survivors, _acc('c')]);
 
       final raw = await repo.exportRaw();
-      expect(raw.firstWhere((r) => r.id == delId).deleted, isTrue,
-          reason: 'tombstone save() sonrası hayatta');
+      expect(
+        raw.firstWhere((r) => r.id == delId).deleted,
+        isTrue,
+        reason: 'tombstone save() sonrası hayatta',
+      );
     });
   });
 
   // --- Denetim A1: tombstone diriltme (id koruyan yedek geri yüklemesi) ---
   group('A1 — canlı kayıt kendi tombstone\'unu düşürür', () {
-    test('sil → yedekten AYNI id ile geri yükle → TEK kayıt, deleted=false',
-        () async {
-      final storage = FakeSecureStorage();
-      final repo = _repo(storage);
-      await repo.load();
-      await repo.save([_acc('a'), _acc('b')]);
+    test(
+      'sil → yedekten AYNI id ile geri yükle → TEK kayıt, deleted=false',
+      () async {
+        final storage = FakeSecureStorage();
+        final repo = _repo(storage);
+        await repo.load();
+        await repo.save([_acc('a'), _acc('b')]);
 
-      final restored = (await repo.load()).accounts.first;
-      await repo.markDeleted(restored.id);
-      expect((await repo.exportRaw()).firstWhere((r) => r.id == restored.id).deleted,
-          isTrue);
+        final restored = (await repo.load()).accounts.first;
+        await repo.markDeleted(restored.id);
+        expect(
+          (await repo.exportRaw())
+              .firstWhere((r) => r.id == restored.id)
+              .deleted,
+          isTrue,
+        );
 
-      // Yedek geri yükleme: AYNI id ile canlı kayıt tekrar yazılır.
-      final survivors = (await repo.load()).accounts;
-      await repo.save([...survivors, restored]);
+        // Yedek geri yükleme: AYNI id ile canlı kayıt tekrar yazılır.
+        final survivors = (await repo.load()).accounts;
+        await repo.save([...survivors, restored]);
 
-      final raw = await repo.exportRaw();
-      expect(raw.where((r) => r.id == restored.id), hasLength(1),
-          reason: 'canlı + tombstone AYNI id ile diske yazılamaz — '
-              'push onConflict:id ile 21000 verirdi');
-      expect(raw.firstWhere((r) => r.id == restored.id).deleted, isFalse,
-          reason: 'bilinçli diriltme: canlı kazanır');
-      expect(raw.firstWhere((r) => r.id == restored.id).isDirty, isTrue,
-          reason: 'sv=null → push sunucuyu deleted=false yapar');
-      expect((await repo.load()).accounts.map((a) => a.id), contains(restored.id));
-    });
+        final raw = await repo.exportRaw();
+        expect(
+          raw.where((r) => r.id == restored.id),
+          hasLength(1),
+          reason:
+              'canlı + tombstone AYNI id ile diske yazılamaz — '
+              'push onConflict:id ile 21000 verirdi',
+        );
+        expect(
+          raw.firstWhere((r) => r.id == restored.id).deleted,
+          isFalse,
+          reason: 'bilinçli diriltme: canlı kazanır',
+        );
+        expect(
+          raw.firstWhere((r) => r.id == restored.id).isDirty,
+          isTrue,
+          reason: 'sv=null → push sunucuyu deleted=false yapar',
+        );
+        expect(
+          (await repo.load()).accounts.map((a) => a.id),
+          contains(restored.id),
+        );
+      },
+    );
 
     test('diskte canlı + tombstone (aynı id) → load canlıyı seçer, '
         'importRemote diski ONARIR', () async {
       final storage = FakeSecureStorage();
       final account = _acc('resurrected');
       final blob = FakeCrypto().encrypt(
-        plaintext: Uint8List.fromList(utf8.encode(jsonEncode(account.toJson()))),
+        plaintext: Uint8List.fromList(
+          utf8.encode(jsonEncode(account.toJson())),
+        ),
         key: FakeKeyHandle(),
         aad: Uint8List.fromList('token|1|${account.id}'.codeUnits),
       );
@@ -204,8 +244,11 @@ void main() {
 
       final repo = _repo(storage);
       final loaded = await repo.load();
-      expect(loaded.accounts.map((a) => a.id), [account.id],
-          reason: 'canlı kayıt tombstone\'a rağmen gösterilir');
+      expect(
+        loaded.accounts.map((a) => a.id),
+        [account.id],
+        reason: 'canlı kayıt tombstone\'a rağmen gösterilir',
+      );
       expect(loaded.corruptedCount, 0);
 
       // Boş pull bile diski onarır (mükerrer id bir sonraki push\'a taşınmaz).
@@ -223,10 +266,9 @@ void main() {
       final storage = FakeSecureStorage();
       final repo = _repo(storage);
       await repo.load();
-      final out = await repo.importRemote(
-        [_row('x', iso: '2026-06-09T10:00:00Z')],
-        pullCursorIso: null,
-      );
+      final out = await repo.importRemote([
+        _row('x', iso: '2026-06-09T10:00:00Z'),
+      ], pullCursorIso: null);
       expect(out.changed, isTrue);
       expect(out.appliedCount, 1);
       final raw = await repo.exportRaw();
@@ -239,12 +281,13 @@ void main() {
       final repo = _repo(storage);
       await repo.load();
       // Önce server'dan x'i al (sv set olur).
-      await repo.importRemote([_row('x', iso: '2026-06-09T10:00:00Z')],
-          pullCursorIso: null);
+      await repo.importRemote([
+        _row('x', iso: '2026-06-09T10:00:00Z'),
+      ], pullCursorIso: null);
       // Daha yeni server sürümü gelir.
-      final out = await repo.importRemote(
-          [_row('x', iso: '2026-06-09T11:00:00Z')],
-          pullCursorIso: '2026-06-09T10:00:00Z');
+      final out = await repo.importRemote([
+        _row('x', iso: '2026-06-09T11:00:00Z'),
+      ], pullCursorIso: '2026-06-09T10:00:00Z');
       expect(out.changed, isTrue);
       final raw = await repo.exportRaw();
       expect(raw.single.serverUpdatedAtIso, '2026-06-09T11:00:00.000Z');
@@ -254,153 +297,190 @@ void main() {
       final storage = FakeSecureStorage();
       final repo = _repo(storage);
       await repo.load();
-      await repo.importRemote([_row('x', iso: '2026-06-09T11:00:00Z')],
-          pullCursorIso: null);
+      await repo.importRemote([
+        _row('x', iso: '2026-06-09T11:00:00Z'),
+      ], pullCursorIso: null);
       // Eski sürüm tekrar gelir (stale/duplicate pull).
-      final out = await repo.importRemote(
-          [_row('x', iso: '2026-06-09T10:00:00Z')],
-          pullCursorIso: '2026-06-09T11:00:00Z');
+      final out = await repo.importRemote([
+        _row('x', iso: '2026-06-09T10:00:00Z'),
+      ], pullCursorIso: '2026-06-09T11:00:00Z');
       expect(out.changed, isFalse, reason: 'idempotent: zaten yeni sürümdeyiz');
     });
 
-    test('lokal dirty + cursor-SONRASI server değişikliği → server kazanır',
-        () async {
-      final storage = FakeSecureStorage();
-      final repo = _repo(storage);
-      await repo.load();
-      await repo.save([_acc('a')]); // lokal dirty (sv=null)
-      final id = (await repo.load()).accounts.single.id;
-      // Başka cihaz aynı id'yi cursor'dan SONRA değiştirmiş.
-      final out = await repo.importRemote(
-          [_row(id, iso: '2026-06-09T12:00:00Z')],
-          pullCursorIso: '2026-06-09T11:00:00Z');
-      expect(out.changed, isTrue, reason: 'cursor-sonrası → başka cihaz kazanır');
-    });
+    test(
+      'lokal dirty + cursor-SONRASI server değişikliği → server kazanır',
+      () async {
+        final storage = FakeSecureStorage();
+        final repo = _repo(storage);
+        await repo.load();
+        await repo.save([_acc('a')]); // lokal dirty (sv=null)
+        final id = (await repo.load()).accounts.single.id;
+        // Başka cihaz aynı id'yi cursor'dan SONRA değiştirmiş.
+        final out = await repo.importRemote([
+          _row(id, iso: '2026-06-09T12:00:00Z'),
+        ], pullCursorIso: '2026-06-09T11:00:00Z');
+        expect(
+          out.changed,
+          isTrue,
+          reason: 'cursor-sonrası → başka cihaz kazanır',
+        );
+      },
+    );
 
-    test('lokal dirty + cursor-ÖNCESİ server (kendi echo) → local korunur',
-        () async {
-      final storage = FakeSecureStorage();
-      final repo = _repo(storage);
-      await repo.load();
-      await repo.save([_acc('a')]); // dirty
-      final id = (await repo.load()).accounts.single.id;
-      final out = await repo.importRemote(
-          [_row(id, iso: '2026-06-09T09:00:00Z')],
-          pullCursorIso: '2026-06-09T11:00:00Z');
-      expect(out.changed, isFalse, reason: 'echo → lokal push beklemede, korunur');
-      final raw = await repo.exportRaw();
-      expect(raw.single.isDirty, isTrue);
-    });
+    test(
+      'lokal dirty + cursor-ÖNCESİ server (kendi echo) → local korunur',
+      () async {
+        final storage = FakeSecureStorage();
+        final repo = _repo(storage);
+        await repo.load();
+        await repo.save([_acc('a')]); // dirty
+        final id = (await repo.load()).accounts.single.id;
+        final out = await repo.importRemote([
+          _row(id, iso: '2026-06-09T09:00:00Z'),
+        ], pullCursorIso: '2026-06-09T11:00:00Z');
+        expect(
+          out.changed,
+          isFalse,
+          reason: 'echo → lokal push beklemede, korunur',
+        );
+        final raw = await repo.exportRaw();
+        expect(raw.single.isDirty, isTrue);
+      },
+    );
 
-    test('remote deleted=true daha yeni → lokal canlı tombstone olur', () async {
-      final storage = FakeSecureStorage();
-      final repo = _repo(storage);
-      await repo.load();
-      await repo.importRemote([_row('x', iso: '2026-06-09T10:00:00Z')],
-          pullCursorIso: null);
-      final out = await repo.importRemote(
-          [_row('x', iso: '2026-06-09T11:00:00Z', deleted: true)],
-          pullCursorIso: '2026-06-09T10:00:00Z');
-      expect(out.changed, isTrue);
-      final raw = await repo.exportRaw();
-      expect(raw.single.deleted, isTrue, reason: 'delete LWW ile kazandı');
-    });
+    test(
+      'remote deleted=true daha yeni → lokal canlı tombstone olur',
+      () async {
+        final storage = FakeSecureStorage();
+        final repo = _repo(storage);
+        await repo.load();
+        await repo.importRemote([
+          _row('x', iso: '2026-06-09T10:00:00Z'),
+        ], pullCursorIso: null);
+        final out = await repo.importRemote([
+          _row('x', iso: '2026-06-09T11:00:00Z', deleted: true),
+        ], pullCursorIso: '2026-06-09T10:00:00Z');
+        expect(out.changed, isTrue);
+        final raw = await repo.exportRaw();
+        expect(raw.single.deleted, isTrue, reason: 'delete LWW ile kazandı');
+      },
+    );
 
-    test('çift pull (aynı row 2x) → tek sonuç, ikincisi no-op (idempotent)',
-        () async {
-      final storage = FakeSecureStorage();
-      final repo = _repo(storage);
-      await repo.load();
-      final r = _row('x', iso: '2026-06-09T10:00:00Z');
-      final out1 = await repo.importRemote([r], pullCursorIso: null);
-      expect(out1.changed, isTrue);
-      final out2 = await repo.importRemote([r], pullCursorIso: '2026-06-09T10:00:00Z');
-      expect(out2.changed, isFalse);
-      expect((await repo.exportRaw()).length, 1);
-    });
+    test(
+      'çift pull (aynı row 2x) → tek sonuç, ikincisi no-op (idempotent)',
+      () async {
+        final storage = FakeSecureStorage();
+        final repo = _repo(storage);
+        await repo.load();
+        final r = _row('x', iso: '2026-06-09T10:00:00Z');
+        final out1 = await repo.importRemote([r], pullCursorIso: null);
+        expect(out1.changed, isTrue);
+        final out2 = await repo.importRemote([
+          r,
+        ], pullCursorIso: '2026-06-09T10:00:00Z');
+        expect(out2.changed, isFalse);
+        expect((await repo.exportRaw()).length, 1);
+      },
+    );
 
-    test('null cursor + dirty lokal → remote tombstone diriltilmiş kaydı SİLMEZ',
-        () async {
-      // Cihaz B hiç başarılı pull yapmamış (cursor null). Kullanıcı id koruyan
-      // bir yedeği geri yükler → silinen token canlı + sv=null (dirty) olur.
-      // Sunucu hâlâ tombstone taşıyor; ilk sync onu SESSİZCE uygulayamamalı.
-      final storage = FakeSecureStorage();
-      final repo = _repo(storage);
-      await repo.load();
-      await repo.save([_acc('a')]);
-      final acc = (await repo.load()).accounts.single;
-      await repo.markDeleted(acc.id);
+    test(
+      'null cursor + dirty lokal → remote tombstone diriltilmiş kaydı SİLMEZ',
+      () async {
+        // Cihaz B hiç başarılı pull yapmamış (cursor null). Kullanıcı id koruyan
+        // bir yedeği geri yükler → silinen token canlı + sv=null (dirty) olur.
+        // Sunucu hâlâ tombstone taşıyor; ilk sync onu SESSİZCE uygulayamamalı.
+        final storage = FakeSecureStorage();
+        final repo = _repo(storage);
+        await repo.load();
+        await repo.save([_acc('a')]);
+        final acc = (await repo.load()).accounts.single;
+        await repo.markDeleted(acc.id);
 
-      // Yedek geri yükleme: AYNI id ile canlı kayıt (bilinçli diriltme).
-      await repo.load();
-      await repo.save([acc]);
-      final before = await repo.exportRaw();
-      expect(before.single.deleted, isFalse);
-      expect(before.single.isDirty, isTrue);
+        // Yedek geri yükleme: AYNI id ile canlı kayıt (bilinçli diriltme).
+        await repo.load();
+        await repo.save([acc]);
+        final before = await repo.exportRaw();
+        expect(before.single.deleted, isFalse);
+        expect(before.single.isDirty, isTrue);
 
-      final out = await repo.importRemote(
-          [_row(acc.id, iso: '2026-06-09T10:00:00Z', deleted: true)],
-          pullCursorIso: null);
+        final out = await repo.importRemote([
+          _row(acc.id, iso: '2026-06-09T10:00:00Z', deleted: true),
+        ], pullCursorIso: null);
 
-      expect(out.changed, isFalse,
-          reason: 'cursor null → "cursor SONRASI" kanıtlanamaz → dirty lokal korunur');
-      final raw = await repo.exportRaw();
-      expect(raw, hasLength(1));
-      expect(raw.single.deleted, isFalse,
-          reason: 'diriltilen token sessizce silinmedi');
-      expect(raw.single.isDirty, isTrue,
-          reason: 'dirty kalır → push sunucuyu deleted=false yapar');
-    });
+        expect(
+          out.changed,
+          isFalse,
+          reason:
+              'cursor null → "cursor SONRASI" kanıtlanamaz → dirty lokal korunur',
+        );
+        final raw = await repo.exportRaw();
+        expect(raw, hasLength(1));
+        expect(
+          raw.single.deleted,
+          isFalse,
+          reason: 'diriltilen token sessizce silinmedi',
+        );
+        expect(
+          raw.single.isDirty,
+          isTrue,
+          reason: 'dirty kalır → push sunucuyu deleted=false yapar',
+        );
+      },
+    );
 
-    test('null cursor + dirty lokal + remote CANLI güncelleme → yine lokal kazanır',
-        () async {
-      // Aynı kural tombstone'a özel DEĞİL: ilk pull'da (cursor null) dirty lokal
-      // her zaman korunur; çakışma push sonrası sunucuda LWW ile çözülür.
-      final storage = FakeSecureStorage();
-      final repo = _repo(storage);
-      await repo.load();
-      await repo.save([_acc('a')]);
-      final acc = (await repo.load()).accounts.single;
+    test(
+      'null cursor + dirty lokal + remote CANLI güncelleme → yine lokal kazanır',
+      () async {
+        // Aynı kural tombstone'a özel DEĞİL: ilk pull'da (cursor null) dirty lokal
+        // her zaman korunur; çakışma push sonrası sunucuda LWW ile çözülür.
+        final storage = FakeSecureStorage();
+        final repo = _repo(storage);
+        await repo.load();
+        await repo.save([_acc('a')]);
+        final acc = (await repo.load()).accounts.single;
 
-      final out = await repo.importRemote(
-          [_row(acc.id, iso: '2026-06-09T10:00:00Z')],
-          pullCursorIso: null);
+        final out = await repo.importRemote([
+          _row(acc.id, iso: '2026-06-09T10:00:00Z'),
+        ], pullCursorIso: null);
 
-      expect(out.changed, isFalse);
-      expect((await repo.exportRaw()).single.isDirty, isTrue);
-      // Lokali OLMAYAN id'ler etkilenmez → ilk pull yine remote token getirir.
-      final out2 = await repo.importRemote(
-          [_row('remote-only', iso: '2026-06-09T10:00:00Z')],
-          pullCursorIso: null);
-      expect(out2.appliedCount, 1);
-    });
+        expect(out.changed, isFalse);
+        expect((await repo.exportRaw()).single.isDirty, isTrue);
+        // Lokali OLMAYAN id'ler etkilenmez → ilk pull yine remote token getirir.
+        final out2 = await repo.importRemote([
+          _row('remote-only', iso: '2026-06-09T10:00:00Z'),
+        ], pullCursorIso: null);
+        expect(out2.appliedCount, 1);
+      },
+    );
 
-    test('import sonrası reload → remote token decrypt edilebilir (aynı masterKey)',
-        () async {
-      final storage = FakeSecureStorage();
-      // Cihaz A: token üretip ham blob'unu "sunucuya" taşı.
-      final repoA = _repo(storage);
-      await repoA.load();
-      await repoA.save([_acc('shared')]);
-      final rawA = (await repoA.exportRaw()).single;
+    test(
+      'import sonrası reload → remote token decrypt edilebilir (aynı masterKey)',
+      () async {
+        final storage = FakeSecureStorage();
+        // Cihaz A: token üretip ham blob'unu "sunucuya" taşı.
+        final repoA = _repo(storage);
+        await repoA.load();
+        await repoA.save([_acc('shared')]);
+        final rawA = (await repoA.exportRaw()).single;
 
-      // Cihaz B: temiz storage, aynı (fake) masterKey. A'nın blob'unu import et.
-      final storageB = FakeSecureStorage();
-      final repoB = _repo(storageB);
-      await repoB.load();
-      await repoB.importRemote([
-        RemoteTokenRow(
-          id: rawA.id,
-          blob: rawA.blob,
-          version: rawA.version,
-          serverUpdatedAt: DateTime.parse('2026-06-09T10:00:00Z'),
-          deleted: false,
-        )
-      ], pullCursorIso: null);
-      // reload → decrypt çalışır (FakeCrypto AAD token|1|<id> eşleşir).
-      final loaded = await repoB.load();
-      expect(loaded.accounts.single.accountName, 'shared');
-    });
+        // Cihaz B: temiz storage, aynı (fake) masterKey. A'nın blob'unu import et.
+        final storageB = FakeSecureStorage();
+        final repoB = _repo(storageB);
+        await repoB.load();
+        await repoB.importRemote([
+          RemoteTokenRow(
+            id: rawA.id,
+            blob: rawA.blob,
+            version: rawA.version,
+            serverUpdatedAt: DateTime.parse('2026-06-09T10:00:00Z'),
+            deleted: false,
+          ),
+        ], pullCursorIso: null);
+        // reload → decrypt çalışır (FakeCrypto AAD token|1|<id> eşleşir).
+        final loaded = await repoB.load();
+        expect(loaded.accounts.single.accountName, 'shared');
+      },
+    );
   });
 
   // --- Faz 5 Patch 3 (K3/R2): tags props'ta → yalnız-etiket düzenlemesi yazılır ---
@@ -414,39 +494,54 @@ void main() {
       storage.data[EncryptedVaultRepository.vaultKey] = jsonEncode(records);
     }
 
-    test('YALNIZ tags değişti → yeniden şifrelenir, updatedAt tazelenir, sv düşer',
-        () async {
-      final storage = FakeSecureStorage();
-      final account = OtpAccount(
-        id: 'tok-1',
-        secret: 'JBSWY3DPEHPK3PXP',
-        type: OtpType.totp,
-        issuer: 'GitHub',
-        accountName: 'alice@example.com',
-        tags: const ['iş'],
-      );
-      await _repo(storage).save([account]);
-      ageRecord(storage);
-      final before = _records(storage).single;
+    test(
+      'YALNIZ tags değişti → yeniden şifrelenir, updatedAt tazelenir, sv düşer',
+      () async {
+        final storage = FakeSecureStorage();
+        final account = OtpAccount(
+          id: 'tok-1',
+          secret: 'JBSWY3DPEHPK3PXP',
+          type: OtpType.totp,
+          issuer: 'GitHub',
+          accountName: 'alice@example.com',
+          tags: const ['iş'],
+        );
+        await _repo(storage).save([account]);
+        ageRecord(storage);
+        final before = _records(storage).single;
 
-      final crypto = CountingCrypto();
-      final repo = _repo(storage, crypto: crypto);
-      await repo.load(); // _lastById dolar (kısayolun ön koşulu)
-      crypto.encryptCalls = 0;
+        final crypto = CountingCrypto();
+        final repo = _repo(storage, crypto: crypto);
+        await repo.load(); // _lastById dolar (kısayolun ön koşulu)
+        crypto.encryptCalls = 0;
 
-      await repo.save([account.copyWith(tags: const ['ev'])]);
+        await repo.save([
+          account.copyWith(tags: const ['ev']),
+        ]);
 
-      final after = _records(storage).single;
-      expect(crypto.encryptCalls, 1, reason: 'tags props\'ta → değişmiş sayılır');
-      expect(after['c'], isNot(before['c']), reason: 'yeni etiket → yeni blob');
-      expect(after['updatedAt'], greaterThan(1000));
-      expect(after.containsKey('sv'), isFalse,
-          reason: 'lokal değişiklik → dirty (push edilecek)');
+        final after = _records(storage).single;
+        expect(
+          crypto.encryptCalls,
+          1,
+          reason: 'tags props\'ta → değişmiş sayılır',
+        );
+        expect(
+          after['c'],
+          isNot(before['c']),
+          reason: 'yeni etiket → yeni blob',
+        );
+        expect(after['updatedAt'], greaterThan(1000));
+        expect(
+          after.containsKey('sv'),
+          isFalse,
+          reason: 'lokal değişiklik → dirty (push edilecek)',
+        );
 
-      // Ve yeni etiket gerçekten okunabilir olmalı (sessiz kayıp YOK — R2).
-      final reloaded = await _repo(storage).load();
-      expect(reloaded.accounts.single.tags, ['ev']);
-    });
+        // Ve yeni etiket gerçekten okunabilir olmalı (sessiz kayıp YOK — R2).
+        final reloaded = await _repo(storage).load();
+        expect(reloaded.accounts.single.tags, ['ev']);
+      },
+    );
 
     test('etiketler de dahil hiçbir şey değişmedi → ESKİ blob korunur', () async {
       final storage = FakeSecureStorage();
@@ -468,41 +563,47 @@ void main() {
       crypto.encryptCalls = 0;
 
       // Aynı hesap, yalnız kirli etiket yazımıyla → normalize sonrası BİREBİR aynı.
-      await repo.save([account.copyWith(tags: const ['  iş  ', 'iş'])]);
+      await repo.save([
+        account.copyWith(tags: const ['  iş  ', 'iş']),
+      ]);
 
       final after = _records(storage).single;
       expect(crypto.encryptCalls, 0, reason: 'gereksiz re-encrypt dalgası YOK');
       expect(after['c'], before['c']);
       expect(after['updatedAt'], 1000);
-      expect(after['sv'], '2020-01-01T00:00:00.000Z',
-          reason: 'sunucu cursor\'ı korunur → sahte push yok');
-    });
-
-    test('etiketsiz hesap Patch 3 öncesiyle AYNI ciphertext\'i üretir (K2)',
-        () async {
-      // Aynı düz metin → FakeCrypto\'da aynı gövde; yalnız nonce sayaçtan gelir.
-      final untagged = OtpAccount(
-        id: 'tok-1',
-        secret: 'JBSWY3DPEHPK3PXP',
-        type: OtpType.totp,
-        issuer: 'GitHub',
-        accountName: 'alice@example.com',
+      expect(
+        after['sv'],
+        '2020-01-01T00:00:00.000Z',
+        reason: 'sunucu cursor\'ı korunur → sahte push yok',
       );
-      expect(untagged.toJson().containsKey('tags'), isFalse);
-
-      final storage = FakeSecureStorage();
-      await _repo(storage).save([untagged]);
-      final repo = _repo(storage);
-      await repo.load();
-      final before = _records(storage).single;
-      await repo.save([untagged]);
-      expect(_records(storage).single['c'], before['c']);
     });
+
+    test(
+      'etiketsiz hesap Patch 3 öncesiyle AYNI ciphertext\'i üretir (K2)',
+      () async {
+        // Aynı düz metin → FakeCrypto\'da aynı gövde; yalnız nonce sayaçtan gelir.
+        final untagged = OtpAccount(
+          id: 'tok-1',
+          secret: 'JBSWY3DPEHPK3PXP',
+          type: OtpType.totp,
+          issuer: 'GitHub',
+          accountName: 'alice@example.com',
+        );
+        expect(untagged.toJson().containsKey('tags'), isFalse);
+
+        final storage = FakeSecureStorage();
+        await _repo(storage).save([untagged]);
+        final repo = _repo(storage);
+        await repo.load();
+        final before = _records(storage).single;
+        await repo.save([untagged]);
+        expect(_records(storage).single['c'], before['c']);
+      },
+    );
   });
 
   group('exportRaw — id başına tek kayıt (push onConflict:id)', () {
-    test('decrypt edilemeyen + canlı AYNI id → exportRaw TEK kayıt döndürür',
-        () async {
+    test('decrypt edilemeyen + canlı AYNI id → exportRaw TEK kayıt döndürür', () async {
       // load(): ilk kayıt decrypt fail → _corruptedRaw (ŞEMASI geçerli, yalnız
       // AAD/anahtar tutmaz), ikincisi canlı → _lastById. save() ikisini de diske
       // yazar (bozuk kayıt korunur). Tekilleştirme olmadan exportRaw aynı id'yi
@@ -516,7 +617,9 @@ void main() {
         accountName: 'canli',
       );
       final good = crypto.encrypt(
-        plaintext: Uint8List.fromList(utf8.encode(jsonEncode(account.toJson()))),
+        plaintext: Uint8List.fromList(
+          utf8.encode(jsonEncode(account.toJson())),
+        ),
         key: FakeKeyHandle(),
         aad: Uint8List.fromList('token|1|dup'.codeUnits),
       );
@@ -527,15 +630,18 @@ void main() {
         aad: Uint8List.fromList('token|1|baska'.codeUnits),
       );
       Map<String, Object?> rec(EncryptedBlob b, int updatedAt) => {
-            'id': 'dup',
-            'v': 1,
-            'n': base64Encode(b.nonce),
-            'c': base64Encode(b.ciphertext),
-            'updatedAt': updatedAt,
-            'deleted': false,
-          };
+        'id': 'dup',
+        'v': 1,
+        'n': base64Encode(b.nonce),
+        'c': base64Encode(b.ciphertext),
+        'updatedAt': updatedAt,
+        'deleted': false,
+      };
       // Bozuk kayıt ÖNCE → canlı olan sonradan görülse bile export'ta kalmalı.
-      storage.data['vault_encrypted_v1'] = jsonEncode([rec(bad, 1), rec(good, 2)]);
+      storage.data['vault_encrypted_v1'] = jsonEncode([
+        rec(bad, 1),
+        rec(good, 2),
+      ]);
 
       final repo = _repo(storage);
       final loaded = await repo.load();
@@ -544,8 +650,11 @@ void main() {
 
       // Kullanıcı banner'a rağmen kaydeder → bozuk raw AYNEN geri yazılır.
       await repo.save(loaded.accounts);
-      expect(jsonDecode(storage.data['vault_encrypted_v1']!) as List, hasLength(2),
-          reason: 'bozuk kayıt silinmez (veri kaybı yok) → diskte mükerrer id');
+      expect(
+        jsonDecode(storage.data['vault_encrypted_v1']!) as List,
+        hasLength(2),
+        reason: 'bozuk kayıt silinmez (veri kaybı yok) → diskte mükerrer id',
+      );
 
       final raw = await repo.exportRaw();
       expect(raw, hasLength(1), reason: 'push tek satır görür (21000 yok)');
@@ -557,7 +666,9 @@ void main() {
       final storage = FakeSecureStorage();
       final account = _acc('resurrected');
       final blob = FakeCrypto().encrypt(
-        plaintext: Uint8List.fromList(utf8.encode(jsonEncode(account.toJson()))),
+        plaintext: Uint8List.fromList(
+          utf8.encode(jsonEncode(account.toJson())),
+        ),
         key: FakeKeyHandle(),
         aad: Uint8List.fromList('token|1|${account.id}'.codeUnits),
       );
@@ -577,19 +688,24 @@ void main() {
 
       final raw = await _repo(storage).exportRaw();
       expect(raw, hasLength(1));
-      expect(raw.single.deleted, isFalse, reason: 'bilinçli diriltme: canlı kazanır');
+      expect(
+        raw.single.deleted,
+        isFalse,
+        reason: 'bilinçli diriltme: canlı kazanır',
+      );
     });
   });
 
   test('sv geriye-uyum: eski (sv\'siz) kayıt parse edilir', () async {
     final storage = FakeSecureStorage();
     // Elle eski-format kayıt yaz (sv alanı YOK).
-    final blob = FakeCrypto()
-        .encrypt(
-            plaintext: Uint8List.fromList(utf8.encode(jsonEncode(_acc('old').toJson()))),
-            key: FakeKeyHandle(),
-            aad: Uint8List.fromList('token|1|oldid'.codeUnits))
-        ;
+    final blob = FakeCrypto().encrypt(
+      plaintext: Uint8List.fromList(
+        utf8.encode(jsonEncode(_acc('old').toJson())),
+      ),
+      key: FakeKeyHandle(),
+      aad: Uint8List.fromList('token|1|oldid'.codeUnits),
+    );
     storage.data['vault_encrypted_v1'] = jsonEncode([
       {
         'id': 'oldid',
@@ -599,7 +715,7 @@ void main() {
         'updatedAt': 123,
         'deleted': false,
         // 'sv' YOK
-      }
+      },
     ]);
     final repo = _repo(storage);
     final raw = await repo.exportRaw();

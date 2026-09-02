@@ -29,7 +29,8 @@ void main() {
         counter: 42,
       );
       final restored = OtpAccount.fromJson(
-          jsonDecode(jsonEncode(original.toJson())) as Map<String, dynamic>);
+        jsonDecode(jsonEncode(original.toJson())) as Map<String, dynamic>,
+      );
       expect(restored, original); // id dahil tüm props eşit (Equatable)
     });
 
@@ -40,7 +41,8 @@ void main() {
         accountName: 'no-issuer',
       );
       final restored = OtpAccount.fromJson(
-          jsonDecode(jsonEncode(original.toJson())) as Map<String, dynamic>);
+        jsonDecode(jsonEncode(original.toJson())) as Map<String, dynamic>,
+      );
       expect(restored.issuer, isNull);
       expect(restored, original);
     });
@@ -54,7 +56,8 @@ void main() {
         digits: 5,
       );
       final restored = OtpAccount.fromJson(
-          jsonDecode(jsonEncode(original.toJson())) as Map<String, dynamic>);
+        jsonDecode(jsonEncode(original.toJson())) as Map<String, dynamic>,
+      );
       expect(restored.type, OtpType.steam);
       expect(restored, original);
     });
@@ -68,7 +71,8 @@ void main() {
         tags: const ['iş', 'ev'],
       );
       final restored = OtpAccount.fromJson(
-          jsonDecode(jsonEncode(original.toJson())) as Map<String, dynamic>);
+        jsonDecode(jsonEncode(original.toJson())) as Map<String, dynamic>,
+      );
       expect(restored.tags, ['iş', 'ev']);
       expect(restored, original); // props'ta tags var → tam eşitlik
     });
@@ -127,30 +131,34 @@ void main() {
       );
     });
 
-    test('geçersiz Base32 secret FormatException fırlatır (kart crash önlenir)',
-        () {
-      expect(
-        () => OtpAccount.fromJson({
-          'secret': '0118!!!', // Base32'de geçersiz karakter
-          'type': 'totp',
-          'accountName': 'x',
-        }),
-        throwsFormatException,
-      );
-    });
+    test(
+      'geçersiz Base32 secret FormatException fırlatır (kart crash önlenir)',
+      () {
+        expect(
+          () => OtpAccount.fromJson({
+            'secret': '0118!!!', // Base32'de geçersiz karakter
+            'type': 'totp',
+            'accountName': 'x',
+          }),
+          throwsFormatException,
+        );
+      },
+    );
 
-    test('aralık dışı period FormatException fırlatır (period=0 bölme önlenir)',
-        () {
-      expect(
-        () => OtpAccount.fromJson({
-          'secret': 'JBSWY3DPEHPK3PXP',
-          'type': 'totp',
-          'accountName': 'x',
-          'period': 0,
-        }),
-        throwsFormatException,
-      );
-    });
+    test(
+      'aralık dışı period FormatException fırlatır (period=0 bölme önlenir)',
+      () {
+        expect(
+          () => OtpAccount.fromJson({
+            'secret': 'JBSWY3DPEHPK3PXP',
+            'type': 'totp',
+            'accountName': 'x',
+            'period': 0,
+          }),
+          throwsFormatException,
+        );
+      },
+    );
 
     test('aralık dışı digits FormatException fırlatır', () {
       expect(
@@ -164,30 +172,34 @@ void main() {
       );
     });
 
-    test('yanlış tipli "type" (sayı) FormatException fırlatır (TypeError değil)',
-        () {
-      expect(
-        () => OtpAccount.fromJson({
-          'secret': 'JBSWY3DPEHPK3PXP',
-          'type': 123, // String beklenir
-          'accountName': 'x',
-        }),
-        throwsFormatException,
-      );
-    });
+    test(
+      'yanlış tipli "type" (sayı) FormatException fırlatır (TypeError değil)',
+      () {
+        expect(
+          () => OtpAccount.fromJson({
+            'secret': 'JBSWY3DPEHPK3PXP',
+            'type': 123, // String beklenir
+            'accountName': 'x',
+          }),
+          throwsFormatException,
+        );
+      },
+    );
 
-    test('yanlış tipli "digits" (liste) FormatException fırlatır (TypeError değil)',
-        () {
-      expect(
-        () => OtpAccount.fromJson({
-          'secret': 'JBSWY3DPEHPK3PXP',
-          'type': 'totp',
-          'accountName': 'x',
-          'digits': [6], // num/String beklenir
-        }),
-        throwsFormatException,
-      );
-    });
+    test(
+      'yanlış tipli "digits" (liste) FormatException fırlatır (TypeError değil)',
+      () {
+        expect(
+          () => OtpAccount.fromJson({
+            'secret': 'JBSWY3DPEHPK3PXP',
+            'type': 'totp',
+            'accountName': 'x',
+            'digits': [6], // num/String beklenir
+          }),
+          throwsFormatException,
+        );
+      },
+    );
 
     test('sayısal String "digits" tolere edilir (esnek geri okuma)', () {
       final a = OtpAccount.fromJson({
@@ -201,76 +213,104 @@ void main() {
 
     // Security review finding 4: fractional numeric fields must be REJECTED, not
     // silently truncated (consistency with KeyAttributes strict policy, CRYPTO.md §8).
-    test('fractional "digits" (6.9) → FormatException (not truncated to 6)', () {
-      expect(
-        () => OtpAccount.fromJson({
+    test(
+      'fractional "digits" (6.9) → FormatException (not truncated to 6)',
+      () {
+        expect(
+          () => OtpAccount.fromJson({
+            'secret': 'JBSWY3DPEHPK3PXP',
+            'type': 'totp',
+            'accountName': 'x',
+            'digits': 6.9,
+          }),
+          throwsFormatException,
+        );
+      },
+    );
+
+    test(
+      'fractional "counter" (1.5) → FormatException (not truncated to 1)',
+      () {
+        expect(
+          () => OtpAccount.fromJson({
+            'secret': 'JBSWY3DPEHPK3PXP',
+            'type': 'hotp',
+            'accountName': 'x',
+            'counter': 1.5,
+          }),
+          throwsFormatException,
+        );
+      },
+    );
+
+    test(
+      'integer-valued double "digits" (8.0) accepted (JSON round-trip safe)',
+      () {
+        final a = OtpAccount.fromJson({
           'secret': 'JBSWY3DPEHPK3PXP',
           'type': 'totp',
           'accountName': 'x',
-          'digits': 6.9,
-        }),
-        throwsFormatException,
-      );
-    });
-
-    test('fractional "counter" (1.5) → FormatException (not truncated to 1)', () {
-      expect(
-        () => OtpAccount.fromJson({
-          'secret': 'JBSWY3DPEHPK3PXP',
-          'type': 'hotp',
-          'accountName': 'x',
-          'counter': 1.5,
-        }),
-        throwsFormatException,
-      );
-    });
-
-    test('integer-valued double "digits" (8.0) accepted (JSON round-trip safe)', () {
-      final a = OtpAccount.fromJson({
-        'secret': 'JBSWY3DPEHPK3PXP',
-        'type': 'totp',
-        'accountName': 'x',
-        'digits': 8.0,
-      });
-      expect(a.digits, 8);
-    });
+          'digits': 8.0,
+        });
+        expect(a.digits, 8);
+      },
+    );
   });
 
   group('SecureStorageVaultRepository.load dayanıklılık', () {
     test('bozuk üst-düzey JSON crash etmez, boş liste döner', () async {
       final storage = _MockStorage();
-      when(() => storage.read(key: any(named: 'key')))
-          .thenAnswer((_) async => 'bu geçerli json değil {{{');
+      when(
+        () => storage.read(key: any(named: 'key')),
+      ).thenAnswer((_) async => 'bu geçerli json değil {{{');
       final repo = SecureStorageVaultRepository(storage: storage);
       expect((await repo.load()).accounts, isEmpty);
     });
 
-    test('bozuk TEK kayıt atlanır, sağlamlar yüklenir + corruptedCount', () async {
-      final good = OtpAccount(
-        secret: 'JBSWY3DPEHPK3PXP',
-        type: OtpType.totp,
-        accountName: 'good',
-      );
-      final raw = jsonEncode([
-        good.toJson(),
-        {'secret': '!!!bozuk', 'type': 'totp', 'accountName': 'bad'}, // geçersiz secret
-        {'secret': 'JBSWY3DPEHPK3PXP', 'type': 99, 'accountName': 'tip'}, // yanlış tip → TypeError değil
-        {'secret': 'JBSWY3DPEHPK3PXP', 'type': 'totp', 'accountName': 'x', 'period': 'çok'}, // yanlış tip
-        {'foo': 'bar'}, // tamamen alakasız
-      ]);
-      final storage = _MockStorage();
-      when(() => storage.read(key: any(named: 'key')))
-          .thenAnswer((_) async => raw);
-      final repo = SecureStorageVaultRepository(storage: storage);
-      final loaded = await repo.load();
-      expect(loaded.accounts.map((a) => a.accountName), ['good']);
-      expect(loaded.corruptedCount, 4); // 4 bozuk kayıt atlandı + sayıldı
-    });
+    test(
+      'bozuk TEK kayıt atlanır, sağlamlar yüklenir + corruptedCount',
+      () async {
+        final good = OtpAccount(
+          secret: 'JBSWY3DPEHPK3PXP',
+          type: OtpType.totp,
+          accountName: 'good',
+        );
+        final raw = jsonEncode([
+          good.toJson(),
+          {
+            'secret': '!!!bozuk',
+            'type': 'totp',
+            'accountName': 'bad',
+          }, // geçersiz secret
+          {
+            'secret': 'JBSWY3DPEHPK3PXP',
+            'type': 99,
+            'accountName': 'tip',
+          }, // yanlış tip → TypeError değil
+          {
+            'secret': 'JBSWY3DPEHPK3PXP',
+            'type': 'totp',
+            'accountName': 'x',
+            'period': 'çok',
+          }, // yanlış tip
+          {'foo': 'bar'}, // tamamen alakasız
+        ]);
+        final storage = _MockStorage();
+        when(
+          () => storage.read(key: any(named: 'key')),
+        ).thenAnswer((_) async => raw);
+        final repo = SecureStorageVaultRepository(storage: storage);
+        final loaded = await repo.load();
+        expect(loaded.accounts.map((a) => a.accountName), ['good']);
+        expect(loaded.corruptedCount, 4); // 4 bozuk kayıt atlandı + sayıldı
+      },
+    );
 
     test('depo boşsa boş liste döner', () async {
       final storage = _MockStorage();
-      when(() => storage.read(key: any(named: 'key')))
-          .thenAnswer((_) async => null);
+      when(
+        () => storage.read(key: any(named: 'key')),
+      ).thenAnswer((_) async => null);
       final repo = SecureStorageVaultRepository(storage: storage);
       expect((await repo.load()).accounts, isEmpty);
     });

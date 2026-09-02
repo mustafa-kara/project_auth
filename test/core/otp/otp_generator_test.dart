@@ -38,10 +38,14 @@ void main() {
     // Her algoritmanın kendi secret'ı (RFC: SHA1=20B, SHA256=32B, SHA512=64B);
     // tümü "12345678901234567890" deseninin tekrarı (ASCII).
     final secretSha1 = Uint8List.fromList(ascii.encode('12345678901234567890'));
-    final secretSha256 =
-        Uint8List.fromList(ascii.encode('12345678901234567890123456789012'));
-    final secretSha512 = Uint8List.fromList(ascii.encode(
-        '1234567890123456789012345678901234567890123456789012345678901234'));
+    final secretSha256 = Uint8List.fromList(
+      ascii.encode('12345678901234567890123456789012'),
+    );
+    final secretSha512 = Uint8List.fromList(
+      ascii.encode(
+        '1234567890123456789012345678901234567890123456789012345678901234',
+      ),
+    );
 
     // RFC 6238 Appendix B tablosu (8 haneli), period=30.
     // (unixTime saniye, algoritma, beklenen 8 haneli kod)
@@ -60,15 +64,12 @@ void main() {
 
     for (final (unixTime, algo, secret, code) in cases) {
       test('t=$unixTime ${algo.uriName} → $code', () {
-        final time =
-            DateTime.fromMillisecondsSinceEpoch(unixTime * 1000, isUtc: true);
+        final time = DateTime.fromMillisecondsSinceEpoch(
+          unixTime * 1000,
+          isUtc: true,
+        );
         expect(
-          gen.totp(
-            secret: secret,
-            time: time,
-            digits: 8,
-            algorithm: algo,
-          ),
+          gen.totp(secret: secret, time: time, digits: 8, algorithm: algo),
           code,
         );
       });
@@ -96,7 +97,10 @@ void main() {
         time: DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
       );
       expect(code.length, 5);
-      expect(RegExp(r'^[23456789BCDFGHJKMNPQRTVWXY]{5}$').hasMatch(code), isTrue);
+      expect(
+        RegExp(r'^[23456789BCDFGHJKMNPQRTVWXY]{5}$').hasMatch(code),
+        isTrue,
+      );
     });
   });
 

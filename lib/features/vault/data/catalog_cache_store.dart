@@ -17,7 +17,7 @@ class CatalogCacheStore {
   final FlutterSecureStorage _storage;
 
   CatalogCacheStore({FlutterSecureStorage? storage})
-      : _storage = storage ?? const FlutterSecureStorage();
+    : _storage = storage ?? const FlutterSecureStorage();
 
   Future<List<CatalogService>?> read() async {
     final raw = await _storage.read(key: storageKey);

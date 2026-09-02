@@ -35,8 +35,8 @@ class EncryptedBlob {
     required Uint8List nonce,
     required Uint8List ciphertext,
     this.version = supportedVersion,
-  })  : _nonce = Uint8List.fromList(nonce),
-        _ciphertext = Uint8List.fromList(ciphertext) {
+  }) : _nonce = Uint8List.fromList(nonce),
+       _ciphertext = Uint8List.fromList(ciphertext) {
     _validate(version, _nonce, _ciphertext);
   }
 
@@ -44,15 +44,18 @@ class EncryptedBlob {
   static void _validate(int version, Uint8List nonce, Uint8List ciphertext) {
     if (version < 1 || version > supportedVersion) {
       throw FormatException(
-          'EncryptedBlob: desteklenmeyen version $version (beklenen 1..$supportedVersion)');
+        'EncryptedBlob: desteklenmeyen version $version (beklenen 1..$supportedVersion)',
+      );
     }
     if (nonce.length != nonceBytes) {
       throw FormatException(
-          'EncryptedBlob: nonce $nonceBytes byte olmalı (${nonce.length})');
+        'EncryptedBlob: nonce $nonceBytes byte olmalı (${nonce.length})',
+      );
     }
     if (ciphertext.length < minCiphertextBytes) {
       throw FormatException(
-          'EncryptedBlob: ciphertext en az $minCiphertextBytes byte olmalı (${ciphertext.length})');
+        'EncryptedBlob: ciphertext en az $minCiphertextBytes byte olmalı (${ciphertext.length})',
+      );
     }
   }
 
@@ -63,10 +66,10 @@ class EncryptedBlob {
 
   /// base64 ile JSON (storage için).
   Map<String, dynamic> toJson() => {
-        'v': version,
-        'n': base64Encode(_nonce),
-        'c': base64Encode(_ciphertext),
-      };
+    'v': version,
+    'n': base64Encode(_nonce),
+    'c': base64Encode(_ciphertext),
+  };
 
   /// [toJson] çıktısından geri kurar. Yanlış tip / geçersiz base64 →
   /// [FormatException] (bozuk depodan sessizce hatalı blob üretmemek için).
@@ -94,7 +97,9 @@ class EncryptedBlob {
   static String? _asString(Object? v, String name) {
     if (v == null) return null;
     if (v is String) return v;
-    throw FormatException('EncryptedBlob.fromJson: "$name" String olmalı (${v.runtimeType})');
+    throw FormatException(
+      'EncryptedBlob.fromJson: "$name" String olmalı (${v.runtimeType})',
+    );
   }
 
   /// Tamsayı bekler. `1.5` gibi kesirli `num` sessizce truncate EDİLMEZ.
@@ -103,8 +108,12 @@ class EncryptedBlob {
     if (v is int) return v;
     if (v is double) {
       if (v == v.roundToDouble()) return v.toInt();
-      throw FormatException('EncryptedBlob.fromJson: "$name" tamsayı olmalı, kesirli ($v)');
+      throw FormatException(
+        'EncryptedBlob.fromJson: "$name" tamsayı olmalı, kesirli ($v)',
+      );
     }
-    throw FormatException('EncryptedBlob.fromJson: "$name" sayı olmalı (${v.runtimeType})');
+    throw FormatException(
+      'EncryptedBlob.fromJson: "$name" sayı olmalı (${v.runtimeType})',
+    );
   }
 }

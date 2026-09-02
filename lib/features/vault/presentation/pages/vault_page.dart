@@ -77,8 +77,9 @@ class _VaultPageState extends State<VaultPage> {
   }
 
   void _toggleViewMode() {
-    final next =
-        _viewMode == VaultViewMode.card ? VaultViewMode.list : VaultViewMode.card;
+    final next = _viewMode == VaultViewMode.card
+        ? VaultViewMode.list
+        : VaultViewMode.card;
     setState(() => _viewMode = next);
     _viewModeStore.write(next); // tercih kalıcı
   }
@@ -128,9 +129,11 @@ class _VaultPageState extends State<VaultPage> {
         actions: [
           _SyncIndicator(syncState: state.syncState),
           IconButton(
-            icon: Icon(_viewMode == VaultViewMode.card
-                ? Icons.view_list_outlined
-                : Icons.grid_view_outlined),
+            icon: Icon(
+              _viewMode == VaultViewMode.card
+                  ? Icons.view_list_outlined
+                  : Icons.grid_view_outlined,
+            ),
             tooltip: _viewMode == VaultViewMode.card
                 ? 'Kompakt liste görünümü'
                 : 'Kart görünümü',
@@ -204,8 +207,8 @@ class _VaultPageState extends State<VaultPage> {
           // instead of being repaired with a setState during build.
           final activeTag =
               (_selectedTag != null && tags.contains(_selectedTag))
-                  ? _selectedTag
-                  : null;
+              ? _selectedTag
+              : null;
           // The field itself is cleared AFTER the frame — never during build,
           // which would be a setState inside build. Without this the stale name
           // lives on in state: it would come back the moment the tag reappears
@@ -252,27 +255,31 @@ class _VaultPageState extends State<VaultPage> {
           );
           final list = visible.isEmpty
               ? (activeTag != null
-                  ? EmptyState(
-                      icon: Icons.sell_outlined,
-                      title: 'Bu etikette kod yok',
-                      description:
-                          '« $activeTag » etiketiyle eşleşen kod bulunamadı.',
-                      actionLabel: 'Filtreyi temizle',
-                      onAction: _clearFilters,
-                    )
-                  : EmptyState(
-                      icon: Icons.search_off,
-                      title: 'Aramayla eşleşen kod yok',
-                      description: '"$_query" için sonuç bulunamadı.',
-                      actionLabel: 'Aramayı temizle',
-                      onAction: () {
-                        _searchController.clear();
-                        setState(() => _query = '');
-                      },
-                    ))
+                    ? EmptyState(
+                        icon: Icons.sell_outlined,
+                        title: 'Bu etikette kod yok',
+                        description:
+                            '« $activeTag » etiketiyle eşleşen kod bulunamadı.',
+                        actionLabel: 'Filtreyi temizle',
+                        onAction: _clearFilters,
+                      )
+                    : EmptyState(
+                        icon: Icons.search_off,
+                        title: 'Aramayla eşleşen kod yok',
+                        description: '"$_query" için sonuç bulunamadı.',
+                        actionLabel: 'Aramayı temizle',
+                        onAction: () {
+                          _searchController.clear();
+                          setState(() => _query = '');
+                        },
+                      ))
               : ListView.builder(
                   padding: const EdgeInsets.fromLTRB(
-                      Gap.lg, Gap.sm, Gap.lg, 88), // FAB için alt boşluk
+                    Gap.lg,
+                    Gap.sm,
+                    Gap.lg,
+                    88,
+                  ), // FAB için alt boşluk
                   itemCount: visible.length,
                   itemBuilder: (context, i) {
                     final acc = visible[i];
@@ -360,11 +367,8 @@ class _VaultPageState extends State<VaultPage> {
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      builder: (_) => EditTokenSheet(
-        account: account,
-        cubit: cubit,
-        focusTags: focusTags,
-      ),
+      builder: (_) =>
+          EditTokenSheet(account: account, cubit: cubit, focusTags: focusTags),
     );
   }
 
@@ -397,9 +401,11 @@ class _VaultPageState extends State<VaultPage> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Kodu sil?'),
-        content: Text('« ${account.label} » kalıcı olarak silinecek. '
-            'Bu işlem geri alınamaz — bu hesabın 2FA\'sına erişimini '
-            'kaybedebilirsin.'),
+        content: Text(
+          '« ${account.label} » kalıcı olarak silinecek. '
+          'Bu işlem geri alınamaz — bu hesabın 2FA\'sına erişimini '
+          'kaybedebilirsin.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
@@ -407,7 +413,8 @@ class _VaultPageState extends State<VaultPage> {
           ),
           FilledButton(
             style: FilledButton.styleFrom(
-                backgroundColor: Theme.of(ctx).colorScheme.error),
+              backgroundColor: Theme.of(ctx).colorScheme.error,
+            ),
             onPressed: () => Navigator.of(ctx).pop(true),
             child: const Text('Sil'),
           ),
@@ -475,8 +482,9 @@ class _VaultPageState extends State<VaultPage> {
       builder: (ctx) => AlertDialog(
         title: const Text('Bozuk kayıtları kaldır?'),
         content: const Text(
-            'Çözülemeyen kayıtlar KALICI silinir. Bu işlem geri alınamaz. '
-            'Sağlam token\'lara dokunulmaz.'),
+          'Çözülemeyen kayıtlar KALICI silinir. Bu işlem geri alınamaz. '
+          'Sağlam token\'lara dokunulmaz.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
@@ -484,7 +492,8 @@ class _VaultPageState extends State<VaultPage> {
           ),
           FilledButton(
             style: FilledButton.styleFrom(
-                backgroundColor: Theme.of(ctx).colorScheme.error),
+              backgroundColor: Theme.of(ctx).colorScheme.error,
+            ),
             onPressed: () => Navigator.of(ctx).pop(true),
             child: const Text('Kaldır'),
           ),
@@ -571,9 +580,10 @@ class _IntegrityErrorView extends StatelessWidget {
       builder: (ctx) => AlertDialog(
         title: const Text('Vault\'u sıfırla?'),
         content: const Text(
-            'Tüm şifreli token\'lar ve anahtar verisi KALICI silinir. '
-            'Bu işlem geri alınamaz. Recovery key\'in olsa bile bu cihazdaki '
-            'veri gider.'),
+          'Tüm şifreli token\'lar ve anahtar verisi KALICI silinir. '
+          'Bu işlem geri alınamaz. Recovery key\'in olsa bile bu cihazdaki '
+          'veri gider.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
@@ -581,7 +591,8 @@ class _IntegrityErrorView extends StatelessWidget {
           ),
           FilledButton(
             style: FilledButton.styleFrom(
-                backgroundColor: Theme.of(ctx).colorScheme.error),
+              backgroundColor: Theme.of(ctx).colorScheme.error,
+            ),
             onPressed: () => Navigator.of(ctx).pop(true),
             child: const Text('Sıfırla'),
           ),
@@ -603,13 +614,19 @@ class _IntegrityErrorView extends StatelessWidget {
           children: [
             Icon(Icons.report_gmailerrorred, size: 48, color: scheme.error),
             const SizedBox(height: Gap.lg),
-            Text('Vault açılamadı',
-                style: theme.textTheme.titleLarge, textAlign: TextAlign.center),
+            Text(
+              'Vault açılamadı',
+              style: theme.textTheme.titleLarge,
+              textAlign: TextAlign.center,
+            ),
             const SizedBox(height: Gap.sm),
-            Text('Hiçbir kayıt doğrulanamadı.',
-                style: theme.textTheme.bodyMedium
-                    ?.copyWith(color: scheme.onSurfaceVariant),
-                textAlign: TextAlign.center),
+            Text(
+              'Hiçbir kayıt doğrulanamadı.',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+              textAlign: TextAlign.center,
+            ),
             const SizedBox(height: Gap.xl),
             FilledButton(
               // Vault'u yeniden aç: kilitle → guard /unlock'a yönlendirir.

@@ -21,8 +21,9 @@ sealed class SyncError implements Exception {
 /// Ağ/bağlantı hatası (`AuthRetryableFetchException`, socket, timeout).
 /// Restore'da bu → `restoreFailed` (setup'a DÜŞME).
 class SyncNetworkError extends SyncError {
-  const SyncNetworkError(
-      [super.message = 'Bağlantı hatası. İnternetini kontrol et.']);
+  const SyncNetworkError([
+    super.message = 'Bağlantı hatası. İnternetini kontrol et.',
+  ]);
 }
 
 /// Yetki reddi (RLS/401/403) — beklenmedik; oturum/uid uyumsuzluğu olabilir.
@@ -32,8 +33,9 @@ class SyncPermissionDenied extends SyncError {
 
 /// Sunucu kaydı beklenen kolon/formatta değil (bytea decode / eksik alan).
 class SyncMalformedRemote extends SyncError {
-  const SyncMalformedRemote(
-      [super.message = 'Sunucu verisi beklenmeyen biçimde.']);
+  const SyncMalformedRemote([
+    super.message = 'Sunucu verisi beklenmeyen biçimde.',
+  ]);
 }
 
 /// Eşleştirilemeyen diğer hatalar.

@@ -55,11 +55,7 @@ class OtpGenerator {
   /// Steam Guard kodu — TOTP'nin Steam'e özgü 5 karakterlik varyantı.
   ///
   /// SHA1, period=30, ama digit yerine 26-harfli alfabeden 5 sembol üretir.
-  String steam({
-    required Uint8List secret,
-    DateTime? time,
-    int period = 30,
-  }) {
+  String steam({required Uint8List secret, DateTime? time, int period = 30}) {
     final t = time ?? DateTime.now();
     final counter = totpCounter(time: t, period: period);
     var value = _truncate(_hmac(secret, counter, OtpAlgorithm.sha1));

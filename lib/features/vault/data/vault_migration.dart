@@ -39,9 +39,9 @@ class VaultMigration {
     required CryptoService crypto,
     FlutterSecureStorage? storage,
     String keyPrefix = '',
-  })  : _crypto = crypto,
-        _storage = storage ?? const FlutterSecureStorage(),
-        _keyPrefix = keyPrefix;
+  }) : _crypto = crypto,
+       _storage = storage ?? const FlutterSecureStorage(),
+       _keyPrefix = keyPrefix;
 
   String get _markerKey => '$_keyPrefix$markerKey';
 
@@ -120,8 +120,11 @@ class VaultMigration {
     for (final item in decoded) {
       if (item is! Map) continue;
       try {
-        accounts.add(OtpAccount.fromJson(
-            {for (final e in item.entries) e.key.toString(): e.value}));
+        accounts.add(
+          OtpAccount.fromJson({
+            for (final e in item.entries) e.key.toString(): e.value,
+          }),
+        );
       } catch (_) {
         continue;
       }

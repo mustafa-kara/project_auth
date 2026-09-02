@@ -39,9 +39,8 @@ class TagManagerSheet extends StatefulWidget {
 
 class _TagManagerSheetState extends State<TagManagerSheet> {
   /// How many accounts carry [tag] right now.
-  int _countFor(String tag) => widget.cubit.state.accounts
-      .where((a) => a.tags.contains(tag))
-      .length;
+  int _countFor(String tag) =>
+      widget.cubit.state.accounts.where((a) => a.tags.contains(tag)).length;
 
   void _report(String message) {
     if (!mounted) return;
@@ -77,8 +76,10 @@ class _TagManagerSheetState extends State<TagManagerSheet> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Etiketi sil?'),
-        content: Text('« $tag » etiketi $count koddan kaldırılacak. '
-            'Kodların kendisi SİLİNMEZ.'),
+        content: Text(
+          '« $tag » etiketi $count koddan kaldırılacak. '
+          'Kodların kendisi SİLİNMEZ.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
@@ -86,7 +87,8 @@ class _TagManagerSheetState extends State<TagManagerSheet> {
           ),
           FilledButton(
             style: FilledButton.styleFrom(
-                backgroundColor: Theme.of(ctx).colorScheme.error),
+              backgroundColor: Theme.of(ctx).colorScheme.error,
+            ),
             onPressed: () => Navigator.of(ctx).pop(true),
             child: const Text('Kaldır'),
           ),
@@ -117,19 +119,30 @@ class _TagManagerSheetState extends State<TagManagerSheet> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Padding(
-                padding:
-                    const EdgeInsets.fromLTRB(Gap.lg, Gap.lg, Gap.lg, Gap.sm),
-                child: Text('Etiketleri yönet',
-                    style: theme.textTheme.titleMedium),
+                padding: const EdgeInsets.fromLTRB(
+                  Gap.lg,
+                  Gap.lg,
+                  Gap.lg,
+                  Gap.sm,
+                ),
+                child: Text(
+                  'Etiketleri yönet',
+                  style: theme.textTheme.titleMedium,
+                ),
               ),
               if (tags.isEmpty)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(
-                      Gap.lg, Gap.sm, Gap.lg, Gap.xl),
+                    Gap.lg,
+                    Gap.sm,
+                    Gap.lg,
+                    Gap.xl,
+                  ),
                   child: Text(
                     'Hiç etiket yok.',
-                    style: theme.textTheme.bodyMedium
-                        ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 )
               else
@@ -184,8 +197,9 @@ class _RenameTagDialog extends StatefulWidget {
 }
 
 class _RenameTagDialogState extends State<_RenameTagDialog> {
-  late final TextEditingController _controller =
-      TextEditingController(text: widget.tag);
+  late final TextEditingController _controller = TextEditingController(
+    text: widget.tag,
+  );
 
   @override
   void dispose() {
@@ -195,23 +209,23 @@ class _RenameTagDialogState extends State<_RenameTagDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-        title: const Text('Etiketi yeniden adlandır'),
-        content: TextField(
-          controller: _controller,
-          autofocus: true,
-          maxLength: OtpAccount.maxTagRunes,
-          decoration: const InputDecoration(labelText: 'Yeni ad'),
-          onSubmitted: (v) => Navigator.of(context).pop(v),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Vazgeç'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(_controller.text),
-            child: const Text('Kaydet'),
-          ),
-        ],
-      );
+    title: const Text('Etiketi yeniden adlandır'),
+    content: TextField(
+      controller: _controller,
+      autofocus: true,
+      maxLength: OtpAccount.maxTagRunes,
+      decoration: const InputDecoration(labelText: 'Yeni ad'),
+      onSubmitted: (v) => Navigator.of(context).pop(v),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.of(context).pop(),
+        child: const Text('Vazgeç'),
+      ),
+      FilledButton(
+        onPressed: () => Navigator.of(context).pop(_controller.text),
+        child: const Text('Kaydet'),
+      ),
+    ],
+  );
 }

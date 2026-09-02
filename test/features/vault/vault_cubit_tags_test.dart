@@ -64,15 +64,14 @@ OtpAccount _acc(
   String? issuer,
   String name = 'me@example.com',
   List<String> tags = const [],
-}) =>
-    OtpAccount(
-      id: id,
-      secret: 'JBSWY3DPEHPK3PXP',
-      type: OtpType.totp,
-      issuer: issuer,
-      accountName: name,
-      tags: tags,
-    );
+}) => OtpAccount(
+  id: id,
+  secret: 'JBSWY3DPEHPK3PXP',
+  type: OtpType.totp,
+  issuer: issuer,
+  accountName: name,
+  tags: tags,
+);
 
 List<String> _tagsOf(VaultCubit c, String id) =>
     c.state.accounts.firstWhere((a) => a.id == id).tags;
@@ -117,7 +116,9 @@ void main() {
     });
 
     test('null argüman ilgili alanı DEĞİŞTİRMEZ', () async {
-      final cubit = build([_acc('t1', issuer: 'GitHub', tags: ['iş'])]);
+      final cubit = build([
+        _acc('t1', issuer: 'GitHub', tags: ['iş']),
+      ]);
       await cubit.load();
 
       await cubit.editMetadata(id: 't1', accountName: 'yeni@example.com');
@@ -127,7 +128,9 @@ void main() {
     });
 
     test('tags: const [] etiketleri TEMİZLER', () async {
-      final cubit = build([_acc('t1', tags: ['iş', 'ev'])]);
+      final cubit = build([
+        _acc('t1', tags: ['iş', 'ev']),
+      ]);
       await cubit.load();
       repo.saveCount = 0;
 
@@ -148,13 +151,21 @@ void main() {
         tags: ['  iş ', 'iş', '', 'ev', 'g' * 40],
       );
 
-      expect(repo.stored.single.tags,
-          ['iş', 'ev', 'g' * OtpAccount.maxTagRunes]);
+      expect(repo.stored.single.tags, [
+        'iş',
+        'ev',
+        'g' * OtpAccount.maxTagRunes,
+      ]);
     });
 
     test('issuer `add` ile AYNI kanonikleştirmeden geçer (A2)', () async {
       final catalog = IssuerCatalog(const [
-        CatalogService(id: '1', name: 'GitHub', issuer: 'github', logoUrl: null),
+        CatalogService(
+          id: '1',
+          name: 'GitHub',
+          issuer: 'github',
+          logoUrl: null,
+        ),
       ]);
       final cubit = build([_acc('t1', issuer: 'MyBank')], catalog: catalog);
       await cubit.load();
@@ -166,7 +177,9 @@ void main() {
     });
 
     test('bilinmeyen id → NE yazma NE push (no-op)', () async {
-      final cubit = build([_acc('t1', tags: ['iş'])]);
+      final cubit = build([
+        _acc('t1', tags: ['iş']),
+      ]);
       await cubit.load();
       repo.saveCount = 0;
 
@@ -177,22 +190,27 @@ void main() {
       expect(repo.stored.single.tags, ['iş']);
     });
 
-    test('değişiklik yok → NE yazma NE push (normalize sonrası eşit)', () async {
-      final cubit = build([_acc('t1', issuer: 'GitHub', tags: ['iş', 'ev'])]);
-      await cubit.load();
-      repo.saveCount = 0;
+    test(
+      'değişiklik yok → NE yazma NE push (normalize sonrası eşit)',
+      () async {
+        final cubit = build([
+          _acc('t1', issuer: 'GitHub', tags: ['iş', 'ev']),
+        ]);
+        await cubit.load();
+        repo.saveCount = 0;
 
-      // Aynı değerler, yalnız kirli yazımla: normalize sonrası birebir aynı.
-      await cubit.editMetadata(
-        id: 't1',
-        issuer: 'GitHub',
-        accountName: 'me@example.com',
-        tags: ['  iş  ', 'ev', 'iş'],
-      );
+        // Aynı değerler, yalnız kirli yazımla: normalize sonrası birebir aynı.
+        await cubit.editMetadata(
+          id: 't1',
+          issuer: 'GitHub',
+          accountName: 'me@example.com',
+          tags: ['  iş  ', 'ev', 'iş'],
+        );
 
-      expect(repo.saveCount, 0);
-      expect(sync.pushCount, 0);
-    });
+        expect(repo.saveCount, 0);
+        expect(sync.pushCount, 0);
+      },
+    );
 
     // Düzenleme sheet'i issuer'ı olmayan bir token için BOŞ "Servis" alanı
     // gösterir ve Kaydet'te o boşluğu `''` olarak geri yollar. `''` bir değer
@@ -200,7 +218,9 @@ void main() {
     // dokunulmamış token yeniden şifrelenir, push edilir ve blob'a
     // `"issuer": ""` yazılırdı (review P2).
     test('issuer\'sız token\'a boş issuer → NE yazma NE push', () async {
-      final cubit = build([_acc('t1', tags: ['iş'])]);
+      final cubit = build([
+        _acc('t1', tags: ['iş']),
+      ]);
       await cubit.load();
       repo.saveCount = 0;
 
@@ -227,25 +247,27 @@ void main() {
       expect(sync.pushCount, 0);
     });
 
-    test('boş issuer VAR OLAN issuer\'ı temizler (sonuç null, "" değil)',
-        () async {
-      final cubit = build([_acc('t1', issuer: 'GitHub')]);
-      await cubit.load();
-      repo.saveCount = 0;
+    test(
+      'boş issuer VAR OLAN issuer\'ı temizler (sonuç null, "" değil)',
+      () async {
+        final cubit = build([_acc('t1', issuer: 'GitHub')]);
+        await cubit.load();
+        repo.saveCount = 0;
 
-      await cubit.editMetadata(id: 't1', issuer: '');
+        await cubit.editMetadata(id: 't1', issuer: '');
 
-      expect(repo.saveCount, 1);
-      expect(sync.pushCount, 1);
-      final stored = repo.stored.single;
-      expect(stored.issuer, isNull);
-      // K2 ile aynı kural: temizlenen alan JSON'a HİÇ yazılmaz.
-      expect(stored.toJson().containsKey('issuer'), isFalse);
-      // Temizleme başka hiçbir alanı düşürmez.
-      expect(stored.id, 't1');
-      expect(stored.secret, 'JBSWY3DPEHPK3PXP');
-      expect(stored.accountName, 'me@example.com');
-    });
+        expect(repo.saveCount, 1);
+        expect(sync.pushCount, 1);
+        final stored = repo.stored.single;
+        expect(stored.issuer, isNull);
+        // K2 ile aynı kural: temizlenen alan JSON'a HİÇ yazılmaz.
+        expect(stored.toJson().containsKey('issuer'), isFalse);
+        // Temizleme başka hiçbir alanı düşürmez.
+        expect(stored.id, 't1');
+        expect(stored.secret, 'JBSWY3DPEHPK3PXP');
+        expect(stored.accountName, 'me@example.com');
+      },
+    );
 
     test('issuer temizlenirken etiketler ve diğer alanlar korunur', () async {
       final cubit = build([
@@ -260,7 +282,9 @@ void main() {
     });
 
     test('hiçbir argüman verilmezse de no-op', () async {
-      final cubit = build([_acc('t1', tags: ['iş'])]);
+      final cubit = build([
+        _acc('t1', tags: ['iş']),
+      ]);
       await cubit.load();
       repo.saveCount = 0;
 
@@ -291,10 +315,14 @@ void main() {
       expect(failing.state.error, isNotNull);
 
       // Üçü de aynı `_guardIntegrity` kapısından geçer.
-      await expectLater(failing.editMetadata(id: 't1', tags: ['iş']),
-          throwsA(isA<StateError>()));
       await expectLater(
-          failing.renameTag('iş', 'ofis'), throwsA(isA<StateError>()));
+        failing.editMetadata(id: 't1', tags: ['iş']),
+        throwsA(isA<StateError>()),
+      );
+      await expectLater(
+        failing.renameTag('iş', 'ofis'),
+        throwsA(isA<StateError>()),
+      );
       await expectLater(failing.deleteTag('iş'), throwsA(isA<StateError>()));
     });
 
@@ -359,7 +387,9 @@ void main() {
     });
 
     test('hiçbir kayıt taşımıyorsa → NE yazma NE push', () async {
-      final cubit = build([_acc('t1', tags: ['ev'])]);
+      final cubit = build([
+        _acc('t1', tags: ['ev']),
+      ]);
       await cubit.load();
       repo.saveCount = 0;
 
@@ -370,7 +400,9 @@ void main() {
     });
 
     test('from == to (normalize sonrası) → no-op', () async {
-      final cubit = build([_acc('t1', tags: ['iş'])]);
+      final cubit = build([
+        _acc('t1', tags: ['iş']),
+      ]);
       await cubit.load();
       repo.saveCount = 0;
 
@@ -381,7 +413,9 @@ void main() {
     });
 
     test('to boş/boşluk → no-op (etiket SİLİNMEZ)', () async {
-      final cubit = build([_acc('t1', tags: ['iş'])]);
+      final cubit = build([
+        _acc('t1', tags: ['iş']),
+      ]);
       await cubit.load();
       repo.saveCount = 0;
 
@@ -393,7 +427,9 @@ void main() {
     });
 
     test('from boş → no-op', () async {
-      final cubit = build([_acc('t1', tags: ['iş'])]);
+      final cubit = build([
+        _acc('t1', tags: ['iş']),
+      ]);
       await cubit.load();
       repo.saveCount = 0;
 
@@ -404,7 +440,9 @@ void main() {
     });
 
     test('yeni ad normalize edilir (32 rune kırpma)', () async {
-      final cubit = build([_acc('t1', tags: ['iş'])]);
+      final cubit = build([
+        _acc('t1', tags: ['iş']),
+      ]);
       await cubit.load();
 
       await cubit.renameTag('iş', '  ${'g' * 40}  ');
@@ -412,19 +450,21 @@ void main() {
       expect(_tagsOf(cubit, 't1').single, 'g' * OtpAccount.maxTagRunes);
     });
 
-    test('R9: İ/i AYRI etiketlerdir — yalnız tam eşleşen yeniden adlandırılır',
-        () async {
-      final cubit = build([
-        _acc('t1', name: 'a@x.com', tags: ['İş']),
-        _acc('t2', name: 'b@x.com', tags: ['iş']),
-      ]);
-      await cubit.load();
+    test(
+      'R9: İ/i AYRI etiketlerdir — yalnız tam eşleşen yeniden adlandırılır',
+      () async {
+        final cubit = build([
+          _acc('t1', name: 'a@x.com', tags: ['İş']),
+          _acc('t2', name: 'b@x.com', tags: ['iş']),
+        ]);
+        await cubit.load();
 
-      await cubit.renameTag('iş', 'ofis');
+        await cubit.renameTag('iş', 'ofis');
 
-      expect(_tagsOf(cubit, 't1'), ['İş']);
-      expect(_tagsOf(cubit, 't2'), ['ofis']);
-    });
+        expect(_tagsOf(cubit, 't1'), ['İş']);
+        expect(_tagsOf(cubit, 't2'), ['ofis']);
+      },
+    );
   });
 
   group('deleteTag', () {
@@ -448,7 +488,9 @@ void main() {
     });
 
     test('hiçbir kayıt taşımıyorsa → NE yazma NE push', () async {
-      final cubit = build([_acc('t1', tags: ['ev'])]);
+      final cubit = build([
+        _acc('t1', tags: ['ev']),
+      ]);
       await cubit.load();
       repo.saveCount = 0;
 
@@ -459,7 +501,9 @@ void main() {
     });
 
     test('boş etiket → no-op', () async {
-      final cubit = build([_acc('t1', tags: ['iş'])]);
+      final cubit = build([
+        _acc('t1', tags: ['iş']),
+      ]);
       await cubit.load();
       repo.saveCount = 0;
 
@@ -470,15 +514,19 @@ void main() {
       expect(_tagsOf(cubit, 't1'), ['iş']);
     });
 
-    test('son etiket kalkınca JSON\'dan "tags" anahtarı da çıkar (K2)',
-        () async {
-      final cubit = build([_acc('t1', tags: ['iş'])]);
-      await cubit.load();
+    test(
+      'son etiket kalkınca JSON\'dan "tags" anahtarı da çıkar (K2)',
+      () async {
+        final cubit = build([
+          _acc('t1', tags: ['iş']),
+        ]);
+        await cubit.load();
 
-      await cubit.deleteTag('iş');
+        await cubit.deleteTag('iş');
 
-      expect(repo.stored.single.toJson().containsKey('tags'), isFalse);
-    });
+        expect(repo.stored.single.toJson().containsKey('tags'), isFalse);
+      },
+    );
   });
 
   group('allTags', () {
@@ -511,7 +559,9 @@ void main() {
     });
 
     test('mutasyonlardan sonra ANINDA güncellenir (cache yok)', () async {
-      final cubit = build([_acc('t1', tags: ['iş'])]);
+      final cubit = build([
+        _acc('t1', tags: ['iş']),
+      ]);
       await cubit.load();
       expect(cubit.allTags, ['iş']);
 
@@ -523,24 +573,28 @@ void main() {
     });
   });
 
-  test('etiket mutasyonları add/remove ile SERİLEŞİR (tek yazma kuyruğu)',
-      () async {
-    final cubit = build([_acc('t1', tags: ['iş'])]);
-    await cubit.load();
-    repo.saveCount = 0;
+  test(
+    'etiket mutasyonları add/remove ile SERİLEŞİR (tek yazma kuyruğu)',
+    () async {
+      final cubit = build([
+        _acc('t1', tags: ['iş']),
+      ]);
+      await cubit.load();
+      repo.saveCount = 0;
 
-    // Beklemeden arka arkaya: _opChain sırayı korumalı.
-    final ops = <Future<void>>[
-      cubit.add(_acc('t2', name: 'b@x.com', tags: ['iş'])),
-      cubit.renameTag('iş', 'ofis'),
-      cubit.deleteTag('ofis'),
-    ];
-    await Future.wait(ops);
+      // Beklemeden arka arkaya: _opChain sırayı korumalı.
+      final ops = <Future<void>>[
+        cubit.add(_acc('t2', name: 'b@x.com', tags: ['iş'])),
+        cubit.renameTag('iş', 'ofis'),
+        cubit.deleteTag('ofis'),
+      ];
+      await Future.wait(ops);
 
-    expect(repo.stored.map((a) => a.id), ['t1', 't2']);
-    expect(repo.stored.every((a) => a.tags.isEmpty), isTrue);
-    expect(repo.saveCount, 3);
-  });
+      expect(repo.stored.map((a) => a.id), ['t1', 't2']);
+      expect(repo.stored.every((a) => a.tags.isEmpty), isTrue);
+      expect(repo.saveCount, 3);
+    },
+  );
 }
 
 /// `load()`'da patlayan depo — bütünlük hatası state'i kurmak için.

@@ -95,13 +95,13 @@ class BackupEnvelope {
 
   /// `backup|<version>|<kdf.alg>|<opslimit>|<memlimit>|<b64 salt>|<cipher.alg>`
   Uint8List get aad => aadFor(
-        version: version,
-        kdfAlg: kdfAlg,
-        opsLimit: opsLimit,
-        memLimit: memLimit,
-        salt: _salt,
-        cipherAlg: cipherAlg,
-      );
+    version: version,
+    kdfAlg: kdfAlg,
+    opsLimit: opsLimit,
+    memLimit: memLimit,
+    salt: _salt,
+    cipherAlg: cipherAlg,
+  );
 
   /// Same derivation as [aad], usable before the ciphertext (and therefore the
   /// envelope) exists — export needs the AAD to produce the blob.
@@ -116,27 +116,25 @@ class BackupEnvelope {
     // `createdAt` is deliberately NOT in the AAD: it is unauthenticated metadata
     // (a convenience label for the file list). The authenticated timestamp is
     // `exportedAt`, which lives INSIDE the encrypted payload.
-    final text = 'backup|$version|$kdfAlg|$opsLimit|$memLimit|'
+    final text =
+        'backup|$version|$kdfAlg|$opsLimit|$memLimit|'
         '${base64Encode(salt)}|$cipherAlg';
     return Uint8List.fromList(utf8.encode(text));
   }
 
   Map<String, dynamic> toJson() => {
-        'format': formatId,
-        'version': version,
-        'createdAt': createdAt.toUtc().toIso8601String(),
-        'kdf': {
-          'alg': kdfAlg,
-          'opslimit': opsLimit,
-          'memlimit': memLimit,
-          'salt': saltBase64,
-        },
-        'cipher': {
-          'alg': cipherAlg,
-          'nonce': base64Encode(blob.nonce),
-        },
-        'ciphertext': base64Encode(blob.ciphertext),
-      };
+    'format': formatId,
+    'version': version,
+    'createdAt': createdAt.toUtc().toIso8601String(),
+    'kdf': {
+      'alg': kdfAlg,
+      'opslimit': opsLimit,
+      'memlimit': memLimit,
+      'salt': saltBase64,
+    },
+    'cipher': {'alg': cipherAlg, 'nonce': base64Encode(blob.nonce)},
+    'ciphertext': base64Encode(blob.ciphertext),
+  };
 
   /// Strict parse of a decoded root JSON object.
   ///
@@ -151,7 +149,8 @@ class BackupEnvelope {
     final format = _asString(json['format'], 'format');
     if (format != formatId) {
       throw FormatException(
-          'BackupEnvelope: "format" must be "$formatId" (got "$format")');
+        'BackupEnvelope: "format" must be "$formatId" (got "$format")',
+      );
     }
 
     final version = _asInt(json['version'], 'version');
@@ -161,7 +160,8 @@ class BackupEnvelope {
     if (version > supportedVersion) {
       if (onUnsupportedVersion != null) onUnsupportedVersion(version);
       throw FormatException(
-          'BackupEnvelope: unsupported "version" $version (max $supportedVersion)');
+        'BackupEnvelope: unsupported "version" $version (max $supportedVersion)',
+      );
     }
 
     final createdAtText = _asString(json['createdAt'], 'createdAt');
@@ -171,7 +171,8 @@ class BackupEnvelope {
     final createdAt = DateTime.tryParse(createdAtText);
     if (createdAt == null) {
       throw const FormatException(
-          'BackupEnvelope: "createdAt" is not an ISO-8601 timestamp');
+        'BackupEnvelope: "createdAt" is not an ISO-8601 timestamp',
+      );
     }
 
     final kdf = _asMap(json['kdf'], 'kdf');
@@ -182,16 +183,22 @@ class BackupEnvelope {
     final memLimit = _asInt(kdf['memlimit'], 'kdf.memlimit');
     if (kdfAlg == null || opsLimit == null || memLimit == null) {
       throw const FormatException(
-          'BackupEnvelope: "kdf.alg"/"kdf.opslimit"/"kdf.memlimit" are required');
+        'BackupEnvelope: "kdf.alg"/"kdf.opslimit"/"kdf.memlimit" are required',
+      );
     }
     final salt = _base64(_required(kdf['salt'], 'kdf.salt'), 'kdf.salt');
     final cipherAlg = _asString(cipher['alg'], 'cipher.alg');
     if (cipherAlg == null) {
       throw const FormatException('BackupEnvelope: "cipher.alg" is required');
     }
-    final nonce = _base64(_required(cipher['nonce'], 'cipher.nonce'), 'cipher.nonce');
-    final ciphertext =
-        _base64(_required(json['ciphertext'], 'ciphertext'), 'ciphertext');
+    final nonce = _base64(
+      _required(cipher['nonce'], 'cipher.nonce'),
+      'cipher.nonce',
+    );
+    final ciphertext = _base64(
+      _required(json['ciphertext'], 'ciphertext'),
+      'ciphertext',
+    );
 
     return BackupEnvelope(
       version: version,
@@ -216,27 +223,33 @@ class BackupEnvelope {
   }) {
     if (version < 1 || version > supportedVersion) {
       throw FormatException(
-          'BackupEnvelope: unsupported version $version (expected 1..$supportedVersion)');
+        'BackupEnvelope: unsupported version $version (expected 1..$supportedVersion)',
+      );
     }
     if (kdfAlg != kdfAlgArgon2id) {
       throw FormatException(
-          'BackupEnvelope: "kdf.alg" must be "$kdfAlgArgon2id" (got "$kdfAlg")');
+        'BackupEnvelope: "kdf.alg" must be "$kdfAlgArgon2id" (got "$kdfAlg")',
+      );
     }
     if (cipherAlg != cipherAlgXChaCha20) {
       throw FormatException(
-          'BackupEnvelope: "cipher.alg" must be "$cipherAlgXChaCha20" (got "$cipherAlg")');
+        'BackupEnvelope: "cipher.alg" must be "$cipherAlgXChaCha20" (got "$cipherAlg")',
+      );
     }
     if (opsLimit < minOpsLimit || opsLimit > maxOpsLimit) {
       throw FormatException(
-          'BackupEnvelope: "kdf.opslimit" must be $minOpsLimit..$maxOpsLimit (got $opsLimit)');
+        'BackupEnvelope: "kdf.opslimit" must be $minOpsLimit..$maxOpsLimit (got $opsLimit)',
+      );
     }
     if (memLimit < minMemLimit || memLimit > maxMemLimit) {
       throw FormatException(
-          'BackupEnvelope: "kdf.memlimit" must be $minMemLimit..$maxMemLimit (got $memLimit)');
+        'BackupEnvelope: "kdf.memlimit" must be $minMemLimit..$maxMemLimit (got $memLimit)',
+      );
     }
     if (saltLength != saltBytes) {
       throw FormatException(
-          'BackupEnvelope: "kdf.salt" must be exactly $saltBytes bytes (got $saltLength)');
+        'BackupEnvelope: "kdf.salt" must be exactly $saltBytes bytes (got $saltLength)',
+      );
     }
   }
 
@@ -248,7 +261,8 @@ class BackupEnvelope {
   static Uint8List _base64(Object value, String name) {
     if (value is! String) {
       throw FormatException(
-          'BackupEnvelope: "$name" must be a String (got ${value.runtimeType})');
+        'BackupEnvelope: "$name" must be a String (got ${value.runtimeType})',
+      );
     }
     try {
       return base64Decode(value);
@@ -261,7 +275,8 @@ class BackupEnvelope {
     if (v == null) return null;
     if (v is String) return v;
     throw FormatException(
-        'BackupEnvelope: "$name" must be a String (got ${v.runtimeType})');
+      'BackupEnvelope: "$name" must be a String (got ${v.runtimeType})',
+    );
   }
 
   /// Integer-valued doubles (`3.0`) are accepted; a fractional `num` is rejected
@@ -272,16 +287,19 @@ class BackupEnvelope {
     if (v is double) {
       if (v == v.truncateToDouble()) return v.toInt();
       throw FormatException(
-          'BackupEnvelope: "$name" must be an integer (fractional: $v)');
+        'BackupEnvelope: "$name" must be an integer (fractional: $v)',
+      );
     }
     throw FormatException(
-        'BackupEnvelope: "$name" must be a number (got ${v.runtimeType})');
+      'BackupEnvelope: "$name" must be a number (got ${v.runtimeType})',
+    );
   }
 
   static Map<String, dynamic> _asMap(Object? v, String name) {
     if (v is Map<String, dynamic>) return v;
     if (v is Map) return v.map((k, val) => MapEntry(k.toString(), val));
     throw FormatException(
-        'BackupEnvelope: "$name" must be an object (got ${v.runtimeType})');
+      'BackupEnvelope: "$name" must be an object (got ${v.runtimeType})',
+    );
   }
 }

@@ -15,8 +15,8 @@ class LastSyncStore {
   final String _keyPrefix;
 
   LastSyncStore({FlutterSecureStorage? storage, String keyPrefix = ''})
-      : _storage = storage ?? const FlutterSecureStorage(),
-        _keyPrefix = keyPrefix;
+    : _storage = storage ?? const FlutterSecureStorage(),
+      _keyPrefix = keyPrefix;
 
   String get _key => '$_keyPrefix$storageKey';
 
