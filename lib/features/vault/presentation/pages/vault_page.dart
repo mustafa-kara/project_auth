@@ -20,7 +20,11 @@ import '../../data/view_mode_store.dart';
 import '../../domain/token_sync_service.dart';
 import '../bloc/vault_cubit.dart';
 import '../widgets/add_token_sheet.dart';
+import '../widgets/edit_token_sheet.dart';
 import '../widgets/otp_card.dart';
+import '../widgets/tag_chips_bar.dart';
+import '../widgets/tag_manager_sheet.dart';
+import '../widgets/token_action_sheet.dart';
 
 class VaultPage extends StatefulWidget {
   const VaultPage({super.key});
@@ -32,6 +36,12 @@ class VaultPage extends StatefulWidget {
 class _VaultPageState extends State<VaultPage> {
   final TextEditingController _searchController = TextEditingController();
   String _query = '';
+
+  /// Phase 5 Patch 3 — active tag filter, or null for "all codes".
+  ///
+  /// Single selection and SESSION-SCOPED on purpose: a filter that survived a
+  /// restart is the classic way a user concludes a token has disappeared.
+  String? _selectedTag;
 
   /// Kullanıcı bu oturumda corruption banner'ını "Yine de devam et" ile gizledi mi.
   /// (Bozuk kayıtlar korunur; banner yalnız görsel olarak kapanır.)
@@ -87,12 +97,20 @@ class _VaultPageState extends State<VaultPage> {
     }
   }
 
-  /// Arama filtresi: issuer/account/label üzerinde case-insensitive, boşluk-dayanıklı.
-  List<OtpAccount> _filter(List<OtpAccount> accounts) {
+  /// Arama filtresi: issuer/account/label/etiket üzerinde case-insensitive,
+  /// boşluk-dayanıklı. [tag] verilirse arama ile AND'lenir (tek etiket).
+  ///
+  /// The tag is an exact membership test, not a substring one: a chip is a
+  /// deliberate pick, so "iş" must not also match "işlem".
+  List<OtpAccount> _filter(List<OtpAccount> accounts, String? tag) {
     final q = _query.trim().toLowerCase();
-    if (q.isEmpty) return accounts;
+    if (q.isEmpty && tag == null) return accounts;
     return accounts.where((a) {
-      final hay = '${a.issuer ?? ''} ${a.accountName} ${a.label}'.toLowerCase();
+      if (tag != null && !a.tags.contains(tag)) return false;
+      if (q.isEmpty) return true;
+      final hay =
+          '${a.issuer ?? ''} ${a.accountName} ${a.label} ${a.tags.join(' ')}'
+              .toLowerCase();
       return hay.contains(q);
     }).toList();
   }
@@ -178,7 +196,17 @@ class _VaultPageState extends State<VaultPage> {
               primaryAction: true,
             );
           }
-          final visible = _filter(state.accounts);
+          final cubit = context.read<VaultCubit>();
+          final tags = cubit.allTags;
+          // A tag that no longer exists (renamed/deleted on another device, or
+          // removed from the last token holding it) must not keep hiding codes:
+          // the selection is validated against the live list on every build
+          // instead of being repaired with a setState during build.
+          final activeTag =
+              (_selectedTag != null && tags.contains(_selectedTag))
+                  ? _selectedTag
+                  : null;
+          final visible = _filter(state.accounts, activeTag);
           // Kısmi bozulma uyarı banner'ı (AppBanner, warning) — sağlam token'lar
           // yine de gösterilir (Design.md §11 dürüst hata, §14.10).
           final banner = (state.corruptedCount > 0 && !_corruptionDismissed)
@@ -204,17 +232,32 @@ class _VaultPageState extends State<VaultPage> {
                 )
               : null;
           final compact = _viewMode == VaultViewMode.list;
+          final chips = TagChipsBar(
+            tags: tags,
+            selected: activeTag,
+            onSelected: (t) => setState(() => _selectedTag = t),
+            onManage: () => _showTagManager(context),
+          );
           final list = visible.isEmpty
-              ? EmptyState(
-                  icon: Icons.search_off,
-                  title: 'Aramayla eşleşen kod yok',
-                  description: '"$_query" için sonuç bulunamadı.',
-                  actionLabel: 'Aramayı temizle',
-                  onAction: () {
-                    _searchController.clear();
-                    setState(() => _query = '');
-                  },
-                )
+              ? (activeTag != null
+                  ? EmptyState(
+                      icon: Icons.sell_outlined,
+                      title: 'Bu etikette kod yok',
+                      description:
+                          '« $activeTag » etiketiyle eşleşen kod bulunamadı.',
+                      actionLabel: 'Filtreyi temizle',
+                      onAction: _clearFilters,
+                    )
+                  : EmptyState(
+                      icon: Icons.search_off,
+                      title: 'Aramayla eşleşen kod yok',
+                      description: '"$_query" için sonuç bulunamadı.',
+                      actionLabel: 'Aramayı temizle',
+                      onAction: () {
+                        _searchController.clear();
+                        setState(() => _query = '');
+                      },
+                    ))
               : ListView.builder(
                   padding: const EdgeInsets.fromLTRB(
                       Gap.lg, Gap.sm, Gap.lg, 88), // FAB için alt boşluk
@@ -235,17 +278,23 @@ class _VaultPageState extends State<VaultPage> {
                           context.read<VaultCubit>().incrementCounter(acc.id),
                           'Sayaç kaydedilemedi',
                         ),
-                        onDelete: () => _runMutation(
-                          context.read<VaultCubit>().removeById(acc.id),
-                          'Silme kaydedilemedi',
-                        ),
+                        // Long press no longer deletes: it opens the action
+                        // sheet, and EVERY delete path (sheet entry and the
+                        // 'Sil' assistive action below) goes through
+                        // _confirmDelete first (risk R10).
+                        onLongPress: () => _showTokenActions(acc),
+                        onEdit: () => _showEditSheet(acc),
+                        onDelete: () => _confirmDelete(acc),
                       ),
                     );
                   },
                 );
-          if (banner == null) return list;
           return Column(
-            children: [banner, Expanded(child: list)],
+            children: [
+              ?banner,
+              chips,
+              Expanded(child: list),
+            ],
           );
         },
       ),
@@ -264,6 +313,98 @@ class _VaultPageState extends State<VaultPage> {
     // keeps this page mounted (protection stays on), and a nested sensitive
     // screen closing above it no longer turns the protection off early.
     return SecureScreenScope(child: scaffold);
+  }
+
+  /// Arama + etiket filtresini birlikte temizler (boş-filtre CTA'sı).
+  void _clearFilters() {
+    _searchController.clear();
+    setState(() {
+      _query = '';
+      _selectedTag = null;
+    });
+  }
+
+  /// Uzun basış → eylem sheet'i (Phase 5 Patch 3, plan §5 D2).
+  ///
+  /// Replaces the old "long press deletes immediately" behaviour: the delete
+  /// entry lands on [_confirmDelete], so a mis-touch can no longer cost the
+  /// user access to an account's 2FA (risk R10 — CHANGELOG'a girer).
+  Future<void> _showTokenActions(OtpAccount account) async {
+    final action = await TokenActionSheet.show(context, account: account);
+    if (!mounted || action == null) return;
+    switch (action) {
+      case TokenAction.edit:
+        _showEditSheet(account);
+      case TokenAction.tags:
+        _showEditSheet(account, focusTags: true);
+      case TokenAction.delete:
+        await _confirmDelete(account);
+    }
+  }
+
+  /// Metadata düzenleme sheet'i. Secret ASLA gösterilmez/okunmaz.
+  void _showEditSheet(OtpAccount account, {bool focusTags = false}) {
+    final cubit = context.read<VaultCubit>();
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => EditTokenSheet(
+        account: account,
+        cubit: cubit,
+        focusTags: focusTags,
+      ),
+    );
+  }
+
+  /// Etiket yöneticisi. Yeniden adlandırma/silme aktif filtreyi taşır/temizler.
+  void _showTagManager(BuildContext context) {
+    final cubit = context.read<VaultCubit>();
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => TagManagerSheet(
+        cubit: cubit,
+        onRenamed: (from, to) {
+          if (mounted && _selectedTag == from) {
+            setState(() => _selectedTag = to);
+          }
+        },
+        onDeleted: (tag) {
+          if (mounted && _selectedTag == tag) {
+            setState(() => _selectedTag = null);
+          }
+        },
+      ),
+    );
+  }
+
+  /// Kod silme — açık onay (geri alınamaz). Onaysız silinen tek yol yoktur.
+  Future<void> _confirmDelete(OtpAccount account) async {
+    final cubit = context.read<VaultCubit>();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Kodu sil?'),
+        content: Text('« ${account.label} » kalıcı olarak silinecek. '
+            'Bu işlem geri alınamaz — bu hesabın 2FA\'sına erişimini '
+            'kaybedebilirsin.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Vazgeç'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+                backgroundColor: Theme.of(ctx).colorScheme.error),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Sil'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await _runMutation(cubit.removeById(account.id), 'Silme kaydedilemedi');
+    }
   }
 
   /// Ekleme yöntemini seçtirir: QR tara veya manuel `otpauth://`.

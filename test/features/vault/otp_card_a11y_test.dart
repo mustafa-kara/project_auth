@@ -76,6 +76,84 @@ void main() {
     expect(find.byType(OtpCard), findsOneWidget);
   });
 
+  // --- Faz 5 Patch 3 — uzun basış artık DOĞRUDAN SİLMEZ (risk R10). Kart bir
+  // `onLongPress` alırsa onu çağırır (VaultPage eylem sheet'ini açar); geriye
+  // dönük olarak `onLongPress` verilmediğinde eski davranış korunur. Ekran
+  // okuyucu kullanıcısı uzun basamaz → 'Düzenle'/'Sil' customSemanticsActions
+  // olarak yayınlanır. ---
+  group('uzun basış + assistive eylemler', () {
+    testWidgets('onLongPress verildiğinde silme ÇAĞRILMAZ', (tester) async {
+      var longPressed = 0;
+      var deleted = 0;
+      await tester.pumpWidget(_host(OtpCard(
+        account: _acc(),
+        onLongPress: () => longPressed++,
+        onDelete: () => deleted++,
+      )));
+      await tester.pump();
+
+      await tester.longPress(find.byType(OtpCard));
+      await tester.pump();
+
+      expect(longPressed, 1);
+      expect(deleted, 0, reason: 'onaysız silme yolu kapandı');
+    });
+
+    testWidgets('onLongPress yoksa eski davranış korunur (onDelete)',
+        (tester) async {
+      var deleted = 0;
+      await tester.pumpWidget(_host(OtpCard(
+        account: _acc(),
+        onDelete: () => deleted++,
+      )));
+      await tester.pump();
+
+      await tester.longPress(find.byType(OtpCard));
+      await tester.pump();
+
+      expect(deleted, 1);
+    });
+
+    testWidgets('customSemanticsActions: Düzenle + Sil', (tester) async {
+      var edited = 0;
+      var deleted = 0;
+      await tester.pumpWidget(_host(OtpCard(
+        account: _acc(),
+        onEdit: () => edited++,
+        onDelete: () => deleted++,
+        onLongPress: () {},
+      )));
+      await tester.pump();
+
+      final props = tester
+          .widgetList<Semantics>(find.byType(Semantics))
+          .map((s) => s.properties)
+          .firstWhere((p) => p.customSemanticsActions != null);
+      final actions = props.customSemanticsActions!;
+      expect(actions.keys.map((k) => k.label), containsAll(['Düzenle', 'Sil']));
+
+      // Birincil etiket ve tap (kopyala) KORUNUR — yalnız eylem eklendi.
+      expect(props.label, contains('kod '));
+      expect(props.onTap, isNotNull);
+
+      actions.entries.firstWhere((e) => e.key.label == 'Düzenle').value();
+      actions.entries.firstWhere((e) => e.key.label == 'Sil').value();
+      expect(edited, 1);
+      expect(deleted, 1);
+    });
+
+    testWidgets('geri çağrı yoksa assistive eylem de YAYINLANMAZ',
+        (tester) async {
+      await tester.pumpWidget(_host(OtpCard(account: _acc())));
+      await tester.pump();
+
+      final withActions = tester
+          .widgetList<Semantics>(find.byType(Semantics))
+          .where((s) => s.properties.customSemanticsActions != null);
+      expect(withActions, isEmpty);
+    });
+  });
+
   // --- Clipboard hygiene (security review finding 2): copying an OTP must not
   // leave it in the clipboard indefinitely. Tap copies the code; after the
   // window it is wiped only if the clipboard still holds our value. ---
