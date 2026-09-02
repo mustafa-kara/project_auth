@@ -122,6 +122,41 @@ re-revokes both from `public`/`anon`/`authenticated`. It contains **no password*
 `private.admin_global_stats()` is currently held by `postgres` **only**, which is exactly why the dashboard's
 stats cards render an error card until step 1+2 are done.
 
+### Operator steps applied (2026-09-02, via Supabase MCP)
+
+The section above was written before the steps were run; steps 1–3 are now largely done, and this paragraph is
+the current state of `authenticator-dev` (`vfyqokvgtdxxurroqbtj`), all of it measured live on **2026-09-02**.
+
+- **Migration applied.** `20260902201638_admin_backend_role.sql` is in the live project; the DB version is
+  `20260902201638` and `list_migrations` returns exactly the repo's four files, name for name. The repo file
+  was renamed from `20260902120000_…` to match the version the database recorded.
+- **Roles created and verified.** `admin_backend` — NOLOGIN, NOINHERIT, `usage` on `private` + `execute` on
+  `private.admin_global_stats()`, and **no table privileges at all**. `admin_app` — LOGIN, member of
+  `admin_backend`, no `bypassrls`/`superuser`/`createrole`. For both roles
+  `has_table_privilege(…, 'public.tokens', 'select')` and the same on `public.key_attributes` return
+  **false**: the panel's direct-Postgres path can read the aggregate and nothing else.
+- **`admin_app` has no password yet — on purpose.** It is the one step that stays with the operator, in the
+  Dashboard SQL editor (`alter role admin_app password '<güçlü-parola>';`), so the password never passes
+  through a migration, this repo or an agent transcript. Until it is set the role cannot connect.
+- **CA bundled.** The Supabase Root 2021 CA (a public root certificate, not a secret) now lives at
+  `admin/certs/supabase-prod-ca-2021.crt` with `admin/certs/README.txt` carrying the source URL, the SHA-256
+  fingerprint and the one-liner that loads it into `SUPABASE_CA_CERT`. The pooler handshake against it
+  verifies: `openssl s_client -connect aws-0-eu-central-1.pooler.supabase.com:5432 -starttls postgres -CAfile
+  admin/certs/supabase-prod-ca-2021.crt` → `Verify return code: 0 (ok)`. Fingerprint SHA-256
+  `80:70:25:AD:50:D4:ED:21:9D:2C:9C:7D:29:9C:00:4F:82:4E:B0:0C:F7:F6:5A:FE:F6:07:D0:7B:72:E6:CA:FA`,
+  validity 2021-04-28 → 2031-04-26. The download URL that actually works is
+  `https://supabase-downloads.s3-ap-southeast-1.amazonaws.com/prod/ssl/prod-ca-2021.crt`; the `us-west-2` URL
+  some docs give 301-redirects to it, and without `curl -L` you get S3's XML error body saved as a
+  "certificate".
+- **Advisors re-run after the DDL: nothing new.** The only security finding is the pre-existing WARN
+  *"Leaked Password Protection Disabled"*, a Dashboard Auth setting that cannot be changed over SQL or MCP
+  (already a Phase 7 item).
+- **Still open, operator-only:** the `admin_app` password above; the `sb_secret_…` key, which must be pasted
+  into the git-ignored `admin/.env.local` (created locally with the URL, the publishable key, the CA cert and
+  placeholders for the secret key and the `DATABASE_URL` password); and the **first real admin row** —
+  `auth.users` today holds only a UI-test account (`uitest…@gmail.com`), so a real account has to be
+  registered in the mobile app before `insert into public.admin_users (user_id) values ('<uuid>');`.
+
 ### Documentation findings (W1) — recorded in full in admin/README.md §5
 
 Library APIs were verified against current documentation **and the installed package source**, not from
