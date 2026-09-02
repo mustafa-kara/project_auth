@@ -17,7 +17,24 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../../../../core/ui/tokens.dart';
+import '../../../../core/ui/widgets/auth_bits.dart';
+import '../../../../core/ui/widgets/status_badge.dart';
+import '../../domain/import_models.dart';
 import '../../domain/import_service.dart';
+
+/// Bir girdinin neden atlandığının Türkçe açıklaması.
+///
+/// Lives here rather than in `import_page.dart` because it is only ever needed
+/// to render this view, which both entry points (file import, Google
+/// Authenticator scan) share.
+String skipReasonLabel(SkipReason reason) => switch (reason) {
+      SkipReason.unsupportedType => 'Desteklenmeyen token türü',
+      SkipReason.invalidSecret => 'Secret okunamadı',
+      SkipReason.invalidFields => 'Alanlar geçersiz',
+      SkipReason.duplicateInFile => 'Dosyada tekrar ediyor',
+      SkipReason.alreadyInVault => 'Zaten vault\'unda var',
+    };
 
 class ImportPreviewView extends StatelessWidget {
   const ImportPreviewView({
@@ -56,5 +73,113 @@ class ImportPreviewView extends StatelessWidget {
   final String confirmLabel;
 
   @override
-  Widget build(BuildContext context) => const SizedBox.shrink();
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      children: [
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.all(Gap.lg),
+            children: [
+              Row(
+                children: [
+                  StatusBadge(
+                    kind: StatusKind.primary,
+                    icon: Icons.description_outlined,
+                    label: headerLabel,
+                  ),
+                  if (headerDetail != null) ...[
+                    const SizedBox(width: Gap.sm),
+                    Expanded(
+                      child: Text(
+                        headerDetail!,
+                        style: theme.textTheme.bodySmall
+                            ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+              const SizedBox(height: Gap.lg),
+              _countLine(
+                context,
+                Icons.add_circle_outline,
+                '${preview.addCount} token içe aktarılacak',
+                emphasis: true,
+              ),
+              _countLine(
+                context,
+                Icons.copy_all_outlined,
+                '${preview.duplicateCount} zaten var',
+              ),
+              _countLine(
+                context,
+                Icons.block_outlined,
+                '${preview.skippedCount} desteklenmiyor',
+              ),
+              if (preview.skipped.isNotEmpty) ...[
+                const SizedBox(height: Gap.md),
+                ExpansionTile(
+                  title: Text('Atlananlar (${preview.skipped.length})'),
+                  childrenPadding:
+                      const EdgeInsets.only(left: Gap.sm, right: Gap.sm),
+                  children: [
+                    for (final s in preview.skipped)
+                      ListTile(
+                        dense: true,
+                        leading: const Icon(Icons.remove_circle_outline),
+                        title: Text(s.label ?? '(isimsiz)'),
+                        subtitle: Text(
+                          s.detail == null
+                              ? skipReasonLabel(s.reason)
+                              : '${skipReasonLabel(s.reason)} — ${s.detail}',
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+              if (error != null) ...[
+                const SizedBox(height: Gap.md),
+                AuthErrorText(error!),
+              ],
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.all(Gap.lg),
+          child: FilledButton(
+            onPressed: busy || preview.toAdd.isEmpty ? null : onConfirm,
+            child: busy ? const BtnSpinner() : Text(confirmLabel),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _countLine(BuildContext context, IconData icon, String text,
+      {bool emphasis = false}) {
+    final theme = Theme.of(context);
+    final color = emphasis
+        ? theme.colorScheme.onSurface
+        : theme.colorScheme.onSurfaceVariant;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: Gap.sm),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: color),
+          const SizedBox(width: Gap.sm),
+          Expanded(
+            child: Text(
+              text,
+              style: (emphasis
+                      ? theme.textTheme.titleMedium
+                      : theme.textTheme.bodyMedium)
+                  ?.copyWith(color: color),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

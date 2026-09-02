@@ -13,7 +13,9 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:project_auth/core/otp/otp_account.dart';
+import 'package:project_auth/core/router/app_router.dart';
 import 'package:project_auth/features/auth/presentation/bloc/vault_lock_cubit.dart';
 import 'package:project_auth/features/auth/presentation/bloc/vault_lock_state.dart';
 import 'package:project_auth/features/import_export/domain/backup_service.dart';
@@ -486,6 +488,55 @@ void main() {
     // `_acc` hepsini bu secret'la kurar; önizleme yalnız issuer/hesap gösterir.
     expect(find.textContaining('JBSWY3DP'), findsNothing);
     expect(find.textContaining('2 token içe aktarılacak'), findsOneWidget);
+  });
+
+  testWidgets(
+      'Faz 5 Patch 2 — "Google Authenticator (QR)" → yönerge sheet\'i → /scan',
+      (tester) async {
+    final vault = VaultCubit(_FakeRepo());
+    await vault.load();
+    addTearDown(vault.close);
+
+    final router = GoRouter(
+      routes: [
+        GoRoute(
+          path: '/',
+          builder: (_, _) => ImportPage(
+            service: _FakeImportService(
+                result: const ImportPreview(
+                    source: ImportSource.aegis, toAdd: [])),
+            documents: _FakeDocuments(),
+          ),
+        ),
+        // Gerçek ScanPage kamera ister → rota varlığını yer tutucuyla doğrula.
+        GoRoute(
+            path: Routes.scan,
+            builder: (_, _) => const Scaffold(body: Text('SCAN-ROUTE'))),
+      ],
+    );
+    addTearDown(router.dispose);
+
+    await tester.pumpWidget(MultiBlocProvider(
+      providers: [
+        BlocProvider<VaultLockCubit>.value(value: lock),
+        BlocProvider<VaultCubit>.value(value: vault),
+      ],
+      child: MaterialApp.router(routerConfig: router),
+    ));
+    await tester.pumpAndSettle();
+
+    // Dosya seçme aksiyonu YERİNDE kalır (mevcut akış bozulmadı).
+    expect(find.text('Dosya seç'), findsOneWidget);
+
+    await tester.tap(find.text('Google Authenticator (QR)'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Hesapları dışa aktar'), findsOneWidget);
+
+    await tester.tap(find.text('Kamerayı aç'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('SCAN-ROUTE'), findsOneWidget);
   });
 
   testWidgets('UTF-8 olmayan dosya → "okunamadı" hatası', (tester) async {
