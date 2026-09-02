@@ -91,11 +91,11 @@ void main() {
       expect(a.algorithm, OtpAlgorithm.sha1); // absent in file → default
     });
 
-    test('unknown algorithm is skipped with a labelled record', () {
+    test('B3 — MD5 is reported as a capability gap, not a broken file', () {
       final skip = result.skipped.single;
-      expect(skip.reason, SkipReason.invalidFields);
+      expect(skip.reason, SkipReason.unsupportedType);
       expect(skip.label, 'WeirdAlgo (weird@example.com)');
-      expect(skip.detail, contains('MD5'));
+      expect(skip.detail, 'algorithm=MD5');
       expect(skip.detail, isNot(contains('ONSWG4TFOQ')));
     });
 
@@ -109,9 +109,9 @@ void main() {
 
     setUp(() => result = parser.parse(_fixture('twofas_steam_hotp.json')));
 
-    test('four services import, two are skipped', () {
+    test('four services import, three are skipped', () {
       expect(result.accounts, hasLength(4));
-      expect(result.skipped, hasLength(2));
+      expect(result.skipped, hasLength(3));
     });
 
     test('tokenType STEAM maps to a Steam token', () {
@@ -131,19 +131,23 @@ void main() {
       expect(a.counter, 7);
     });
 
-    test('HOTP also reads the alternative "initialCounter" name', () {
+    test('tokenType is matched case-insensitively', () {
       final a = result.accounts[2];
-      expect(a.type, OtpType.hotp);
+      expect(a.type, OtpType.hotp); // file says "hotp"
       expect(a.accountName, 'user2');
       expect(a.counter, 3);
     });
 
-    test('D5 — TOTP with issuer "steam" is promoted, digits forced to 5', () {
+    test('B1 — a TOTP service whose issuer reads "steam" stays a TOTP', () {
+      // 2FAS has a first-class STEAM tokenType, so a service the file calls
+      // TOTP is a TOTP. Promoting it would force digits to 5 and produce codes
+      // that do not work.
       final a = result.accounts[3];
-      expect(a.type, OtpType.steam);
+      expect(a.type, OtpType.totp);
       expect(a.issuer, 'steam');
       expect(a.accountName, 'player');
-      expect(a.digits, 5); // file said 6
+      expect(a.digits, 6); // exactly what the file said
+      expect(a.period, 30);
     });
 
     test('HOTP without a counter is skipped, never defaulted to 0', () {
@@ -160,6 +164,13 @@ void main() {
       expect(skip.detail, contains('MOTP'));
     });
 
+    test('B3 — SHA224 (in the 2FAS enum) is unsupportedType', () {
+      final skip = result.skipped[2];
+      expect(skip.reason, SkipReason.unsupportedType);
+      expect(skip.label, 'Sha224 (user5)');
+      expect(skip.detail, 'algorithm=SHA224');
+    });
+
     test('no secret from the file leaks into a skip record', () {
       const secrets = [
         'JBSWY3DPEHPK3PXP',
@@ -168,6 +179,7 @@ void main() {
         'KRSXG5CTMVRXEZLU',
         'MZXW6YTBOI',
         'NB2W45DFOIZA',
+        'ONSWG4TFOQ',
       ];
       for (final skip in result.skipped) {
         final text = '${skip.label ?? ''} ${skip.detail ?? ''}';
@@ -196,6 +208,26 @@ void main() {
         () {
       final json = _export(const [])..['servicesEncrypted'] = '   ';
       expect(parser.parse(json).accounts, isEmpty);
+    });
+
+    test('B2 — a non-empty "reference" alone flags an encrypted export', () {
+      // 2FAS' own predicate: BackupContent.isEncrypted is
+      // `reference.isNullOrBlank().not()`. An export can carry the reference
+      // without servicesEncrypted; it is still password-protected.
+      final json = _export(const [])
+        ..['reference'] = 'Y2lwaGVy:c2FsdA==:aXY=';
+      expect(
+        () => parser.parse(json),
+        throwsA(isA<EncryptedSourceException>()
+            .having((e) => e.source, 'source', ImportSource.twofas)),
+      );
+    });
+
+    test('B2 — an empty or blank "reference" is not treated as encrypted', () {
+      for (final reference in const ['', '   ']) {
+        final json = _export([_service()])..['reference'] = reference;
+        expect(parser.parse(json).accounts, hasLength(1));
+      }
     });
   });
 
@@ -268,46 +300,138 @@ void main() {
       expect(result.skipped.single.detail, isNot(contains('not-base32')));
     });
 
-    test('the Steam heuristic reads otp.issuer ONLY, never the service name',
+    test('B1 — neither otp.issuer nor the service name can promote a TOTP',
         () {
-      // A service the user named "Steam" whose otp block has no issuer: this is
-      // an ordinary 6-digit TOTP (e.g. a Steam *forum* login) and must NOT be
-      // rewritten into a 5-digit Steam token (review follow-up).
-      final result = parser.parse(_export([
-        _service(
-          name: 'Steam',
-          otp: const {
-            'account': 'user',
-            'digits': 6,
-            'period': 30,
-            'algorithm': 'SHA1',
-            'tokenType': 'TOTP',
-          },
-        ),
-      ]));
-      final a = result.accounts.single;
-      expect(a.type, OtpType.totp);
-      expect(a.digits, 6);
-      expect(a.issuer, 'Steam'); // issuer still falls back to the service name
+      for (final otp in const [
+        {
+          'account': 'user',
+          'digits': 6,
+          'period': 30,
+          'algorithm': 'SHA1',
+          'tokenType': 'TOTP',
+        },
+        {
+          'account': 'user',
+          'issuer': 'Steam',
+          'digits': 6,
+          'period': 30,
+          'algorithm': 'SHA1',
+          'tokenType': 'TOTP',
+        },
+      ]) {
+        final result =
+            parser.parse(_export([_service(name: 'Steam', otp: otp)]));
+        final a = result.accounts.single;
+        expect(a.type, OtpType.totp);
+        expect(a.digits, 6);
+      }
     });
 
-    test('otp.issuer "Steam" on a TOTP still promotes to a Steam token', () {
+    test('HOTP still accepts the defensive "initialCounter" field name', () {
+      // Not written by the official exporter (BackupService.Otp only has
+      // `counter`); kept for third-party writers that claim the 2FAS shape.
       final result = parser.parse(_export([
-        _service(
-          name: 'Valve',
-          otp: const {
-            'account': 'user',
-            'issuer': 'Steam',
-            'digits': 6,
-            'period': 30,
-            'algorithm': 'SHA1',
-            'tokenType': 'TOTP',
-          },
-        ),
+        _service(otp: const {
+          'account': 'a',
+          'tokenType': 'HOTP',
+          'initialCounter': 12,
+        }),
       ]));
-      final a = result.accounts.single;
-      expect(a.type, OtpType.steam);
-      expect(a.digits, 5);
+      expect(result.accounts.single.type, OtpType.hotp);
+      expect(result.accounts.single.counter, 12);
+    });
+
+    test('B3 — SHA224/SHA384/MD5 are unsupportedType, not invalidFields', () {
+      for (final algorithm in const ['SHA224', 'sha-384', 'MD5']) {
+        final result = parser.parse(_export([
+          _service(otp: {
+            'account': 'a',
+            'tokenType': 'TOTP',
+            'algorithm': algorithm,
+          }),
+        ]));
+        expect(result.accounts, isEmpty);
+        expect(result.skipped.single.reason, SkipReason.unsupportedType);
+        expect(result.skipped.single.detail,
+            'algorithm=${algorithm.toUpperCase().replaceAll('-', '')}');
+      }
+    });
+
+    test('B3 — an algorithm outside the 2FAS enum stays invalidFields', () {
+      final result = parser.parse(_export([
+        _service(otp: const {
+          'account': 'a',
+          'tokenType': 'TOTP',
+          'algorithm': 'BLAKE2B',
+        }),
+      ]));
+      expect(result.skipped.single.reason, SkipReason.invalidFields);
+      expect(result.skipped.single.detail, contains('BLAKE2B'));
+    });
+
+    test('B4 — name, otp.issuer and otp.account are capped at 512 bytes', () {
+      final long = 'A' * 513;
+      final cases = <String, Map<String, dynamic>>{
+        'issuer': {'account': 'a', 'issuer': long, 'tokenType': 'TOTP'},
+        'account': {'account': long, 'tokenType': 'TOTP'},
+      };
+      cases.forEach((field, otp) {
+        final result = parser.parse(_export([_service(otp: otp)]));
+        expect(result.accounts, isEmpty, reason: field);
+        expect(result.skipped.single.reason, SkipReason.invalidFields);
+        expect(result.skipped.single.detail, contains(field));
+      });
+
+      final byName = parser.parse(_export([
+        _service(name: long, otp: const {'account': 'a', 'tokenType': 'TOTP'}),
+      ]));
+      expect(byName.accounts, isEmpty);
+      expect(byName.skipped.single.detail, contains('name'));
+    });
+
+    test('B4 — the ceiling counts bytes, not code units', () {
+      final result = parser.parse(_export([
+        _service(otp: {'account': 'ş' * 300, 'tokenType': 'TOTP'}),
+      ]));
+      expect(result.accounts, isEmpty);
+      expect(result.skipped.single.reason, SkipReason.invalidFields);
+
+      final ok = parser.parse(_export([
+        _service(otp: {'account': 'ş' * 256, 'tokenType': 'TOTP'}),
+      ]));
+      expect(ok.accounts.single.accountName, 'ş' * 256);
+    });
+
+    test('B4 — an oversized label is clamped before it reaches the preview',
+        () {
+      final result = parser.parse(_export([
+        _service(otp: {'account': 'C' * 5000, 'tokenType': 'TOTP'}),
+      ]));
+      final label = result.skipped.single.label!;
+      expect(label.length, lessThan(200));
+      expect(label, contains('…'));
+    });
+
+    test('B6 — a redacted link secret gets a 2FAS-specific detail', () {
+      final result = parser.parse(_export([
+        const {
+          'name': 'Redacted',
+          'otp': {
+            'account': 'user',
+            'tokenType': 'TOTP',
+            'link':
+                'otpauth://totp/Redacted:user?secret=%5Bhidden%5D&issuer=X',
+          },
+        },
+      ]));
+      expect(result.accounts, isEmpty);
+      final skip = result.skipped.single;
+      expect(skip.reason, SkipReason.invalidSecret);
+      expect(skip.detail, contains('2FAS'));
+      expect(skip.detail, contains('re-export'));
+      // The placeholder is not a secret, but the rule still holds: nothing that
+      // sat in the secret position is echoed back.
+      expect(skip.detail, isNot(contains('hidden')));
     });
 
     test('tokenType is case-insensitive', () {

@@ -14,7 +14,9 @@
         "issuer": "GitHub",
         "note": "",
         "favorite": false,
-        "icon": null,
+        "icon": "iVBORw0KGgoAAAANSUhEUg==",
+        "icon_mime": "image/png",
+        "icon_hash": "2b1f0d3c4a5e6f708192a3b4c5d6e7f8",
         "info": {
           "secret": "JBSWY3DPEHPK3PXP",
           "algo": "SHA1",
