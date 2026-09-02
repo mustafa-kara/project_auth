@@ -242,7 +242,9 @@ yapılabilen işine iki alternatif giriş, artı içe aktarılan grupların koru
   yeniden şifreleme/push dalgası yok). Gerekçeler: [CRYPTO.md §9](CRYPTO.md).
 - **`VaultCubit`** — `editMetadata` (yalnız issuer/hesap adı/etiket; secret ve kod geometrisi parametre
   olarak dahi alınmaz), `renameTag`, `deleteTag`, türetilmiş `allTags`. Üçü de `addAll` kalıbını izler: tüm
-  süpürme için TEK persist + TEK push, no-op'ta hiçbir yazma ve hiçbir push yok.
+  süpürme için TEK persist + TEK push, no-op'ta hiçbir yazma ve hiçbir push yok. `editMetadata`'da BOŞ issuer
+  "issuer yok" demektir (sonuç `null`, `""` değil): düzenleme sheet'i issuer'sız token için boş alan gösterip
+  o boşluğu geri yollar, aksi hâlde hiç dokunulmamış token yeniden şifrelenir ve push edilirdi.
 - **`presentation/widgets/tag_chips_bar.dart`** — arama alanının altında yatay çip şeridi. **Tek seçim ve
   oturum içi**: filtre kalıcı DEĞİL, çünkü yeniden açılışta hayatta kalan bir filtre kullanıcının "token'ım
   kayboldu" sanmasının klasik yoludur. Vault'ta hiç etiket yoksa şerit hiç render edilmez. Filtre `VaultCubit`
@@ -252,9 +254,10 @@ yapılabilen işine iki alternatif giriş, artı içe aktarılan grupların koru
   eylem sheet'i açar (Düzenle / Etiketler / Sil), silme her yolda onaylıdır. Düzenleme sheet'i secret'a
   hiç dokunmaz. Etiket yöneticisi yeniden adlandırma/silmeyi tüm vault'a uygular ve kaç kodu etkilediğini
   önden söyler; silinen yalnızca ETİKETtir, token değil.
-- **`OtpCard` sözleşmesi genişledi (geriye uyumlu).** Yeni iki opsiyonel callback:
-  - `onLongPress` — verilmezse kart ESKİ davranışını korur (uzun basış = `onDelete`). `VaultPage` bunu
-    eylem sheet'ine bağlar, yani üründe uzun basış artık doğrudan silmez.
+- **`OtpCard` sözleşmesi genişledi.** Yeni iki opsiyonel callback:
+  - `onLongPress` — `VaultPage` bunu eylem sheet'ine bağlar, yani üründe uzun basış artık doğrudan
+    silmez. Verilmezse uzun basış HİÇBİR ŞEY yapmaz: `onDelete`'e geri düşüş YOK, böylece onaysız silme
+    yolu handler'ı unutan bir çağrı yerinden geri sızamaz.
   - `onEdit` — düzenleme sheet'ini açar. `onLongPress`'in içine katlanmamasının sebebi erişilebilirlik:
     ekran okuyucu kullanıcısı "uzun basamaz", bu yüzden 'Düzenle' ve 'Sil'
     `customSemanticsActions` olarak da yayınlanır. Kartın birincil `label`'ı ve tek-tap "kodu kopyala"

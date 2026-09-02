@@ -233,6 +233,27 @@ void main() {
     expect(find.text('Kodu düzenle'), findsNothing, reason: 'sheet kapanmalı');
   });
 
+  // Sheet issuer'ı olmayan bir token için BOŞ metin alanı gösterir, dolayısıyla
+  // dokunulmadan kaydedince `issuer: ''` gönderir. Bu SÖZLEŞME: `''`'i "issuer
+  // yok" olarak okuyup no-op'a çevirmek `VaultCubit.editMetadata`'nın işi
+  // (bkz. vault_cubit_tags_test.dart) — sheet'in kendi normalizasyonu yok.
+  testWidgets('issuer\'sız hesap: dokunmadan Kaydet → issuer boş string gider',
+      (tester) async {
+    final cubit = _EditCubit(_FakeRepo([]))..load();
+    addTearDown(cubit.close);
+    await tester.pumpAndSettle();
+    final account = _acc(issuer: null);
+    await _open(tester, cubit, account);
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Kaydet'));
+    await tester.pumpAndSettle();
+
+    expect(cubit.calls, 1);
+    expect(cubit.lastIssuer, '');
+    expect(cubit.lastAccountName, 'octocat@example.com');
+    expect(cubit.lastTags, isEmpty);
+  });
+
   testWidgets('yazma hatası → "Kaydedilemedi: ..." + sheet AÇIK kalır',
       (tester) async {
     final cubit = _EditCubit(_FakeRepo([]), failWith: StateError('disk dolu'))

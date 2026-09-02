@@ -157,6 +157,58 @@ void main() {
       expect(tagsOf(export), ['Work']);
     });
 
+    // 2FAS writes uuid strings, but exports in the wild (and hand-edited files)
+    // carry plain integer ids. Both halves are compared in their STRING form,
+    // so a `7` that fails to match a `"7"` cannot silently cost the token its
+    // group. The NAME is not given the same tolerance: a number is not a label.
+    test('an integer group id matches an integer groupId', () {
+      final export = exportWithGroups([
+        {'id': 7, 'name': 'Work'},
+      ], [
+        {..._service(), 'groupId': 7},
+      ]);
+      expect(tagsOf(export), ['Work']);
+    });
+
+    test('an integer groupId matches a string group id', () {
+      final export = exportWithGroups([
+        group('7', 'Work'),
+      ], [
+        {..._service(), 'groupId': 7},
+      ]);
+      expect(tagsOf(export), ['Work']);
+    });
+
+    test('a string groupId matches an integer group id', () {
+      final export = exportWithGroups([
+        {'id': 7, 'name': 'Work'},
+      ], [
+        {..._service(), 'groupId': ' 7 '},
+      ]);
+      expect(tagsOf(export), ['Work']);
+    });
+
+    test('a non-scalar groupId is still no group at all', () {
+      for (final bad in <Object?>[true, <String>[], <String, Object?>{}]) {
+        final export = exportWithGroups([
+          {'id': 7, 'name': 'Work'},
+          group('true', 'Bool'),
+        ], [
+          {..._service(), 'groupId': bad},
+        ]);
+        expect(tagsOf(export), isEmpty, reason: 'groupId: $bad');
+      }
+    });
+
+    test('a numeric group NAME is still rejected', () {
+      final export = exportWithGroups([
+        {'id': 7, 'name': 7},
+      ], [
+        {..._service(), 'groupId': 7},
+      ]);
+      expect(tagsOf(export), isEmpty);
+    });
+
     test('a 40-character group name is clipped to 32 runes', () {
       final export = exportWithGroups([
         group('g1', 'g' * 40),
@@ -197,13 +249,19 @@ void main() {
           ],
           'schemaVersion': 4,
         },
-        // groupId is not a string
+        // groupId is a number that matches nothing in the index
         exportWithGroups([
           group('g1', 'Work'),
         ], [
           {..._service(), 'groupId': 7},
         ]),
-        // group rows are missing halves / wrongly typed
+        // groupId is a type that can never be an id
+        exportWithGroups([
+          group('g1', 'Work'),
+        ], [
+          {..._service(), 'groupId': <String>['g1']},
+        ]),
+        // group rows are missing halves / wrongly typed / unmatched
         exportWithGroups([
           {'id': 'g1'},
           {'name': 'Work'},

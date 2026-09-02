@@ -198,14 +198,19 @@ class TwoFasParser implements ImportParser {
     }
   }
 
-  /// Root `groups` → `id` → `name`. Rows missing either half, or carrying the
-  /// wrong type, are skipped; the first row wins a duplicated id.
+  /// Root `groups` → `id` → `name`. Rows missing either half are skipped; the
+  /// first row wins a duplicated id.
+  ///
+  /// Ids are keyed by their STRING form: 2FAS writes uuids, but exports in the
+  /// wild (and hand-edited files) also carry plain integer ids, and a `7` that
+  /// failed to match `"7"` would silently cost the token its group. The name
+  /// still has to be a real String — a number is not a label.
   Map<String, String> _groupNamesById(Object? rawGroups) {
     if (rawGroups is! List) return const {};
     final index = <String, String>{};
     for (final raw in rawGroups) {
       if (raw is! Map) continue;
-      final id = (_string(raw['id']) ?? '').trim();
+      final id = _groupId(raw['id']);
       final name = (_string(raw['name']) ?? '').trim();
       if (id.isEmpty || name.isEmpty) continue;
       index.putIfAbsent(id, () => name);
@@ -213,11 +218,20 @@ class TwoFasParser implements ImportParser {
     return index;
   }
 
+  /// A group id in its comparable form: Strings verbatim, numbers via
+  /// [Object.toString], anything else (map, list, bool, null) → empty, i.e. no
+  /// group. Trimmed at both ends so `" 7 "` and `7` land on the same key.
+  String _groupId(Object? value) {
+    if (value is String) return value.trim();
+    if (value is num) return value.toString().trim();
+    return '';
+  }
+
   /// The single group NAME of one service, or nothing. Never throws and never
   /// skips the service.
   List<String> _tagsOf(
       Map<Object?, Object?> service, Map<String, String> groups) {
-    final id = (_string(service['groupId']) ?? '').trim();
+    final id = _groupId(service['groupId']);
     if (id.isEmpty) return const [];
     final name = groups[id];
     return name == null ? const [] : <String>[name];

@@ -407,6 +407,14 @@ class VaultCubit extends Cubit<VaultState> {
   /// edit that changes nothing after normalization → NO write and NO push
   /// (risk R4: a no-op must not cost a re-encrypt or a sync round trip).
   ///
+  /// An [issuer] that is blank (or trims to blank) CLEARS the issuer, i.e. it
+  /// lands as `null`, never as `""`. An edit form shows an empty "Servis" field
+  /// for a token that has no issuer and hands that `""` straight back, so
+  /// without this normalization an untouched issuer-less token would compare
+  /// unequal (`null != ""`), be re-encrypted, be pushed, and would carry
+  /// `"issuer": ""` inside the blob forever. Blank and absent are the same
+  /// thing here; only a `null` ARGUMENT means "do not touch".
+  ///
   /// Follows the [addAll] shape: `_awaitLoaded` → `_sequence` →
   /// `_guardIntegrity` → single `_emitAndPersist` → single `_pushAfterMutation`.
   Future<void> editMetadata({
@@ -421,13 +429,16 @@ class VaultCubit extends Cubit<VaultState> {
       final index = state.accounts.indexWhere((a) => a.id == id);
       if (index < 0) return; // unknown id → no write, no push
       final current = state.accounts[index];
+      // Blank issuer → CLEAR (null), so the comparison below sees a real no-op
+      // for an issuer-less token whose form field was never touched.
+      var draft = current.copyWith(accountName: accountName, tags: tags);
+      if (issuer != null) {
+        final trimmed = issuer.trim();
+        draft = _withIssuer(draft, trimmed.isEmpty ? null : trimmed);
+      }
       // Canonicalization runs on the RESULT, exactly like `add`, so an edited
       // record and an imported one reach `dedupeKey` in the same shape (A2).
-      final edited = _canonicalize(current.copyWith(
-        issuer: issuer,
-        accountName: accountName,
-        tags: tags,
-      ));
+      final edited = _canonicalize(draft);
       // Equality covers normalization: `['iş', 'iş ']` and `['iş']` build the
       // same account, so re-saving the same chips is a no-op (R4). Note this
       // leans on `tags` being in `OtpAccount.props` (K3) — without it a
@@ -440,6 +451,23 @@ class VaultCubit extends Cubit<VaultState> {
     });
   }
 
+  /// Returns [account] with its issuer set to [issuer], including `null`.
+  ///
+  /// `OtpAccount.copyWith` reads `null` as "keep this field", so it can set an
+  /// issuer but never CLEAR one. Rebuilding through the account's own JSON form
+  /// — the exact shape the vault persists — moves every other field across
+  /// without this method having to re-list them, so a field added to the model
+  /// later cannot be silently dropped by an edit.
+  OtpAccount _withIssuer(OtpAccount account, String? issuer) {
+    final json = Map<String, dynamic>.of(account.toJson());
+    if (issuer == null) {
+      json.remove('issuer'); // absent == no issuer (`toJson` omits it too)
+    } else {
+      json['issuer'] = issuer;
+    }
+    return OtpAccount.fromJson(json);
+  }
+
   /// Phase 5 Patch 3 — renames [from] to [to] across EVERY account carrying it.
   ///
   /// Filled by W1.
@@ -448,8 +476,11 @@ class VaultCubit extends Cubit<VaultState> {
   /// one per account (risk R4) — a rename can touch every token in the vault.
   ///
   /// Collision is a MERGE, not an error: if an account already has [to], the
-  /// renamed entry folds into it via `OtpAccount.normalizeTags` (first
-  /// occurrence wins), so the account's existing tag order is preserved.
+  /// renamed entry folds into it via `OtpAccount.normalizeTags`, which keeps
+  /// the FIRST occurrence. The single surviving tag therefore lands in the slot
+  /// of whichever of the two came first — the RENAMED one's slot when [from]
+  /// sat before [to], so the merged tag can move up the account's list. The
+  /// relative order of every other tag is untouched.
   ///
   /// No-op rules — nothing is written or pushed when: [to] normalizes to empty,
   /// [from] equals [to] after normalization, or no account carries [from].
@@ -476,8 +507,9 @@ class VaultCubit extends Cubit<VaultState> {
         }
         changed = true;
         // Collision is a MERGE: the mapped list can hold `target` twice and
-        // `normalizeTags` keeps the FIRST occurrence, so an account that
-        // already carried `target` keeps it in its original position.
+        // `normalizeTags` keeps the FIRST occurrence — so the survivor sits
+        // where the earlier of the two sat, which is the renamed tag's own slot
+        // when it came first.
         next.add(account.copyWith(tags: [
           for (final tag in account.tags) tag == source ? target : tag,
         ]));

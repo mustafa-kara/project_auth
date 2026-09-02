@@ -11,7 +11,7 @@ Authenticator transfer QR that do not need a working camera — a **pasted `otpa
 
 **No Supabase schema change. No crypto change** — no new primitive, no new AAD, no record-version bump, no backup
 envelope bump; docs/CRYPTO.md §4's AAD table is byte-for-byte the same table it was before this patch. host
-**996/996 → 1154/1154**, integration unchanged (**50**, not run on a device this round), `flutter analyze
+**996/996 → 1165/1165**, integration unchanged (**50**, not run on a device this round), `flutter analyze
 --fatal-infos` clean.
 
 ### The model decision: tags live inside the encrypted blob, and nothing around them moves (K1–K6)
@@ -79,15 +79,16 @@ and end-to-end (grouped Aegis file → preview → `addAll` → export → re-im
   on purpose — a filter that survives a restart is the classic way a user concludes a token has disappeared. The
   strip renders nothing at all when the vault has no tags, a chip is an **exact** membership test (picking "iş"
   must not also bring "işlem"), and the search box now also matches tag text, AND-ed with the chip. A selection
-  that stops existing (renamed or deleted, here or on another device) is dropped on the next build rather than
-  left hiding codes.
+  that stops existing (renamed or deleted, here or on another device) stops filtering on the very next build and
+  is then cleared from state in a post-frame callback, so it cannot come back if the tag does.
 - **BEHAVIOUR CHANGE — a long press on a card no longer deletes it.** It used to call `onDelete` directly, with no
   confirmation: a mis-touch while scrolling silently cost the user access to that account's 2FA. It now opens
   `TokenActionSheet` (Kodu düzenle / Etiketleri düzenle / Sil), and **every** delete path — the sheet entry and the
   new assistive action alike — goes through the confirmation dialog first. Anyone with muscle memory for
   "long-press to delete" now gets one extra tap; that is the point.
-- **`OtpCard` gained `onLongPress` and `onEdit`**, both optional and both backwards compatible (a card given
-  neither behaves exactly as before). `onEdit` is separate rather than folded into the long press for an
+- **`OtpCard` gained `onLongPress` and `onEdit`**, both optional. A card given no `onLongPress` does **nothing**
+  on a long press — there is deliberately no fallback to `onDelete`, so the unconfirmed delete path cannot come
+  back through a call site that simply forgot the handler. `onEdit` is separate rather than folded into the long press for an
   accessibility reason: a screen-reader user cannot "long press", so 'Düzenle' and 'Sil' are also published as
   `customSemanticsActions`. The card's primary label and its single-tap "copy the code" are untouched — this only
   *adds* actions.
@@ -167,7 +168,32 @@ and end-to-end (grouped Aegis file → preview → `addAll` → export → re-im
 - Tag ordering within an account is the **user's** order, not alphabetical; only the filter strip re-orders (by
   usage).
 
-### Tests (996 → 1154 host)
+### Review follow-ups
+
+Applied on top of the patch, before the merge. No schema, crypto or user-visible copy change.
+
+- **`editMetadata` treats a blank issuer as "no issuer", not as `""`.** The edit sheet shows an empty "Servis"
+  field for a token that has none and hands that `""` straight back, so `null != ""` made an *untouched* token
+  re-encrypt, push and carry `"issuer": ""` inside its blob. Blank now clears (lands as `null`), and the
+  no-change comparison runs after that normalization — so the same edit is a real no-op. Clearing an issuer that
+  *did* exist still works, and now produces `null` rather than an empty string.
+- **`OtpCard.onLongPress` no longer falls back to `onDelete`.** The fallback was dead (the only call site always
+  passes a handler) but it kept an unconfirmed delete path alive in the widget; a card given no handler now does
+  nothing on long press, and every delete path is confirmed by the caller.
+- **The vault's tag filter clears its own field, not just its render.** A selection whose tag disappeared was
+  ignored per build but kept in state, so the filter silently came back if the tag did (a sync pull, an undone
+  rename). It is now dropped in a post-frame callback.
+- **2FAS `groupId` is matched in string form**, so an export carrying integer group ids (hand-edited files, older
+  writers) no longer loses the tag. Group *names* keep their String-only rule — a number is not a label.
+- Docs corrected where they overstated: `renameTag`'s merge does *not* always preserve the account's tag order
+  (the survivor takes the earlier slot, which is the renamed tag's own when it came first); `EditTokenSheet`'s
+  tag counter limits **graphemes** while the model clips **runes**, so a ZWJ-emoji label can still be clipped
+  after the counter allows it (visible before save, costs a label and never a token — left as is); and
+  `_zeroFillSync` now states its worst case (16 MiB, ~200 ms of blocked UI isolate) and why it stays synchronous.
+- `scan_page_image_test` now **fails** if the picker cache sweep runs while the plaintext copy still exists,
+  pinning the shred-before-clear order the security note claims.
+
+### Tests (996 → 1165 host)
 
 New: `vault_cubit_tags_test`, `vault_page_tags_test`, `edit_token_sheet_test`, `tag_manager_sheet_test`,
 `token_action_sheet_test`, `otp_card_a11y_test`, `add_token_sheet_test` (the renamed and much-extended

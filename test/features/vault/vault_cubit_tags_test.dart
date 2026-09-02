@@ -194,6 +194,71 @@ void main() {
       expect(sync.pushCount, 0);
     });
 
+    // Düzenleme sheet'i issuer'ı olmayan bir token için BOŞ "Servis" alanı
+    // gösterir ve Kaydet'te o boşluğu `''` olarak geri yollar. `''` bir değer
+    // değil, "issuer yok" demektir: aksi hâlde `null != ''` yüzünden hiç
+    // dokunulmamış token yeniden şifrelenir, push edilir ve blob'a
+    // `"issuer": ""` yazılırdı (review P2).
+    test('issuer\'sız token\'a boş issuer → NE yazma NE push', () async {
+      final cubit = build([_acc('t1', tags: ['iş'])]);
+      await cubit.load();
+      repo.saveCount = 0;
+
+      await cubit.editMetadata(
+        id: 't1',
+        issuer: '',
+        accountName: 'me@example.com',
+        tags: ['iş'],
+      );
+
+      expect(repo.saveCount, 0);
+      expect(sync.pushCount, 0);
+      expect(repo.stored.single.issuer, isNull);
+    });
+
+    test('yalnız boşluktan ibaret issuer da no-op sayılır', () async {
+      final cubit = build([_acc('t1')]);
+      await cubit.load();
+      repo.saveCount = 0;
+
+      await cubit.editMetadata(id: 't1', issuer: '   ');
+
+      expect(repo.saveCount, 0);
+      expect(sync.pushCount, 0);
+    });
+
+    test('boş issuer VAR OLAN issuer\'ı temizler (sonuç null, "" değil)',
+        () async {
+      final cubit = build([_acc('t1', issuer: 'GitHub')]);
+      await cubit.load();
+      repo.saveCount = 0;
+
+      await cubit.editMetadata(id: 't1', issuer: '');
+
+      expect(repo.saveCount, 1);
+      expect(sync.pushCount, 1);
+      final stored = repo.stored.single;
+      expect(stored.issuer, isNull);
+      // K2 ile aynı kural: temizlenen alan JSON'a HİÇ yazılmaz.
+      expect(stored.toJson().containsKey('issuer'), isFalse);
+      // Temizleme başka hiçbir alanı düşürmez.
+      expect(stored.id, 't1');
+      expect(stored.secret, 'JBSWY3DPEHPK3PXP');
+      expect(stored.accountName, 'me@example.com');
+    });
+
+    test('issuer temizlenirken etiketler ve diğer alanlar korunur', () async {
+      final cubit = build([
+        _acc('t1', issuer: 'GitHub', tags: ['iş', 'ev']),
+      ]);
+      await cubit.load();
+
+      await cubit.editMetadata(id: 't1', issuer: '  ');
+
+      expect(repo.stored.single.issuer, isNull);
+      expect(repo.stored.single.tags, ['iş', 'ev']);
+    });
+
     test('hiçbir argüman verilmezse de no-op', () async {
       final cubit = build([_acc('t1', tags: ['iş'])]);
       await cubit.load();

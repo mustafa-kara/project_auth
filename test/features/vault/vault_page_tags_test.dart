@@ -296,6 +296,33 @@ void main() {
       expect(find.byType(OtpCard), findsOneWidget);
       expect(find.text('bob@example.com'), findsOneWidget);
     });
+
+    testWidgets('kaybolan etiket geri gelirse filtre KENDİLİĞİNDEN dönmez',
+        (tester) async {
+      final vault = await _pump(tester, [
+        _acc('alice@example.com', tags: ['İş']),
+        _acc('bob@example.com'),
+      ]);
+      await tester.tap(find.widgetWithText(FilterChip, 'İş'));
+      await tester.pumpAndSettle();
+      expect(find.byType(OtpCard), findsOneWidget);
+
+      // Etiket başka bir cihazda yeniden adlandırıldı → seçim artık yok.
+      await vault.renameTag('İş', 'Ofis');
+      await tester.pumpAndSettle();
+      expect(find.byType(OtpCard), findsNWidgets(2));
+
+      // ...ve geri alındı. Seçim yalnız BUILD'de doğrulanıp alanda bayat
+      // kalsaydı 'İş' burada kendiliğinden yeniden seçilir ve kullanıcının
+      // baktığı kodlar sessizce yine gizlenirdi.
+      await vault.renameTag('Ofis', 'İş');
+      await tester.pumpAndSettle();
+      expect(find.byType(OtpCard), findsNWidgets(2));
+      expect(
+        tester.widget<FilterChip>(find.widgetWithText(FilterChip, 'İş')).selected,
+        isFalse,
+      );
+    });
   });
 
   group('a11y', () {

@@ -206,6 +206,18 @@ class _VaultPageState extends State<VaultPage> {
               (_selectedTag != null && tags.contains(_selectedTag))
                   ? _selectedTag
                   : null;
+          // The field itself is cleared AFTER the frame — never during build,
+          // which would be a setState inside build. Without this the stale name
+          // lives on in state: it would come back the moment the tag reappears
+          // (a sync pull, an undo of the rename) and silently re-hide codes the
+          // user is currently looking at.
+          if (_selectedTag != null && activeTag == null) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted && _selectedTag != null) {
+                setState(() => _selectedTag = null);
+              }
+            });
+          }
           final visible = _filter(state.accounts, activeTag);
           // Kısmi bozulma uyarı banner'ı (AppBanner, warning) — sağlam token'lar
           // yine de gösterilir (Design.md §11 dürüst hata, §14.10).

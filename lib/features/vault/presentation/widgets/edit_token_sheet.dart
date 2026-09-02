@@ -46,7 +46,15 @@ class _EditTokenSheetState extends State<EditTokenSheet> {
   final TextEditingController _tagInput = TextEditingController();
 
   /// Working copy of the tags, kept normalized at every step so the UI shows
-  /// exactly what would be persisted (no surprise trimming on save).
+  /// what would be persisted: every chip on screen has already been through
+  /// `OtpAccount.normalizeTags`, so saving cannot trim, drop or reorder them.
+  ///
+  /// One edge case survives, and only at the moment of typing: the field's
+  /// `maxLength` counts GRAPHEME clusters while the model clips at 32 RUNES, so
+  /// a label built out of ZWJ emoji or combining marks can pass the counter and
+  /// still be clipped when it becomes a chip. It is visible (the chip shows the
+  /// clipped text before anything is saved) and it costs a label, never a
+  /// token, so the counter is left as the cheap approximation it is.
   late List<String> _tags = List<String>.of(widget.account.tags);
 
   String? _error;
@@ -204,9 +212,13 @@ class _EditTokenSheetState extends State<EditTokenSheet> {
   }
 
   /// Tag entry. A raw [TextField] rather than `AppTextField` because this one
-  /// needs `maxLength` (the model's 32-rune ceiling, surfaced BEFORE the value
-  /// is silently clipped) and an `enabled` flag for the 8-tag cap; it still
-  /// inherits the shared `inputDecorationTheme`.
+  /// needs `maxLength` (the model's 32-rune ceiling, surfaced as a counter
+  /// BEFORE the value is silently clipped) and an `enabled` flag for the 8-tag
+  /// cap; it still inherits the shared `inputDecorationTheme`.
+  ///
+  /// The counter is an approximation: `maxLength` limits GRAPHEME clusters,
+  /// `OtpAccount.maxTagRunes` limits runes, so the two disagree on ZWJ emoji
+  /// and combining marks — see the note on [_tags].
   Widget _tagField(ThemeData theme) => TextField(
         controller: _tagInput,
         enabled: !_atCap && !_saving,

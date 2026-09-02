@@ -77,10 +77,10 @@ void main() {
   });
 
   // --- Faz 5 Patch 3 — uzun basış artık DOĞRUDAN SİLMEZ (risk R10). Kart bir
-  // `onLongPress` alırsa onu çağırır (VaultPage eylem sheet'ini açar); geriye
-  // dönük olarak `onLongPress` verilmediğinde eski davranış korunur. Ekran
-  // okuyucu kullanıcısı uzun basamaz → 'Düzenle'/'Sil' customSemanticsActions
-  // olarak yayınlanır. ---
+  // `onLongPress` alırsa onu çağırır (VaultPage eylem sheet'ini açar);
+  // verilmediğinde uzun basış HİÇBİR ŞEY yapmaz — `onDelete`'e geri düşüş YOK,
+  // yani onaysız silme yolu koda geri sızamaz. Ekran okuyucu kullanıcısı uzun
+  // basamaz → 'Düzenle'/'Sil' customSemanticsActions olarak yayınlanır. ---
   group('uzun basış + assistive eylemler', () {
     testWidgets('onLongPress verildiğinde silme ÇAĞRILMAZ', (tester) async {
       var longPressed = 0;
@@ -99,7 +99,7 @@ void main() {
       expect(deleted, 0, reason: 'onaysız silme yolu kapandı');
     });
 
-    testWidgets('onLongPress yoksa eski davranış korunur (onDelete)',
+    testWidgets('onLongPress yoksa uzun basış HİÇBİR ŞEY yapmaz (onDelete DEĞİL)',
         (tester) async {
       var deleted = 0;
       await tester.pumpWidget(_host(OtpCard(
@@ -111,7 +111,12 @@ void main() {
       await tester.longPress(find.byType(OtpCard));
       await tester.pump();
 
-      expect(deleted, 1);
+      expect(
+        deleted,
+        0,
+        reason: 'onDelete geri düşüşü kaldırıldı → onaysız silme yolu yok',
+      );
+      expect(tester.takeException(), isNull);
     });
 
     testWidgets('customSemanticsActions: Düzenle + Sil', (tester) async {

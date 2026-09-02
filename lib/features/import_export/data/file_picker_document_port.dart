@@ -196,6 +196,15 @@ class FilePickerDocumentPort implements DocumentPort {
   }
 
   /// [_zeroFill]'s synchronous twin — see [shredCachedCopy] for why.
+  ///
+  /// WORST CASE it blocks the UI isolate for the whole overwrite. The size is
+  /// capped by `QrImageLimits.maxBytes` (16 MiB), and a 16 MiB sequential write
+  /// to app-sandbox flash is on the order of ~200 ms on the slow devices this
+  /// app targets — a jank of a few frames, once, on a path the user has just
+  /// spent seconds in the system photo picker. Accepted knowingly: making it
+  /// async would let [clearPickerCache] unlink the file mid-overwrite, or let
+  /// the screen be disposed with a plaintext picture of a TOTP seed still
+  /// readable on disk, which is the exact thing this guards against.
   static void _zeroFillSync(File file) {
     final length = file.lengthSync();
     if (length <= 0) return;

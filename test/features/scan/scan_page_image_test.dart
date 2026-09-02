@@ -95,8 +95,18 @@ class _FakeDocuments implements DocumentPort {
         path: path, name: 'qr.png', sizeBytes: File(path).lengthSync());
   }
 
+  /// Sıra kanıtı: genel temizlik çağrıldığında seçicinin bıraktığı nüsha ARTIK
+  /// olmamalı. `shredCachedCopy` sıfırla-sonra-sil yapar; ters sırada
+  /// `clearPickerCache` dosyayı ÜZERİNE YAZMADAN unlink ederdi ve düz baytlar
+  /// diskte kalırdı (Patch 3 güvenlik hijyeni).
   @override
-  Future<void> clearPickerCache() async => clears++;
+  Future<void> clearPickerCache() async {
+    clears++;
+    final path = imagePath;
+    if (path != null && File(path).existsSync()) {
+      fail('shred must run before clearPickerCache');
+    }
+  }
 
   @override
   noSuchMethod(Invocation invocation) =>
