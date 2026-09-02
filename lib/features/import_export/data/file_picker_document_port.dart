@@ -6,17 +6,17 @@
 ///   SAF and iOS' UTType tables disagree about `application/json`, and a filter
 ///   that does not match hides the very file the user came for. The format is
 ///   validated by content (`ImportService.detect`) rather than by extension.
-/// - `withData: true` hands us the bytes directly, so no storage permission and
-///   no `path` that Android may refuse. It does NOT avoid a cached copy: the
-///   plugin still materialises the picked document in the app's own cache
+/// - `pickFile()` (file_picker 12) returns a single [PlatformFile] whose bytes
+///   are read on demand via `readAsBytes()`. The read is served from the app's
+///   OWN cached copy of the document — the plugin materialises every pick there
 ///   (iOS copies it into `NSTemporaryDirectory()`, Android into
-///   `cacheDir/file_picker/`) and never removes it, so [pickJson] shreds that
-///   copy itself — see [_clearPickerCache].
-/// - `saveFile` leaves a leftover of its own on iOS, in a directory
-///   `clearTemporaryFiles()` does NOT touch, so [saveJson] shreds that one —
+///   `cacheDir/file_picker/`) and never removes it — so no storage permission
+///   and no `path` the OS may refuse are needed, but a PLAINTEXT copy is left
+///   behind and [pickJson] shreds it — see [_clearPickerCache].
+/// - `saveFile` leaves a leftover of its own on iOS; [saveJson] shreds it —
 ///   see [FilePickerDocumentPort._shredIosSaveLeftover].
-/// - The size ceiling is enforced BEFORE the bytes are handed on, so a huge pick
-///   cannot be decoded into a String.
+/// - The size ceiling is enforced BEFORE the bytes are read, so a huge pick is
+///   never materialised in memory nor decoded into a String.
 ///
 /// SECURITY: opening either dialog backgrounds the app (Android emits `paused`),
 /// which would normally wipe the master key. Callers MUST wrap every call in
@@ -53,30 +53,30 @@ class FilePickerDocumentPort implements DocumentPort {
 
   /// Picks one document and returns its bytes.
   ///
-  /// [maxBytes] is a UX guard, not a memory guard: the plugin has already read
-  /// the whole document into the cached copy and into `bytes` by the time this
-  /// method sees it, so the ceiling cannot be applied *before* the bytes exist.
-  /// It stops an oversized file from being decoded into a String and parsed.
+  /// [maxBytes] is checked twice. `length()` answers from the size the platform
+  /// reported for the pick and only stats the cached copy as a fallback, so it
+  /// is cheap and rejects an oversized document BEFORE `readAsBytes()` pulls it
+  /// into memory. The byte payload is re-checked because some platforms report
+  /// 0 for unknown-length streams; that second check is what stops an oversized
+  /// file from being decoded into a String and parsed.
   ///
   /// The cached copy is cleared on EVERY exit — success, cancel and throw.
   Future<PickedDocument?> _pick({required int maxBytes}) async {
-    final result = await FilePicker.pickFiles(
-      type: FileType.any,
-      allowMultiple: false,
-      withData: true,
-    );
-    if (result == null || result.files.isEmpty) return null; // user cancelled
+    final file = await FilePicker.pickFile(type: FileType.any);
+    if (file == null) return null; // user cancelled
 
-    final file = result.files.first;
-    // `size` is reported by the platform and is cheap to check; the byte payload
-    // is checked too because some platforms report 0 for unknown-length streams.
-    final bytes = file.bytes;
-    if (file.size > maxBytes) {
-      throw ImportFileTooLargeException(file.size, maxBytes);
+    final reportedSize = await file.length();
+    if (reportedSize > maxBytes) {
+      throw ImportFileTooLargeException(reportedSize, maxBytes);
     }
-    if (bytes == null) {
-      // withData was requested, so a null payload means the platform could not
-      // read the document at all (revoked URI, unreadable provider).
+
+    final Uint8List bytes;
+    try {
+      bytes = await file.readAsBytes();
+    } catch (_) {
+      // The read is served from the plugin's own cached copy, so a failure here
+      // means the platform could not produce the document at all (revoked URI,
+      // unreadable provider, cache already reclaimed).
       throw const MalformedImportFileException('file contents unavailable');
     }
     if (bytes.length > maxBytes) {
@@ -99,11 +99,13 @@ class FilePickerDocumentPort implements DocumentPort {
 
   /// Deletes the plaintext copy `file_picker` leaves in the app cache.
   ///
-  /// Verified against file_picker 11.0.3: `FilePicker.clearTemporaryFiles()` is
-  /// a static that forwards to the platform's `clear` channel call, implemented
-  /// on Android and iOS only. Every failure is swallowed — desktop/web throw
-  /// `UnimplementedError` from the platform interface, and a housekeeping error
-  /// must never turn a completed import into a user-facing failure.
+  /// Verified against file_picker 12.1.3: `FilePicker.clearTemporaryFiles()` is
+  /// a static that forwards to `FilePickerPlatform.instance.clearTemporaryFiles`,
+  /// which only `android_file_picker` and `file_picker_darwin` implement (both
+  /// as the `clear` call on the unchanged `miguelruivo.flutter.plugins.filepicker`
+  /// channel; the interface's own default is a no-op, so desktop and web simply
+  /// do nothing). Every failure is swallowed — a housekeeping error must never
+  /// turn a completed import into a user-facing failure.
   static Future<void> _clearPickerCache() async {
     try {
       await FilePicker.clearTemporaryFiles();
@@ -117,39 +119,53 @@ class FilePickerDocumentPort implements DocumentPort {
     required String fileName,
     required Uint8List bytes,
   }) async {
-    // `bytes` is mandatory on Android/iOS (the plugin writes the file itself) and
-    // is written at the chosen path on desktop — one call covers every platform,
-    // so no share_plus fallback is needed. It is NOT copy-free on iOS, though;
-    // see [_shredIosSaveLeftover].
-    String? path;
+    // `fileName` and `bytes` are required on every platform in file_picker 12:
+    // Android/iOS hand the payload to the native side, desktop writes it at the
+    // chosen path — one call covers every platform, so no share_plus fallback is
+    // needed. It is NOT copy-free on iOS, though; see [_shredIosSaveLeftover].
+    Uri? saved;
     try {
-      path = await FilePicker.saveFile(
-        fileName: fileName,
-        type: FileType.any,
-        bytes: bytes,
-      );
-      return path != null; // null = user cancelled the save dialog
+      saved = await FilePicker.saveFile(fileName: fileName, bytes: bytes);
+      return saved != null; // null = user cancelled the save dialog
     } finally {
-      await _shredIosSaveLeftover(fileName: fileName, savedPath: path);
+      await _shredIosSaveLeftover(
+        fileName: fileName,
+        savedPath: _localPath(saved),
+      );
     }
   }
 
-  /// Shreds the copy `saveFile` leaves in the app's iOS Documents directory.
+  /// The on-disk path behind a `saveFile` result, or null when the destination
+  /// is not a local file (`content:` on Android SAF, `blob:`/`data:` on web).
   ///
-  /// Verified against file_picker 11.0.3
-  /// (`ios/file_picker/Sources/file_picker/FilePickerPlugin.m`): the `save`
-  /// channel call lands in `saveFileWithName:fileType:initialDirectory:bytes:`,
-  /// which builds its destination as
-  /// `URLsForDirectory:NSDocumentDirectory ...[0]` +
-  /// `URLByAppendingPathComponent:fileName` — the caller's [fileName]
-  /// verbatim — writes the payload there, and only THEN presents
-  /// `UIDocumentPickerViewController` in `UIDocumentPickerModeExportToService`,
-  /// i.e. the picker COPIES it to wherever the user chose. Neither
-  /// `documentPicker:didPickDocumentsAtURLs:` (which just returns
-  /// `urls[0].path`) nor `documentPickerWasCancelled:` removes the source, and
-  /// `FilePickerUtils.clearTemporaryFiles` only walks `NSTemporaryDirectory()`
-  /// — so on iOS the whole backup file survives in Documents, which is part of
-  /// the iCloud/iTunes device backup.
+  /// file_picker 12 returns a [Uri] where 11.x returned a bare path string;
+  /// [Uri.toFilePath] throws on any other scheme, hence the guard.
+  static String? _localPath(Uri? uri) =>
+      (uri != null && uri.scheme == 'file') ? uri.toFilePath() : null;
+
+  /// Shreds a copy of the export left in the app's iOS Documents directory.
+  ///
+  /// HISTORY — this guarded a real leak in file_picker 11.0.3
+  /// (`ios/file_picker/Sources/file_picker/FilePickerPlugin.m`): its `save` call
+  /// wrote the payload to `NSDocumentDirectory/<fileName>` before exporting it
+  /// through `UIDocumentPickerViewController`, removed it on no path, and was
+  /// out of reach of `clearTemporaryFiles()` (which walks `NSTemporaryDirectory()`
+  /// only) — so the encrypted backup survived in Documents, which IS part of the
+  /// iCloud/iTunes device backup.
+  ///
+  /// STATUS on file_picker 12 — re-verified against `file_picker_darwin` 1.0.4
+  /// (`darwin/.../Sources/file_picker_darwin/IOSFilePickerHandler.swift`,
+  /// `saveFile(_:)`): the staging file is now built from
+  /// `URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(fileName)`,
+  /// i.e. Documents is no longer touched, and `NSTemporaryDirectory()` is both
+  /// excluded from device backups and reclaimed by the OS. The leftover is still
+  /// never deleted after the export, but it no longer lands anywhere that leaves
+  /// the device.
+  ///
+  /// This shredder is KEPT as defence in depth rather than reduced to a no-op:
+  /// it costs one `exists()` on a directory that should hold no such file, and
+  /// it is the only thing standing between a future upstream change of that
+  /// destination and a plaintext-path regression that nothing else would catch.
   ///
   /// Best effort by design: overwrite in place with zeros, then unlink, and
   /// swallow every failure — housekeeping must not turn a completed export into

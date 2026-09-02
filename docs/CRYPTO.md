@@ -493,10 +493,10 @@ directly. A weak backup password is refused **before** any Argon2id work.
   `Isolate.run` returns, but only when the GC gets round to it. Same class of exposure as the
   `String` above, accepted for the same reason; nothing about it is made worse by the isolate, which
   is why the responsiveness win is taken.
-- **iOS `saveFile` leaves a copy behind.** file_picker 11.0.3 implements the iOS save by writing the
+- **iOS `saveFile` leaves a copy behind.** file_picker 11.0.3 implemented the iOS save by writing the
   bytes into the app's `NSDocumentDirectory/<fileName>` and exporting *that* through
-  `UIDocumentPickerViewController`; neither the pick callback nor the cancel callback removes it,
-  and `clearTemporaryFiles()` only walks `NSTemporaryDirectory()`, so it never sees this file. The
+  `UIDocumentPickerViewController`; neither the pick callback nor the cancel callback removed it,
+  and `clearTemporaryFiles()` only walks `NSTemporaryDirectory()`, so it never saw this file. The
   app's Documents directory is part of the iCloud/iTunes device backup, so an encrypted vault backup
   the user thought they had put on a USB stick would also silently ride along to iCloud.
   `FilePickerDocumentPort.saveJson` therefore shreds it in a `finally`: zero-fill in place (opened
@@ -504,6 +504,14 @@ directly. A weak backup password is refused **before** any Argon2id work.
   best effort and every failure is swallowed — housekeeping must not turn a finished export into a
   user-facing error, and the file is encrypted regardless. No-op off iOS: Android writes through the
   SAF stream and desktop writes straight to the chosen path.
+  **Status after the file_picker 12 upgrade (2026-09-02):** re-read from the source
+  (`file_picker_darwin` 1.0.4, `IOSFilePickerHandler.swift` → `saveFile(_:)`), the staging file is now
+  built from `NSTemporaryDirectory()`, not Documents. It is still never deleted after the export, but
+  `NSTemporaryDirectory()` is excluded from device backups and reclaimed by the OS, and
+  `clearTemporaryFiles()` does reach it — so the leak this shredder was written for is gone upstream.
+  The shredder was **kept rather than reduced to a no-op**: it costs one `exists()` on a directory
+  that should now hold no such file, and it is the only thing that would catch the destination moving
+  back to a backed-up location in a future release.
   **Info.plist constraint that comes with this:** `UIFileSharingEnabled` and
   `LSSupportsOpeningDocumentsInPlace` must stay OUT of `ios/Runner/Info.plist`. Either one makes the
   app's own Documents directory visible in Files, at which point the user can pick it as the export
