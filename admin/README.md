@@ -25,14 +25,24 @@ Node 22+ gerekir (`engines.node: >=22`).
 
 | Değişken | Nerede | Açıklama |
 |---|---|---|
-| `NEXT_PUBLIC_SUPABASE_URL` | istemci + sunucu | Proje API URL'i |
-| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | istemci + sunucu | `sb_publishable_…` — düşük yetkili, RLS'e tabi |
+| `NEXT_PUBLIC_SUPABASE_URL` | sunucu (ön ek gereği herkese açık) | Proje API URL'i |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | sunucu (ön ek gereği herkese açık) | `sb_publishable_…` — düşük yetkili, RLS'e tabi |
 | `SUPABASE_SECRET_KEY` | **yalnız sunucu** | `sb_secret_…` — RLS bypass; asla tarayıcıya gitmez |
 | `DATABASE_URL` | **yalnız sunucu** | `admin_app` login rolü ile Postgres bağlantısı |
+| `SUPABASE_CA_CERT` | **yalnız sunucu** | Postgres CA sertifikası (PEM). Şemada **opsiyonel**, pratikte (a) yolu için **zorunlu** — §5 madde 5 |
 
-Şema doğrulaması `src/lib/env.ts` içinde zod ile yapılır ve **eski `eyJ…` JWT
-anahtarlarını reddeder** (prefix zorunlu). Doğrulama **tembeldir** (istek anında),
-bu yüzden `next build` gerçek sırlar olmadan da çalışır.
+> **`NEXT_PUBLIC_` ön eki hakkında:** bugün panelde **tarayıcı tarafı Supabase
+> istemcisi yoktur** (giriş/çıkış ve tüm okumalar sunucu bileşenleri ve server
+> action'lar üzerinden gider), bu yüzden bu iki değer pratikte yalnızca sunucuda
+> okunur ve istemci paketine hiç girmez. Ön ek yine de korunuyor: değerler tanımı
+> gereği herkese açıktır ve ileride bir istemci bileşeni gerekirse yeniden
+> adlandırma gerekmez. Zararsız ama yanıltıcı olabilir — bu yüzden yazıyoruz.
+
+Şema doğrulaması ikiye ayrılmıştır: herkese açık yarısı `src/lib/env.ts`,
+sunucuya özel yarısı `src/lib/env.server.ts` (`import 'server-only'`). İkisi de
+**eski `eyJ…` JWT anahtarlarını reddeder** (prefix zorunlu). Doğrulama
+**tembeldir** (istek anında), bu yüzden `next build` gerçek sırlar olmadan da
+çalışır.
 
 ### Operatör adımı — `admin_app` login rolü (bir kez, Dashboard SQL Editor'da)
 
@@ -66,7 +76,13 @@ Yollar **asla karıştırılmaz**.
 |---|---|---|---|
 | **(a)** Doğrudan Postgres | `DATABASE_URL` → `admin_app`, sonra `set local role admin_backend` | Yalnızca `select private.admin_global_stats()` — kullanıcılar arası **toplam** okuma | `src/lib/db.ts` (`getGlobalStats`) |
 | **(b)** Secret key | `SUPABASE_SECRET_KEY` (`sb_secret_…`) | `auth.admin.*` (listUsers / ban / delete) + `announcements`/`catalog_services`/`feature_flags`/`audit_logs` yazma | `src/lib/supabase/admin.ts` (`createAdminClient`), `src/lib/audit.ts` (`writeAudit`) |
-| **(c)** Kullanıcı oturumu | publishable key + `@supabase/ssr` çerezleri | Giriş/çıkış, admin-public tabloları okuma, `audit_logs` okuma (RLS `is_admin()`) | `src/lib/supabase/server.ts`, `src/lib/supabase/browser.ts`, `src/proxy.ts` |
+| **(c)** Kullanıcı oturumu | publishable key + `@supabase/ssr` çerezleri | Giriş/çıkış, admin-public tabloları okuma, `audit_logs` okuma (RLS `is_admin()`) | `src/lib/supabase/server.ts`, `src/proxy.ts` |
+
+**(c) yolu bugün tamamen sunucu tarafıdır.** Giriş, çıkış ve tüm okumalar sunucu
+bileşenleri / server action'lar üzerinden çerezli `createServerClient()` ile
+yapılır. `src/lib/supabase/browser.ts` hiçbir yerden import edilmiyordu; ölü kod
+olarak **silindi** (bir istemci bileşeni gerçekten gerekirse `createBrowserClient`
+ile bilinçli olarak geri eklenir).
 
 `private` şeması Data API'ye **exposed değildir**, bu yüzden (a) yolu `.rpc()` ile
 çağrılamaz — doğrudan Postgres bağlantısı zorunludur.
@@ -81,6 +97,13 @@ Yollar **asla karıştırılmaz**.
 - `requireAdmin()` iddiaları `auth.getClaims()` ile **JWKS imza doğrulaması**
   yaparak okur ve `app_metadata.admin === true` şartını arar. Bu claim'i
   `public.custom_access_token_hook` üretir (`public.admin_users` tablosundan).
+- **Tazelik kontrolü (fail-closed).** Claim token üretilirken damgalanır, yani
+  `public.admin_users`'tan satırı silmek **mevcut access token'ı geçersizleştirmez**.
+  Bu yüzden `requireAdmin()` claim'i doğruladıktan sonra secret-key istemcisiyle
+  `admin_users` üzerinde **bir PK araması** daha yapar; satır yoksa **veya okuma
+  hata verirse** `ForbiddenError` fırlatır. Maliyet: her panel isteği başına bir
+  indeksli arama (layout + sayfa + eylem hepsi `requireAdmin()` çağırır). Bunun
+  bilinçli takası §6 madde 12'de; yetki geri alma adımları §9'da.
 
 ---
 
@@ -89,13 +112,14 @@ Yollar **asla karıştırılmaz**.
 ```ts
 // src/lib/env.ts                (istemci + sunucu; tembel doğrulama)
 export const publicEnvSchema: ZodObject
-export const serverEnvSchema: ZodObject
-export type PublicEnv, ServerEnv
+export type PublicEnv
 export function getPublicEnv(): PublicEnv
-export function getServerEnv(): ServerEnv          // window varsa fırlatır
 
-// src/lib/supabase/browser.ts   (istemci)
-export function createClient(): SupabaseClient
+// src/lib/env.server.ts         ('server-only'; tembel doğrulama)
+export const serverEnvSchema: ZodObject             // + SUPABASE_CA_CERT (opsiyonel, PEM)
+export type ServerEnv
+export function normaliseCaCert(value): string | undefined   // literal \n → gerçek satır sonu
+export function getServerEnv(): ServerEnv           // window varsa ayrıca fırlatır
 
 // src/lib/supabase/server.ts    (sunucu; çerez tabanlı oturum)
 export async function createClient(): Promise<SupabaseClient>
@@ -108,13 +132,18 @@ export const globalStatsSchema: ZodObject
 export type GlobalStats = { total_users: number; total_tokens: number;
                             total_devices: number; generated_at: string }
 export function parseGlobalStats(value: unknown): GlobalStats
+export function buildSslOptions(ca): { rejectUnauthorized: true; ca?: string }  // saf, testli
 export async function getGlobalStats(): Promise<GlobalStats>
 
-// src/lib/auth.ts               (sunucu)
-export class ForbiddenError extends Error
+// src/lib/forbidden.ts          (saf; import'u YOK — istemci bileşeni de kullanabilir)
+export const FORBIDDEN_DIGEST = 'ADMIN_FORBIDDEN'
+export const ADMIN_REVOKED_MESSAGE: string
+export class ForbiddenError extends Error            // name + digest sabit
+
+// src/lib/auth.ts               (sunucu; forbidden.ts'i yeniden dışa aktarır)
 export interface AdminIdentity { userId: string; email: string | null }
 export function isAdminClaims(claims: unknown): boolean
-export async function requireAdmin(): Promise<AdminIdentity>
+export async function requireAdmin(): Promise<AdminIdentity>  // claim + admin_users tazeliği
 
 // src/lib/audit.ts              ('server-only')
 export const AUDIT_ACTIONS: readonly AuditAction[]
@@ -173,17 +202,20 @@ export function mapCatalogRow(row): CatalogService | null
 export const TOKEN_SYNC_FLAG_KEY = 'token_sync_enabled'
 export const TOKEN_SYNC_WARNING: string
 export const FLAG_KEY_PATTERN: RegExp, PAYLOAD_MAX_BYTES = 8 * 1024
+export const FORBIDDEN_PAYLOAD_KEYS = ['__proto__','constructor','prototype']
+export const PAYLOAD_UNUSABLE_WARNING: string
 export function parseFlagPayload(raw): FlagPayloadResult            // JSON nesnesi ya da null
 export const flagCreateSchema, flagPayloadUpdateSchema, flagToggleSchema, flagDeleteSchema
-export function mapFlagRow(row): FeatureFlag | null
+export function mapFlagRow(row): FeatureFlag | null                 // + payloadUnusable: boolean
 export function formatPayload(payload): string
 export function flagAuditTarget(key, operation): string             // 'token_sync_enabled:disable'
 
 // src/lib/audit-query.ts        (saf; /audit arama parametreleri)
-export const AUDIT_PAGE_SIZE = 50, AUDIT_SEARCH_MAX_LENGTH = 100
+export const AUDIT_PAGE_SIZE = 50, AUDIT_SEARCH_MAX_LENGTH = 100, AUDIT_MAX_PAGE = 10_000
 export function parseAuditQuery(params): AuditQuery                 // action beyaz listeli
 export function auditRange(page, pageSize?): { from: number; to: number }
 export function auditPageCount(total, pageSize?): number
+export function auditHasNextPage(page, total, rowCount, pageSize?): boolean
 export function escapeLikePattern(value): string                    // %/_ kaçışlı, * düşürülür
 export function buildAuditHref(query): string
 export function auditActionLabel(action): string
@@ -207,6 +239,15 @@ Yeni sayfa eklemek: `src/app/(dashboard)/<route>/page.tsx` + `NAV_ITEMS`'a bir s
 | `/audit` | `(dashboard)/audit/page.tsx` | proxy + layout + `requireAdmin()` | (c), RLS `is_admin()` | — (yalnız okur) |
 | `/auth` (sayfa değil) | `src/app/auth/actions.ts` | genel yol öneki; `signOut` + `/login` yönlendirmesi | (c) | — |
 
+`(dashboard)` grubunun bir **error boundary**'si vardır:
+`src/app/(dashboard)/error.tsx`. `requireAdmin()` yönlendirme yerine
+`ForbiddenError` fırlattığı için (proxy'nin çalışmadığı bir dağıtımda ya da bir
+matcher değişikliğinden sonra buraya düşülebilir) boundary olmadan ham Next.js
+hata ekranı görünürdü. Boundary hatayı **`digest`** ile tanır: üretim derlemesinde
+Next mesajı ve stack'i siler ama hatanın **zaten taşıdığı** digest'i korur
+(`next/dist/server/app-render/create-error-handler.js:79-91`). Hata nesnesinden
+hiçbir şey ekrana basılmaz — `message` sürücü/kısıt ayrıntısı taşıyabilir.
+
 `/users` sayfalıdır (`?page=`, 50 satır/sayfa) ve `/audit` de öyle (50 satır/sayfa, `?action=`/`?q=` süzgeçli).
 `/announcements`, `/catalog` ve `/flags` **sayfalama yapmaz** — tabloyu bütün olarak çeker (bugünkü satır
 sayılarında sorun değil; büyürlerse `.range()` gerekir). `/users` araması **sayfa-yereldir**:
@@ -225,7 +266,9 @@ açıkça yazar.
 | `npm run test` | Vitest (jsdom + Testing Library) |
 | `npm run build` | `next build` — gerçek sır gerektirmez |
 
-`npm run test` bugün **153 test / 10 dosya** çalıştırır ve hepsi saftır (ağ yok, Supabase istemcisi yok).
+`npm run test` bugün **231 test / 13 dosya** çalıştırır ve hepsi saftır (ağ yok, gerçek Supabase istemcisi
+yok — server action testleri istemciyi modül sınırında `vi.mock`'lar; `test/postgrest-mock.ts` postgrest-js
+zincirinin sadece kullanılan kısmını taklit eder).
 CI aynı sırayı `.github/workflows/admin-ci.yml` içinde koşar (`npm ci` → lint → typecheck → test → build),
 yalnızca `admin/**` değişikliklerinde tetiklenir ve **hiçbir Supabase sırrı verilmez** — gerçek kimlik bilgisi
 istemeye başlayan bir build bu adımda düşer.
@@ -285,6 +328,43 @@ kaynağından** doğrulandı.
    Sürücü olarak `postgres` (porsager) kullanılıyor (ARCHITECTURE §6 tercihi;
    dokümanda serverless için aksi bir öneri yok).
 
+5. **Postgres TLS: `ssl: 'require'` doğrulama yapmaz; pooler sertifikası herkesçe
+   güvenilen bir kökten gelmez** (inceleme bulgusu P2-3, doğrulama 2026-09-02).
+   Kurulu `postgres@3.4.9` kaynağı (`src/connection.js:283`): `'require' | 'allow' |
+   'prefer'` dizgelerinin **hepsi** `options.rejectUnauthorized = false` yapar — yani
+   bağlantı şifreli ama **kimliği doğrulanmamış**tır (libpq `sslmode=require`
+   semantiği). Hemen altındaki `else if (typeof ssl === 'object')
+   Object.assign(options, ssl)` dalı desteklenen çıkış kapısıdır, `src/lib/db.ts`
+   artık onu kullanır: `{ rejectUnauthorized: true, ...(ca ? { ca } : {}) }`.
+
+   **`ca` pratikte zorunludur.** Supavisor pooler'ının sunduğu zincir canlı olarak
+   ölçüldü (`openssl s_client -connect aws-0-eu-central-1.pooler.supabase.com:5432
+   -starttls postgres`, 2026-09-02):
+
+   ```
+   0 s:CN=*.pooler.supabase.com          i:CN=Supabase Intermediate 2021 CA
+   1 s:CN=Supabase Intermediate 2021 CA  i:CN=Supabase Root 2021 CA
+   2 s:CN=Supabase Root 2021 CA          i:CN=Supabase Root 2021 CA   (kendinden imzalı)
+   verify error:num=19:self-signed certificate in certificate chain
+   ```
+
+   Kök **Supabase'in kendi özel CA'sıdır**; hiçbir genel güven deposunda yoktur.
+   Dolayısıyla `SUPABASE_CA_CERT` verilmezse `rejectUnauthorized: true` el sıkışması
+   **kapalı düşer** (stats kartları hata kartı gösterir) — istenen davranış budur,
+   sessiz doğrulamasız bağlantı değil. Şemada opsiyonel tutulmasının tek nedeni
+   panelin (a) yolu olmadan da açılıp derlenebilmesidir.
+
+   Doküman tarafı bunu **açıkça yazmıyor**, o yüzden ölçüm yapıldı:
+   <https://supabase.com/docs/guides/platform/ssl-enforcement.md> yalnızca
+   `verify-full` için Supabase CA sertifikasının indirilmesi gerektiğini ve
+   sertifikanın Dashboard'da **SSL Configuration** bölümünde bulunduğunu söyler;
+   <https://supabase.com/docs/guides/database/connecting-to-postgres.md> "mümkün
+   olan her yerde SSL" der ve "Server root certificate"ın dashboard'dan alınacağını
+   belirtir. İkisi de pooler zincirinin genel olarak güvenilir olup olmadığını
+   söylemez. **İndirme yeri: Dashboard → Database → SSL Configuration.**
+   `.env` tek satır taşıyabildiği için PEM'deki literal `\n` dizileri
+   `normaliseCaCert()` ile gerçek satır sonlarına çevrilir.
+
 Ek: <https://supabase.com/changelog.md> taraması — `@supabase/ssr` `getAll`/`setAll`
 çerez API'si (eski `get`/`set`/`remove` v1.0'da kaldırılacak), asimetrik JWT imza
 anahtarları ve `getClaims()` duyurusu; ele alınan sürümleri bozacak yeni bir
@@ -294,10 +374,12 @@ kırılma bulunamadı.
 
 ## 6. Güvenlik değişmezleri
 
-1. `SUPABASE_SECRET_KEY` ve `DATABASE_URL` **yalnızca sunucuda**. Bunları okuyan
-   her modül `import 'server-only'` ile başlar (`lib/supabase/admin.ts`,
-   `lib/db.ts`, `lib/audit.ts`); `getServerEnv()` ayrıca `typeof window` kontrolü
-   yapar. `NEXT_PUBLIC_` ön eki bu iki değere **asla** verilmez.
+1. `SUPABASE_SECRET_KEY`, `DATABASE_URL` ve `SUPABASE_CA_CERT` **yalnızca
+   sunucuda**. Bunları okuyan her modül `import 'server-only'` ile başlar —
+   artık şemanın kendisi de: `lib/env.server.ts`, `lib/supabase/admin.ts`,
+   `lib/db.ts`, `lib/audit.ts`. Marker'ı `getServerEnv()`'in `typeof window`
+   kontrolünden **önce** koyduk: ilki derleme zamanı hatası, ikincisi çalışma
+   zamanı. `NEXT_PUBLIC_` ön eki bu değerlere **asla** verilmez.
 2. Panel `tokens` / `key_attributes` satırlarını **hiçbir yoldan okumaz**.
    Kullanıcılar arası tek okuma `private.admin_global_stats()` üzerinden gelen
    sayımlardır.
@@ -330,12 +412,35 @@ kırılma bulunamadı.
    `catalog_services.logo_url` yalnız **mutlak `https://`** kabul eder: sütun
    herkese açık okunur, `javascript:`/`data:` bir değer ileride onu render eden
    herhangi bir istemci için depolanmış yük olurdu.
+12. **Yönetici yetkisi geri alma anında etkilidir.** `requireAdmin()` claim'i
+   doğruladıktan sonra `public.admin_users` üzerinde bir PK araması daha yapar ve
+   satır yoksa **veya okuma hata verirse** reddeder. Takas bilinçlidir: her panel
+   isteği başına bir indeksli arama daha; karşılığında "yetkiyi aldım, laptopu
+   kapattım" ile gerçeğin arasında bir token ömrü boyunca (varsayılan 1 saat)
+   `auth.admin.deleteUser` çağırabilen bir hesap kalmaz. Runbook: §9.
+13. **Hiçbir satırı etkilemeyen bir yazma başarı sayılmaz.** PostgREST, hiçbir
+   satırla eşleşmeyen `PATCH`/`DELETE` için `204 No Content` ve **hata yok** döner;
+   bu yüzden her `update`/`delete` `.select('<pk>')` ile etkilenen satırları geri
+   ister ve boş sonuç, `revalidatePath`'ten **ve** `writeAudit`'ten **önce** hataya
+   çevrilir. Aksi hâlde denetim kaydı hiç olmamış işlemleri anlatırdı — bir
+   sonradan-atfetme günlüğü için eksik kayıttan daha kötüsü uydurma kayıttır.
+14. **`feature_flags.payload` yazarken körlemesine silme yok.** Sütun bir JSON
+   nesnesi değilse (dizi/skaler — SQL'den ya da ileride başka bir servisten)
+   `mapFlagRow` onu istemcideki gibi `null`'a indirger **ama** `payloadUnusable`
+   bayrağını kaldırır; payload penceresi boş bir alan yerine uyarı gösterir ve
+   admin alana dokunana kadar **Kaydet kapalıdır**. Yıkım ancak bilinçli olabilir.
+15. **`parseFlagPayload` prototip biçimli anahtarları reddeder** (`__proto__`,
+   `constructor`, `prototype`; her derinlikte). `JSON.parse` `__proto__`'yu **kendi
+   (own)** numaralandırılabilir anahtar yapar ve `JSON.stringify` onu geri yazar,
+   yani anahtar herkesin anonim okuduğu bir sütuna aynen inerdi. Bugün sunucu
+   tarafında hiçbir yer bu nesneyi merge etmiyor ve Dart bağışık — bu sertleştirme,
+   yaşayan bir açığın kapatılması değil.
 
 ---
 
 ## 7. Elle duman testi (manual smoke checklist)
 
-Birim testler saf mantığı kapsar (**153 test / 10 dosya**, `npm run test`); aşağıdaki akışlar **kapsanmaz** —
+Birim testler saf mantığı kapsar (**231 test / 13 dosya**, `npm run test`); aşağıdaki akışlar **kapsanmaz** —
 henüz Playwright/e2e yoktur. Gerçek Supabase'e karşı, `admin_app` rolü ve `public.admin_users`'ta en az bir
 satır varken bir kez geçilmesi beklenir.
 
@@ -376,3 +481,108 @@ satır varken bir kez geçilmesi beklenir.
       **uygulanmaz** (500 değil). `?q=%` gibi bir arama joker gibi davranmaz.
 - [ ] Sayfalama: 50'den fazla satırla 2. sayfa farklı satırlar gösterir, hiçbir satır iki sayfada birden
       görünmez ve `/` üzerindeki "son 10" kartı en yeni satırlarla eşleşir.
+
+**İnceleme takipleri (P2/P3) — elle doğrulanacak**
+- [ ] İki sekmede aynı duyuru açıkken birinden sil, diğerinden sil → ikinci istek **"bulunamadı"** hatası
+      verir ve `/audit`'te **ikinci bir `announcement.delete` satırı oluşmaz**.
+- [ ] `admin_users`'tan kendi satırınızı silin (başka bir yönetici oturumundan) → **çıkış yapmadan**, ilk
+      sayfa yenilemesinde panel `/forbidden`'a düşer; token'ın süresinin dolması beklenmez.
+- [ ] `SUPABASE_CA_CERT` boşken `/` → stats kartı hata verir (`self-signed certificate in certificate
+      chain`); sertifika verildikten sonra sayımlar gelir.
+- [ ] SQL ile `update public.feature_flags set payload = '[1,2,3]'::jsonb where key = '<test_key>'` →
+      `/flags` satırında "JSON nesnesi değil" rozeti, payload penceresinde uyarı, **Kaydet kapalı**;
+      metin alanına dokununca açılır.
+
+---
+
+## 8. Dağıtım notları
+
+**Server Action origin kontrolü.** Next.js, bir Server Function isteğinin `Origin`
+başlığını `Host` ile karşılaştırır ve uyuşmazsa isteği reddeder — Server
+Function'lar için yerleşik CSRF savunması budur. `Host`'u yeniden yazan bir ters
+vekil/CDN arkasında **tüm eylemler** opak bir hatayla düşmeye başlar. İki
+desteklenen çözüm:
+
+1. Paneli `Host` korunacak şekilde sunun (nginx'te `proxy_set_header Host $host;`,
+   platformun `X-Forwarded-Host`'u onurlandırması). `admin/next.config.ts` bugün
+   **boştur** ve bunu varsayar.
+2. Dağıtım alan adlarını açıkça listeleyin:
+
+   ```ts
+   // admin/next.config.ts
+   const nextConfig: NextConfig = {
+     experimental: { serverActions: { allowedOrigins: ['panel.example.com', '*.example.com'] } },
+   }
+   ```
+
+Anahtar adı **kurulu Next 16.3.4'ün tip tanımından** doğrulandı
+(`node_modules/next/dist/server/config-shared.d.ts`, `experimental.serverActions`
+→ `allowedOrigins?: string[]`, "Allowed origins that can bypass Server Action's
+CSRF check"). Alan adı henüz belli olmadığı için `next.config.ts` içinde yalnızca
+yorum olarak duruyor.
+
+**TLS.** `SUPABASE_CA_CERT` üretimde ayarlanmalıdır (§5 madde 5). Ayarlanmazsa
+panel açılır ve çalışır ama `/` üzerindeki sayım kartları el sıkışma hatası
+gösterir — kapalı düşer, sessizce doğrulamasız bağlanmaz.
+
+---
+
+## 9. Runbook — yönetici yetkisini geri alma (demotion)
+
+`app_metadata.admin` claim'i token **üretilirken** damgalanır; satırı silmek
+mevcut access token'ı geçersizleştirmez. `requireAdmin()`'deki tazelik kontrolü
+(§6 madde 12) paneli anında kapatır, ama kullanıcının Supabase oturumu hâlâ
+canlıdır. Tam sıra:
+
+```sql
+-- 1) Yetkiyi kaldır (panelde bilerek yoktur; SQL Editor'da yapılır).
+delete from public.admin_users where user_id = '<uuid>';
+```
+
+```bash
+# 2) O kullanıcının tüm oturumlarını sonlandır (refresh token dahil).
+#    admin.signOut(jwt, 'global') kullanıcının kendi JWT'sini ister; elde yoksa
+#    doğrudan Admin API ile oturumları düşürün:
+curl -X POST "https://<PROJECT_REF>.supabase.co/auth/v1/admin/users/<uuid>/logout" \
+  -H "apikey: $SUPABASE_SECRET_KEY" -H "Authorization: Bearer $SUPABASE_SECRET_KEY"
+```
+
+3. Adım 1 tek başına paneli kapatmaya **yeter** (her istekte `admin_users`
+   aranır). Adım 2, kullanıcının mobil uygulamadaki oturumunu da düşürmek ve
+   claim'i taşıyan token'ın hiç kullanılmamasını sağlamak içindir.
+4. Kalıcı önlem: proje JWT süresini (Dashboard → Authentication → Sessions →
+   *Access token expiry*) makul tutun. Tazelik kontrolü olmasaydı bu süre, geri
+   alınmış bir yöneticinin `auth.admin.deleteUser` çağırabildiği pencere olurdu.
+5. `/audit`'te doğrulayın: adım 1'den sonra o kullanıcının aktör olduğu **yeni**
+   satır oluşmamalı.
+
+---
+
+## 10. Bilinen sınırlar / takip işleri
+
+Bilerek açık bırakılan, kaydedilmiş maddeler:
+
+1. **`/audit` sorgu maliyeti (P3-7).** Her sayfa yüklemesinde `count: 'exact'`
+   çalışır; mevcut indeks yalnızca `(created_at)`
+   (`20260606152227_init_authenticator.sql:231`) ve `ilike('target', '%…%')`
+   indekssizdir. Bugünkü hacimde sorun değil. Büyürse:
+   `create index on public.audit_logs (created_at desc, id desc);` ve
+   `count: 'planned'` (ya da sayımı tamamen bırakıp `auditHasNextPage`'in
+   "dolu sayfa" sezgisine geçmek — altyapısı hazır).
+2. **CI'da bağımlılık denetimi yok (P3-8a).** `.github/workflows/admin-ci.yml`
+   `npm audit --audit-level=high` / `dependency-review-action` çalıştırmıyor, yani
+   bilinen açıklı bir geçişli bağımlılık lockfile commit'li olmasına rağmen sessizce
+   girebilir.
+3. **`admin-ci.yml` zorunlu (required) kontrol yapılamaz (P3-8b).** Her iki tetik de
+   `paths: ['admin/**', …]` taşıdığı için `admin/` dokunmayan PR'larda job hiç rapor
+   etmez. Zorunlu kontrol yapmadan önce ya her zaman koşan bir eş job eklenmeli ya da
+   `paths-ignore` ile ters çevrilmeli. Faz 7 branch protection'dan önce karar verilecek.
+4. **`escapeLikePattern` `*` karakterini kaçırmaz, atar (P3-11).** PostgREST `*`'ı
+   PostgreSQL görmeden `%`'e çevirdiği için kaçış işe yaramaz; bu yüzden düşürülür.
+   Sonuç: `target` alanında literal `*` içeren bir denetim kaydı **aranamaz**.
+   Pratikte zararsız (hedefler uuid / bayrak anahtarı / `key:operation`), ama
+   bilinçli ve kayıtlı bir sınır. Doğrulanmamış varsayım: PostgREST'in *tırnaksız*
+   filtre değerlerinde ters bölü işaretini olduğu gibi ilettiği — canlı bir sorguyla
+   sınanmadı; yanlışsa `%`/`_` içeren bir arama sessizce hiçbir şey eşleştirmez
+   (güvenlik sorunu değil, yalnızca daraltma).
+5. **e2e/Playwright yok.** §7'deki duman testi elle koşulur.

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   flagAuditTarget,
   flagCreateSchema,
+  FORBIDDEN_PAYLOAD_KEYS,
   flagDeleteSchema,
   flagKeySchema,
   flagPayloadTextSchema,
@@ -86,6 +87,27 @@ describe('parseFlagPayload', () => {
     expect(JSON.stringify({ v: value }).length).toBeLessThan(PAYLOAD_MAX_BYTES)
     expect(parseFlagPayload(JSON.stringify({ v: value })).ok).toBe(false)
   })
+
+  it('rejects prototype-shaped keys at the top level', () => {
+    for (const key of FORBIDDEN_PAYLOAD_KEYS) {
+      const result = parseFlagPayload(`{"${key}": {"admin": true}}`)
+      expect(result.ok).toBe(false)
+      expect(result.ok === false && result.error).toContain(key)
+    }
+  })
+
+  it('rejects prototype-shaped keys nested inside objects and arrays', () => {
+    expect(parseFlagPayload('{"a": {"b": {"__proto__": {"x": 1}}}}').ok).toBe(false)
+    expect(parseFlagPayload('{"a": [{"constructor": {"x": 1}}]}').ok).toBe(false)
+    expect(parseFlagPayload('{"a": [[{"prototype": 1}]]}').ok).toBe(false)
+  })
+
+  it('still accepts a payload that merely mentions those words as values', () => {
+    expect(parseFlagPayload('{"note": "__proto__ is not a key here"}')).toEqual({
+      ok: true,
+      value: { note: '__proto__ is not a key here' },
+    })
+  })
 })
 
 describe('flagPayloadTextSchema', () => {
@@ -144,6 +166,7 @@ describe('mapFlagRow', () => {
       key: 'token_sync_enabled',
       enabled: true,
       payload: null,
+      payloadUnusable: false,
       updatedAt: '2026-09-02T10:00:00+00:00',
     })
   })
@@ -160,6 +183,19 @@ describe('mapFlagRow', () => {
     expect(mapFlagRow({ ...valid, payload: [1, 2] })?.payload).toBeNull()
     expect(mapFlagRow({ ...valid, payload: 'x' })?.payload).toBeNull()
     expect(mapFlagRow({ ...valid, payload: { a: 1 } })?.payload).toEqual({ a: 1 })
+  })
+
+  it('flags a coerced payload as unusable so the editor can warn instead of erasing it', () => {
+    expect(mapFlagRow({ ...valid, payload: [1, 2] })?.payloadUnusable).toBe(true)
+    expect(mapFlagRow({ ...valid, payload: 'x' })?.payloadUnusable).toBe(true)
+    expect(mapFlagRow({ ...valid, payload: 42 })?.payloadUnusable).toBe(true)
+    expect(mapFlagRow({ ...valid, payload: false })?.payloadUnusable).toBe(true)
+  })
+
+  it('does not call an ordinary NULL (or an absent column) unusable', () => {
+    expect(mapFlagRow({ ...valid, payload: null })?.payloadUnusable).toBe(false)
+    expect(mapFlagRow({ key: 'k_ey', enabled: false })?.payloadUnusable).toBe(false)
+    expect(mapFlagRow({ ...valid, payload: { a: 1 } })?.payloadUnusable).toBe(false)
   })
 
   it('tolerates a missing updated_at', () => {

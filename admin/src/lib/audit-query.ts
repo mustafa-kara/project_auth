@@ -87,11 +87,22 @@ function firstValue(value: SearchParamValue): string | undefined {
 }
 
 /**
+ * Hard ceiling on `?page=`.
+ *
+ * Unbounded page numbers turn into an unbounded `offset` in the PostgREST query
+ * string (`?page=1e21` → `offset=5e22`), which the database answers with a 5xx
+ * rather than an empty page. 10 000 pages × 50 rows = 500 000 audit rows, far past
+ * anything worth paging through in a browser.
+ */
+export const AUDIT_MAX_PAGE = 10_000
+
+/**
  * `?page=` → a 1-based page number.
  *
  * Anything that is not a finite integer ≥ 1 (missing, `0`, `-3`, `1.5`, `abc`,
  * `Infinity`) collapses to page 1 rather than erroring: a hand-edited URL should
- * show the first page, not a 500.
+ * show the first page, not a 500. Anything above {@link AUDIT_MAX_PAGE} is clamped
+ * down to it for the same reason.
  */
 export function parseAuditPage(value: SearchParamValue): number {
   const raw = firstValue(value)
@@ -101,7 +112,8 @@ export function parseAuditPage(value: SearchParamValue): number {
   if (!Number.isFinite(parsed)) return 1
 
   const page = Math.floor(parsed)
-  return page < 1 ? 1 : page
+  if (page < 1) return 1
+  return page > AUDIT_MAX_PAGE ? AUDIT_MAX_PAGE : page
 }
 
 /**
@@ -154,6 +166,26 @@ export function auditRange(page: number, pageSize: number = AUDIT_PAGE_SIZE): Au
 export function auditPageCount(total: number, pageSize: number = AUDIT_PAGE_SIZE): number {
   if (!Number.isFinite(total) || total <= 0) return 1
   return Math.max(1, Math.ceil(total / pageSize))
+}
+
+/**
+ * Is there a page after this one?
+ *
+ * With an exact `count` the page count answers it. Without one — PostgREST can omit
+ * the total from `content-range` — `pageCount` collapses to 1 and "Sonraki" would
+ * be disabled even though more rows exist. In that case a **full** page is the
+ * signal: exactly `pageSize` rows means there is probably another page (a
+ * false positive costs one empty page, a false negative hides the rest of the log).
+ */
+export function auditHasNextPage(
+  page: number,
+  total: number | null,
+  rowCount: number,
+  pageSize: number = AUDIT_PAGE_SIZE,
+): boolean {
+  if (page >= AUDIT_MAX_PAGE) return false
+  if (total === null) return rowCount === pageSize
+  return page < auditPageCount(total, pageSize)
 }
 
 /**

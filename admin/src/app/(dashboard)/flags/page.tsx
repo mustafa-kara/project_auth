@@ -89,7 +89,11 @@ export default async function FlagsPage() {
                       <FlagToggle flag={flag} />
                     </TableCell>
                     <TableCell className="text-muted-foreground align-top text-xs">
-                      {flag.payload === null ? (
+                      {flag.payloadUnusable ? (
+                        <Badge variant="outline" className="text-destructive">
+                          JSON nesnesi değil
+                        </Badge>
+                      ) : flag.payload === null ? (
                         '—'
                       ) : (
                         <code className="line-clamp-2 break-all">

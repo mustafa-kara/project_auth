@@ -43,12 +43,44 @@ export type FlagPayloadResult =
 const encoder = new TextEncoder()
 
 /**
+ * Keys refused at any depth.
+ *
+ * `JSON.parse` makes `__proto__` an **own** enumerable property rather than
+ * touching `Object.prototype`, and `JSON.stringify` round-trips it, so such a key
+ * would land verbatim in a column every mobile client reads anonymously. Nothing
+ * merges the object server-side today and Dart is immune — this is hardening, not
+ * a fix for a live exploit.
+ */
+export const FORBIDDEN_PAYLOAD_KEYS: readonly string[] = ['__proto__', 'constructor', 'prototype']
+
+/** Depth-first scan for a {@link FORBIDDEN_PAYLOAD_KEYS} member; returns the offender. */
+function findForbiddenKey(value: unknown): string | null {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findForbiddenKey(item)
+      if (found !== null) return found
+    }
+    return null
+  }
+  if (typeof value !== 'object' || value === null) return null
+
+  for (const key of Reflect.ownKeys(value as object)) {
+    if (typeof key !== 'string') continue
+    if (FORBIDDEN_PAYLOAD_KEYS.includes(key)) return key
+    const found = findForbiddenKey((value as Record<string, unknown>)[key])
+    if (found !== null) return found
+  }
+  return null
+}
+
+/**
  * Parses the payload textarea.
  *
  * Empty / whitespace-only → `null` (column stays NULL). Otherwise the text must be
  * JSON, at most {@link PAYLOAD_MAX_BYTES} bytes, and must decode to a JSON **object**
  * or the literal `null`. Arrays and scalars are rejected because the Flutter client
  * drops them, which would silently produce a flag whose payload never arrives.
+ * Prototype-shaped keys are refused at any depth ({@link FORBIDDEN_PAYLOAD_KEYS}).
  *
  * The size check runs before `JSON.parse` so an oversized blob is never parsed.
  */
@@ -71,6 +103,14 @@ export function parseFlagPayload(raw: string | null | undefined): FlagPayloadRes
   if (parsed === null) return { ok: true, value: null }
   if (typeof parsed !== 'object' || Array.isArray(parsed)) {
     return { ok: false, error: 'Payload bir JSON nesnesi ya da null olmalıdır.' }
+  }
+
+  const forbidden = findForbiddenKey(parsed)
+  if (forbidden !== null) {
+    return {
+      ok: false,
+      error: `Payload "${forbidden}" anahtarını içeremez (prototip kirletme koruması).`,
+    }
   }
 
   return { ok: true, value: parsed as Record<string, unknown> }
@@ -116,6 +156,16 @@ export interface FeatureFlag {
   key: string
   enabled: boolean
   payload: FlagPayload
+  /**
+   * `true` when the raw column held something the client cannot use — an array or
+   * a scalar written by SQL or by a future service — which {@link mapFlagRow}
+   * coerces to `payload: null`.
+   *
+   * Without this flag the payload dialog would render an empty textarea for such a
+   * row and saving it unchanged would **erase** the stored value while reporting
+   * success. `null` in the column is the ordinary case and is NOT unusable.
+   */
+  payloadUnusable: boolean
   updatedAt: string | null
 }
 
@@ -127,15 +177,17 @@ export function mapFlagRow(row: unknown): FeatureFlag | null {
   if (typeof r.enabled !== 'boolean') return null
 
   const payload = r.payload
-  const usable =
-    typeof payload === 'object' && payload !== null && !Array.isArray(payload)
-      ? (payload as Record<string, unknown>)
-      : null
+  const isObject = typeof payload === 'object' && payload !== null && !Array.isArray(payload)
+  const usable = isObject ? (payload as Record<string, unknown>) : null
 
   return {
     key: r.key,
     enabled: r.enabled,
     payload: usable,
+    // An absent column (`undefined`) is treated exactly like SQL NULL, not as a
+    // corrupt value: the flags page selects `payload` explicitly, so undefined only
+    // shows up in synthetic rows.
+    payloadUnusable: !isObject && payload !== null && payload !== undefined,
     updatedAt: typeof r.updated_at === 'string' ? r.updated_at : null,
   }
 }
@@ -149,6 +201,10 @@ export function mapFlagRows(rows: unknown): FeatureFlag[] {
   }
   return out
 }
+
+/** Shown by the payload dialog when {@link FeatureFlag.payloadUnusable} is set. */
+export const PAYLOAD_UNUSABLE_WARNING =
+  "Bu satırın payload'ı JSON nesnesi değil; istemci yok sayıyor. Kaydetmek mevcut değeri siler."
 
 /** Pretty-prints a payload for the editor textarea; `null` becomes an empty field. */
 export function formatPayload(payload: FlagPayload): string {

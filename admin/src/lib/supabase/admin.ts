@@ -2,7 +2,8 @@ import 'server-only'
 
 import { createClient as createSupabaseClient, type SupabaseClient } from '@supabase/supabase-js'
 
-import { getServerEnv } from '@/lib/env'
+import { getPublicEnv } from '@/lib/env'
+import { getServerEnv } from '@/lib/env.server'
 
 /**
  * Access path (b) — the project's SECRET key (`sb_secret_…`).
@@ -22,10 +23,9 @@ import { getServerEnv } from '@/lib/env'
  */
 export function createAdminClient(): SupabaseClient {
   const env = getServerEnv()
-  const publicUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-  if (!publicUrl) {
-    throw new Error('NEXT_PUBLIC_SUPABASE_URL tanımlı değil.')
-  }
+  // Via `getPublicEnv()`, not raw `process.env`: a malformed URL then fails at the
+  // zod boundary with a named message instead of deep inside the SDK.
+  const { NEXT_PUBLIC_SUPABASE_URL: publicUrl } = getPublicEnv()
 
   return createSupabaseClient(publicUrl, env.SUPABASE_SECRET_KEY, {
     auth: {

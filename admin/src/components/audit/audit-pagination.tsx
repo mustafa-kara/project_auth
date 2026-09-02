@@ -8,20 +8,21 @@ interface AuditPaginationProps {
   /** `count: 'exact'` from PostgREST; `null` when the count header was absent. */
   total: number | null
   pageCount: number
+  /** From `auditHasNextPage()` — not `page < pageCount`, which is wrong when `total` is null. */
+  hasNext: boolean
 }
 
 /**
  * Prev/next links that preserve the active filters. Rendered as links (not
  * buttons) so the page stays shareable and works without JavaScript.
  */
-export function AuditPagination({ query, total, pageCount }: AuditPaginationProps) {
+export function AuditPagination({ query, total, pageCount, hasNext }: AuditPaginationProps) {
   const hasPrev = query.page > 1
-  const hasNext = query.page < pageCount
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-3">
       <p className="text-muted-foreground text-sm" aria-live="polite">
-        Sayfa {query.page} / {pageCount}
+        {total === null ? `Sayfa ${query.page}` : `Sayfa ${query.page} / ${pageCount}`}
         {total === null ? '' : ` — toplam ${total} kayıt`}
       </p>
 
