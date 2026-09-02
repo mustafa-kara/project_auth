@@ -243,6 +243,42 @@ void main() {
           hasLength(GoogleMigrationCollector.maxAccounts));
     });
 
+    test('skipped entries count toward the cap too', () {
+      // A hostile export can be nothing but unmappable entries: they are not
+      // tokens, but the preview renders one eager row per skip.
+      final collector = GoogleMigrationCollector();
+      final manySkipped = List<SkippedEntry>.generate(
+        GoogleMigrationCollector.maxAccounts,
+        (i) => SkippedEntry(reason: SkipReason.invalidFields, label: 's$i'),
+      );
+      expect(
+          collector.add(
+              _batch(index: 0, size: 2, names: const [], skipped: manySkipped)),
+          MigrationAddOutcome.added);
+      expect(collector.add(_batch(index: 1, size: 2, names: const ['one more'])),
+          MigrationAddOutcome.full);
+      expect(collector.scannedCount, 1);
+    });
+
+    test('accounts and skipped entries share one budget', () {
+      final collector = GoogleMigrationCollector();
+      final half = GoogleMigrationCollector.maxAccounts ~/ 2;
+      expect(
+          collector.add(_batch(
+            index: 0,
+            size: 2,
+            names: List<String>.generate(half, (i) => 'a$i'),
+            skipped: List<SkippedEntry>.generate(
+              half,
+              (i) => SkippedEntry(
+                  reason: SkipReason.invalidFields, label: 's$i'),
+            ),
+          )),
+          MigrationAddOutcome.added);
+      expect(collector.add(_batch(index: 1, size: 2, names: const ['extra'])),
+          MigrationAddOutcome.full);
+    });
+
     test('landing exactly on maxAccounts is allowed', () {
       final collector = GoogleMigrationCollector();
       final half = GoogleMigrationCollector.maxAccounts ~/ 2;

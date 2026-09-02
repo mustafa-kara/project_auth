@@ -34,18 +34,33 @@ import '../../import_export/presentation/widgets/import_preview_view.dart';
 import '../../vault/presentation/bloc/vault_cubit.dart';
 import 'migration_scan_controller.dart';
 
-/// Kamera widget'ının yerine geçen test kurucusu: [onRaw]'ı çağırmak, bir QR
-/// karesinin okunmasıyla aynı yola girer.
+/// Kamera widget'ının yerine geçen test kurucusu: [onDetect]'i çağırmak, bir
+/// kameranın kare yayınlamasıyla birebir aynı yola girer — tek karede birden
+/// çok barkod taşıyan `BarcodeCapture` dâhil.
 typedef ScannerBuilder = Widget Function(
-    BuildContext context, void Function(String raw) onRaw);
+    BuildContext context, void Function(BarcodeCapture capture) onDetect);
+
+/// Kameranın `stop()`/`start()` çağrılarının test tohumu. İkisi AYRI alan:
+/// test ikisini ayrı sayabilmeli ve yalnız `stop()`'u hatalandırabilmeli
+/// (bkz. [_ScanPageState._restartCamera]).
+typedef CameraControls = ({
+  Future<void> Function() stop,
+  Future<void> Function() start,
+});
 
 class ScanPage extends StatefulWidget {
   const ScanPage({
     super.key,
     this.debugMigration,
     this.debugScannerBuilder,
-    this.debugRestartCamera,
+    this.debugCamera,
+    this.debugNow,
   });
+
+  /// Aynı hata mesajının yeniden SnackBar'a dönmesi için geçmesi gereken süre
+  /// (bkz. [_ScanPageState._showError]).
+  @visibleForTesting
+  static const Duration errorRepeatWindow = Duration(seconds: 2);
 
   /// Test tohumu: migration beynini enjekte eder. Prod'da `null` → DI'daki
   /// [ImportService] ile gerçek [MigrationScanController] kurulur.
@@ -57,10 +72,14 @@ class ScanPage extends StatefulWidget {
   @visibleForTesting
   final ScannerBuilder? debugScannerBuilder;
 
-  /// Test tohumu: `stop()`+`start()` kamera yeniden başlatmasının yerine geçer
-  /// (bkz. [_ScanPageState._restartCamera]).
+  /// Test tohumu: gerçek kamera kontrollerinin yerine geçer.
   @visibleForTesting
-  final Future<void> Function()? debugRestartCamera;
+  final CameraControls? debugCamera;
+
+  /// Test tohumu: [_ScanPageState._showError] throttle'ının saati. Prod'da
+  /// `null` → [DateTime.now].
+  @visibleForTesting
+  final DateTime Function()? debugNow;
 
   @override
   State<ScanPage> createState() => _ScanPageState();
@@ -89,12 +108,22 @@ class _ScanPageState extends State<ScanPage> {
 
   /// Onaya sunulan önizleme; doluysa kamera yerine önizleme render edilir.
   ImportPreview? _preview;
+
+  /// Önizleme İSTENDİ ama henüz atanmadı. [_preview] ancak `stop()` bittikten
+  /// sonra dolar; bu bayrak o await penceresinde gelen kareyi de eler (iOS'ta
+  /// kadrajda duran QR her karede yeniden gelir — aşağıdaki nota bak).
+  bool _previewing = false;
+
   bool _busy = false;
   String? _importError;
 
   /// Aynı QR'ın arka arkaya gelen kareleri diyalogları üst üste yığmasın
   /// (iOS'ta `noDuplicates` payload karşılaştırması YAPMAZ — aşağıdaki nota bak).
   bool _dialogOpen = false;
+
+  /// [_showError] throttle'ının durumu: en son gösterilen mesaj ve zamanı.
+  String? _lastError;
+  DateTime? _lastErrorAt;
 
   bool get _isComplete => _total > 0 && _scanned >= _total;
 
@@ -112,19 +141,35 @@ class _ScanPageState extends State<ScanPage> {
     super.dispose();
   }
 
+  /// Bir kamera karesi → bir veya daha çok ham QR metni.
+  ///
+  /// Migration modunda karedeki TÜM barkodlar sırayla işlenir: kullanıcı iki
+  /// aktarım QR'ını yan yana tutabilir ve Android'de `noDuplicates` belleği
+  /// (`MobileScanner.kt`'nin `lastScanned` alanı) karenin tamamını yazar —
+  /// yalnız ilkini alsaydık ikinci QR bir daha HİÇ yayınlanmaz, kullanıcı da
+  /// okunmayan kodu tekrar tekrar göstermeye çalışırdı. Tek-token modunda
+  /// ilk geçerli değer yeterli: orada ilk başarılı okuma zaten ekranı kapatır.
   Future<void> _onDetect(BarcodeCapture capture) async {
-    final raw = capture.barcodes
+    final raws = capture.barcodes
         .map((b) => b.rawValue)
-        .firstWhere((v) => v != null && v.isNotEmpty, orElse: () => null);
-    if (raw == null) return;
-    await _handleRaw(raw);
+        .whereType<String>()
+        .where((v) => v.isNotEmpty)
+        .toList(growable: false);
+    if (raws.isEmpty) return;
+    if (_total == 0) {
+      await _handleRaw(raws.first);
+      return;
+    }
+    for (final raw in raws) {
+      await _handleRaw(raw);
+    }
   }
 
   /// Tek giriş noktası: hem kameradan hem test tohumundan buraya gelinir.
   Future<void> _handleRaw(String raw) async {
-    // Önizleme açıkken kamera zaten durdurulmuştur; gecikmiş bir kare gelirse
-    // onay ekranının altını oymasın.
-    if (_preview != null) return;
+    // Önizleme açıkken (ya da açılmak üzereyken) kamera durduruluyordur;
+    // gecikmiş bir kare onay ekranının altını oymasın.
+    if (_previewing || _preview != null) return;
 
     if (GoogleAuthParser.looksLikeMigrationUri(raw)) {
       _handleMigration(raw);
@@ -189,24 +234,30 @@ class _ScanPageState extends State<ScanPage> {
   Future<void> _askRestart() async {
     if (_dialogOpen) return;
     _dialogOpen = true;
-    final restart = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        content: const Text(
-            'Bu QR farklı bir dışa aktarmaya ait. Baştan başlansın mı?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Vazgeç'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Baştan başla'),
-          ),
-        ],
-      ),
-    );
-    _dialogOpen = false;
+    final bool? restart;
+    try {
+      restart = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          content: const Text(
+              'Bu QR farklı bir dışa aktarmaya ait. Baştan başlansın mı?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Vazgeç'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Baştan başla'),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      // `showDialog` atarsa (ör. Navigator kilitli) bayrak takılı kalmamalı:
+      // aksi hâlde bu diyalog bir daha HİÇ açılmaz.
+      _dialogOpen = false;
+    }
     if (restart == true && mounted) await _restart();
   }
 
@@ -217,6 +268,7 @@ class _ScanPageState extends State<ScanPage> {
         _scanned = 0;
         _total = 0;
         _preview = null;
+        _previewing = false;
         _importError = null;
       });
     }
@@ -231,45 +283,59 @@ class _ScanPageState extends State<ScanPage> {
   /// `android/.../MobileScanner.kt`). Bu alan YALNIZCA `start()` ve `stop()`
   /// içinde `null`'lanır → "Baştan başla" sonrası kullanıcı ilk QR'ı yeniden
   /// gösterse tarayıcı onu yutardı. (iOS/macOS tarafında payload
-  /// karşılaştırması hiç yok: `noDuplicates` orada yalnız kare hızını kısar, bu
-  /// yüzden aynı QR tekrar tekrar gelir — duplicate/diyalog yolları bu
-  /// tekrarlara karşı korumalı.)
+  /// karşılaştırması hiç yok: `noDuplicates` orada yalnız kare hızını kısar
+  /// — `MobileScannerPlugin.swift` timeout'u 0'a çeker — bu yüzden aynı QR
+  /// tekrar tekrar gelir. Buna karşı üç koruma var: diyaloglar [_dialogOpen],
+  /// önizlemenin await penceresi [_previewing], hata mesajları da
+  /// [_showError] throttle'ı.)
+  ///
+  /// `stop()` ile `start()` AYRI çağrılar: durdurma hata verse bile kamera
+  /// yeniden başlatılmalı, yoksa "Baştan başla" sonrası ekran ölü kalırdı.
   Future<void> _restartCamera() async {
-    final override = widget.debugRestartCamera;
-    if (override != null) {
-      await override();
-      return;
-    }
-    try {
-      await _controller.stop();
-      await _controller.start();
-    } catch (_) {
-      // Kamera olmayan platform / geçici hata: state zaten sıfırlandı, asıl
-      // olan o. Gerçek kamera hatası `errorBuilder` ile zaten görünür.
-    }
+    await _stopCamera();
+    if (!mounted) return;
+    await _startCamera();
   }
 
   Future<void> _stopCamera() async {
-    if (widget.debugRestartCamera != null) return;
+    final stop = widget.debugCamera?.stop ?? _controller.stop;
     try {
-      await _controller.stop();
+      await stop();
     } catch (_) {
-      // Aynı gerekçe: durdurma best-effort.
+      // Kamera olmayan platform / geçici hata: durdurma best-effort. Gerçek
+      // kamera hatası `errorBuilder` ile zaten görünür.
     }
   }
 
-  /// Toplananları önizlemeye çevirir. Kamera yalnız önizleme GERÇEKTEN
-  /// açılacaksa durdurulur.
+  Future<void> _startCamera() async {
+    final start = widget.debugCamera?.start ?? (() => _controller.start());
+    try {
+      await start();
+    } catch (_) {
+      // Aynı gerekçe: başlatma best-effort.
+    }
+  }
+
+  /// Toplananları önizlemeye çevirir.
+  ///
+  /// [_previewing] daha İLK await'ten önce set edilir: kamera durdurulurken
+  /// gelen bir kare, önizlemenin hesaplandığı koleksiyonu değiştirmemeli.
+  /// Önizleme açılmazsa (içe aktarılacak hiçbir şey yok) bayrak düşer ve
+  /// kamera geri açılır — kullanıcı taramaya kaldığı yerden devam eder.
   Future<void> _showPreview() async {
+    if (_previewing || _preview != null) return;
     final existing = context.read<VaultCubit>().state.accounts;
+    _previewing = true;
+    await _stopCamera();
     final ImportPreview preview;
     try {
       preview = _migrationController.preview(existing: existing);
     } on EmptyImportException {
+      _previewing = false;
       _showError('Bu kodlarda içe aktarılacak token bulunamadı.');
+      await _startCamera();
       return;
     }
-    await _stopCamera();
     if (!mounted) return;
     setState(() {
       _preview = preview;
@@ -281,25 +347,30 @@ class _ScanPageState extends State<ScanPage> {
   Future<void> _confirmPartial() async {
     if (_dialogOpen) return;
     _dialogOpen = true;
-    final go = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Bu kadar yeter'),
-        content:
-            const Text('Yalnız taradığın kodlardaki hesaplar aktarılacak.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Vazgeç'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Devam'),
-          ),
-        ],
-      ),
-    );
-    _dialogOpen = false;
+    final bool? go;
+    try {
+      go = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Bu kadar yeter'),
+          content:
+              const Text('Yalnız taradığın kodlardaki hesaplar aktarılacak.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Vazgeç'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Devam'),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      // Bkz. [_askRestart]: atan bir `showDialog` bayrağı takılı bırakmasın.
+      _dialogOpen = false;
+    }
     if (go == true && mounted) await _showPreview();
   }
 
@@ -331,19 +402,43 @@ class _ScanPageState extends State<ScanPage> {
     }
   }
 
+  /// Hata SnackBar'ı — AYNI mesaj [ScanPage.errorRepeatWindow] içinde bir kez.
+  ///
+  /// Throttle şart: iOS/macOS'ta `DetectionSpeed.noDuplicates` payload
+  /// karşılaştırması YAPMAZ (`MobileScannerPlugin.swift` yalnız kare
+  /// timeout'unu 0'a çeker), yani kadrajda duran tek bir tekrarlı/bozuk QR her
+  /// karede bir olay üretir. Throttle olmadan `clearSnackBars()` +
+  /// `showSnackBar()` her karede tekrarlanır: sürekli yanıp sönen, alt bandı
+  /// örten bir şerit. Farklı bir mesaj pencereyi beklemeden gösterilir.
   void _showError(String message) {
     // Async save hatası sonrası kullanıcı ekrandan ayrılmış olabilir → disposed
     // context'e dokunma (add sheet'teki mounted korumasıyla tutarlı).
     if (!mounted) return;
+    final now = (widget.debugNow ?? DateTime.now)();
+    final lastAt = _lastErrorAt;
+    if (_lastError == message &&
+        lastAt != null &&
+        now.difference(lastAt) < ScanPage.errorRepeatWindow) {
+      return;
+    }
+    _lastError = message;
+    _lastErrorAt = now;
     final messenger = ScaffoldMessenger.maybeOf(context);
     messenger
       ?..clearSnackBars()
-      ..showSnackBar(SnackBar(content: Text(message)));
+      ..showSnackBar(SnackBar(
+        content: Text(message),
+        // Bant `bottomNavigationBar`'da duruyor; floating SnackBar Scaffold'un
+        // alt widget'larının ÜSTÜNE yerleşir (`_ScaffoldLayout` floating için
+        // `contentBottom` kullanır) → ilerleme ve aksiyonlar örtülmez.
+        behavior: SnackBarBehavior.floating,
+      ));
   }
 
   @override
   Widget build(BuildContext context) {
     final inPreview = _preview != null;
+    final inMigration = _total > 0;
     final page = Scaffold(
       appBar: AppBar(
         title: Text(_total > 0 ? 'Google Authenticator kodunu tara' : 'QR Tara'),
@@ -365,6 +460,19 @@ class _ScanPageState extends State<ScanPage> {
       body: SafeArea(
         child: inPreview ? _buildPreview(context) : _buildCamera(context),
       ),
+      // Bant gövdede DEĞİL, `bottomNavigationBar` yuvasında: floating bir
+      // SnackBar Scaffold'un alt widget'larının üstüne yerleşir, böylece hata
+      // mesajı ilerlemeyi ve üç çıkış yolunu örtmez (bkz. [_showError]).
+      bottomNavigationBar: inPreview || !inMigration
+          ? null
+          : _MigrationBand(
+              scanned: _scanned,
+              total: _total,
+              complete: _isComplete,
+              onContinue: _showPreview,
+              onStopEarly: _confirmPartial,
+              onRestart: _restart,
+            ),
     );
 
     // Kamera önizlemesi QR'ın kendisini (secret) gösterir, onay adımı da hesap
@@ -381,30 +489,15 @@ class _ScanPageState extends State<ScanPage> {
         onConfirm: _confirmImport,
       );
 
-  Widget _buildCamera(BuildContext context) {
-    final scanner = widget.debugScannerBuilder?.call(context, _handleRaw) ??
-        MobileScanner(
-          controller: _controller,
-          onDetect: _onDetect,
-          onDetectError: (error, _) => _showError('Tarama hatası: $error'),
-          errorBuilder: (context, error) => _ScanError(error: error),
-          overlayBuilder: (context, _) => const _ScanReticle(),
-        );
-    if (_total == 0) return scanner;
-    return Column(
-      children: [
-        Expanded(child: scanner),
-        _MigrationBand(
-          scanned: _scanned,
-          total: _total,
-          complete: _isComplete,
-          onContinue: _showPreview,
-          onStopEarly: _confirmPartial,
-          onRestart: _restart,
-        ),
-      ],
-    );
-  }
+  Widget _buildCamera(BuildContext context) =>
+      widget.debugScannerBuilder?.call(context, _onDetect) ??
+      MobileScanner(
+        controller: _controller,
+        onDetect: _onDetect,
+        onDetectError: (error, _) => _showError('Tarama hatası: $error'),
+        errorBuilder: (context, error) => _ScanError(error: error),
+        overlayBuilder: (context, _) => const _ScanReticle(),
+      );
 }
 
 /// Migration modunun alt bandı: ilerleme + üç çıkış yolu.
@@ -430,35 +523,40 @@ class _MigrationBand extends StatelessWidget {
     final theme = Theme.of(context);
     return Material(
       color: theme.colorScheme.surface,
-      child: Padding(
-        padding: const EdgeInsets.all(Gap.lg),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text('$scanned/$total kod tarandı',
-                style: theme.textTheme.titleMedium),
-            if (!complete) ...[
-              const SizedBox(height: Gap.xs),
-              Text(
-                'Kalan kodları sırayla okut',
-                style: theme.textTheme.bodyMedium
-                    ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+      // `bottomNavigationBar` gövdenin SafeArea'sının dışında → alt çentik
+      // dolgusunu bant kendi üstlenir.
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.all(Gap.lg),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('$scanned/$total kod tarandı',
+                  style: theme.textTheme.titleMedium),
+              if (!complete) ...[
+                const SizedBox(height: Gap.xs),
+                Text(
+                  'Kalan kodları sırayla okut',
+                  style: theme.textTheme.bodyMedium
+                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                ),
+              ],
+              const SizedBox(height: Gap.md),
+              if (complete)
+                FilledButton(onPressed: onContinue, child: const Text('Devam'))
+              else
+                OutlinedButton(
+                  onPressed: onStopEarly,
+                  child: const Text('Bu kadar yeter'),
+                ),
+              TextButton(
+                onPressed: onRestart,
+                child: const Text('Baştan başla'),
               ),
             ],
-            const SizedBox(height: Gap.md),
-            if (complete)
-              FilledButton(onPressed: onContinue, child: const Text('Devam'))
-            else
-              OutlinedButton(
-                onPressed: onStopEarly,
-                child: const Text('Bu kadar yeter'),
-              ),
-            TextButton(
-              onPressed: onRestart,
-              child: const Text('Baştan başla'),
-            ),
-          ],
+          ),
         ),
       ),
     );

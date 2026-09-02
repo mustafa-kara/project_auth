@@ -8,7 +8,7 @@ Import from a Google Authenticator **transfer QR** (`otpauth-migration://offline
 multi-code exports alike. **NO Supabase schema change, NO new crypto primitive, NO sync-protocol change, and
 [docs/CRYPTO.md](docs/CRYPTO.md) is untouched** — the imported tokens travel the same
 `VaultCubit.addAll → EncryptedVaultRepository → RawTokenStore → pushUpsert` path as Patch 1's.
-host **736/736 → 899/899**, integration unchanged (**50**, not run on a device this patch — see the manual
+host **736/736 → 909/909**, integration unchanged (**50**, not run on a device this patch — see the manual
 checklist below), `flutter analyze --fatal-infos` clean.
 
 ### The payload format
@@ -101,8 +101,9 @@ in `MobileScanner.kt`'s `lastScanned` field and refuses to emit that value again
 in `start()` and `stop()` — so after a reset, the user re-showing the very first QR would have been swallowed by
 the plugin, with no error anywhere. The reset path therefore does `stop()` + `start()`, not just a state clear.
 The mirror-image finding on iOS/macOS: there is **no** payload comparison at all there, `noDuplicates` only
-throttles the frame rate, so the same QR arrives over and over — every duplicate/dialog path is written to be
-re-entrant (`_dialogOpen`), and a late frame arriving after the preview is opened is dropped.
+throttles the frame rate, so the same QR arrives over and over. Three guards absorb the repeats: dialogs are
+re-entrant (`_dialogOpen`), a frame arriving once the preview has been requested is dropped (`_previewing`), and
+a repeated error message is throttled instead of re-snacked (see "Review follow-ups" below).
 
 ### Screen, entry points and what is deliberately not wired
 
@@ -139,6 +140,37 @@ and the real `ImportService.previewParsed` (real `detectSource`/`dedupeKey`, `Ba
 from raw QR string to a one-token preview; three codes scanned **out of order**, where the repeated token
 collapses to `duplicateInFile`; the same token already in the vault → `alreadyInVault`; and a foreign `batch_id`
 refused with the two already-scanned codes left intact.
+
+### Review follow-ups
+
+Fixes from the patch review, all on the same host-only surface:
+
+- **SnackBar flood on iOS.** `noDuplicates` does no payload comparison there (`MobileScannerPlugin.swift` only
+  forces the frame timeout to 0), so a QR left in the frame re-fired `clearSnackBars()` + `showSnackBar()` every
+  single frame. `_showError` now suppresses the **same** message for 2 seconds (`ScanPage.errorRepeatWindow`,
+  clock injectable as `debugNow`); a different message still appears immediately.
+- **The progress band moved to `bottomNavigationBar`** and error snacks are `SnackBarBehavior.floating`. A
+  floating SnackBar is laid out above the Scaffold's bottom widgets, so the counter and the three exits are no
+  longer covered by the message telling the user why nothing happened.
+- **`_restartCamera` splits `stop()` and `start()`.** A throwing `stop()` used to skip `start()` outright and
+  leave the screen with a dead camera after "start over". The test seam widened to `(stop:, start:)` so both are
+  counted separately.
+- **`_dialogOpen` is cleared in a `finally`.** A throwing `showDialog` would otherwise pin the flag and the
+  dialog would never open again.
+- **Preview race.** `_showPreview` claims the screen with a `_previewing` flag *before* its first `await` and
+  stops the camera first; a frame landing in that window is dropped instead of mutating the collection the
+  preview was computed from. If nothing is importable the flag drops and the camera restarts.
+- **Two QRs in one frame.** In migration mode every `rawValue` of a `BarcodeCapture` is processed, not just the
+  first: Android's `lastScanned` records the whole frame, so a second code held next to the first would never be
+  emitted again. Single-token mode still takes the first value.
+- **Non-canonical 10-byte varints are rejected.** On the tenth byte only bit 63 can legally be contributed, so
+  its payload must be `0x00`/`0x01`; anything else would wrap silently into a different value. Golden vector B
+  (`…ff01`) is unaffected.
+- **`maxAccounts` now counts skipped entries too.** The preview renders one eager `ExpansionTile` row per skip,
+  so an export made of nothing but unmappable entries used to sail past the 1024 ceiling.
+- **Pinned, not changed:** `?data=a&data=b` resolves to the **first** value (the rule `Uri.queryParameters`
+  applies); a test fixes it so a later refactor cannot drift to "last wins". `ImportPage._showGoogleGuide` also
+  gained a `mounted` check between the sheet's `pop` and the `push` to `/scan`.
 
 ### Not verified on a device — manual checklist
 

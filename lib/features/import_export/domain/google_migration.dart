@@ -59,8 +59,8 @@ enum MigrationAddOutcome {
   /// 0..`batchSize - 1`).
   invalidBatch,
 
-  /// Accepting it would push the collected account count past
-  /// [GoogleMigrationCollector.maxAccounts].
+  /// Accepting it would push the collected entry count (accounts **and**
+  /// skipped entries) past [GoogleMigrationCollector.maxAccounts].
   full,
 }
 
@@ -76,7 +76,13 @@ class GoogleMigrationCollector {
   /// a larger claim is malformed input.
   static const int maxBatchSize = 16;
 
-  /// Ceiling on accounts collected across all batches of one export.
+  /// Ceiling on ENTRIES collected across all batches of one export — accounts
+  /// and skipped entries together.
+  ///
+  /// Skipped entries are counted on purpose: they are not tokens, but the
+  /// preview renders one eager `ExpansionTile` row per skip, so a hostile
+  /// export made of nothing but unmappable entries would otherwise sail past
+  /// this ceiling and build an unbounded list.
   static const int maxAccounts = 1024;
 
   /// Accepted batches keyed by `batchIndex`. A map rather than a fixed-length
@@ -135,9 +141,10 @@ class GoogleMigrationCollector {
 
     var collected = 0;
     for (final stored in _batches.values) {
-      collected += stored.accounts.length;
+      collected += stored.accounts.length + stored.skipped.length;
     }
-    if (collected + batch.accounts.length > maxAccounts) {
+    if (collected + batch.accounts.length + batch.skipped.length >
+        maxAccounts) {
       return MigrationAddOutcome.full;
     }
 

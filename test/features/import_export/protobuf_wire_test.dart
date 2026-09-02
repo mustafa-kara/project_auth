@@ -147,6 +147,26 @@ void main() {
       }
     });
 
+    test('a non-canonical 10-byte varint is rejected', () {
+      // Ten bytes is the maximum, and on the tenth `shift` is 63 → only bit 63
+      // can legally be contributed, so its payload must be 0x00 or 0x01.
+      // 0x7F there is protobuf-illegal and would otherwise wrap silently.
+      final bytes = Uint8List.fromList(
+          [...List<int>.filled(ProtobufLimits.maxVarintBytes - 1, 0x80), 0x7F]);
+      expect(() => ProtobufReader(bytes).readVarint(), throwsFormatException);
+    });
+
+    test('the tenth byte may still be 0x00 or 0x01', () {
+      for (final last in const [0x00, 0x01]) {
+        final bytes = Uint8List.fromList([
+          ...List<int>.filled(ProtobufLimits.maxVarintBytes - 1, 0x80),
+          last,
+        ]);
+        expect(ProtobufReader(bytes).readVarint(), last == 0 ? 0 : 1 << 63,
+            reason: 'tenth byte 0x${last.toRadixString(16)}');
+      }
+    });
+
     test('an 11-byte varint is rejected', () {
       // Eleven continuation bytes: the reader must stop at ten, not keep going.
       final bytes = Uint8List.fromList(

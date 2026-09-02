@@ -102,7 +102,15 @@ class ProtobufReader {
       }
       final byte = _bytes[_pos++];
       // On the 10th byte `shift` is 63, so only bit 63 (the sign bit) can be
-      // contributed — exactly how proto3 sign-extends a negative int32.
+      // contributed — exactly how proto3 sign-extends a negative int32. Which
+      // is also why its payload bits may only be 0x00 or 0x01: protobuf calls
+      // anything else a non-canonical varint, and shifting those extra bits by
+      // 63 would silently wrap into a *different* value instead of failing.
+      // Golden vector B's `…ff01` ends in 0x01 and is unaffected.
+      if (i == ProtobufLimits.maxVarintBytes - 1 && (byte & 0x7F) > 0x01) {
+        throw FormatException(
+            'protobuf: non-canonical 10-byte varint at offset ${_pos - 1}');
+      }
       result |= (byte & 0x7F) << shift;
       if ((byte & 0x80) == 0) return result;
       shift += 7;

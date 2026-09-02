@@ -215,6 +215,26 @@ void main() {
       }
     });
 
+    test('a repeated "data" parameter resolves to the FIRST one', () {
+      // Behaviour pin, not a preference: no legitimate export carries two
+      // `data` parameters, so this only decides which half of a malformed QR
+      // is rejected. `Uri.queryParameters` picks the first as well; pinning it
+      // keeps a later refactor from silently drifting to "last wins".
+      final first = base64.encode(encodeMigrationPayload(entries: [_entry()]));
+      final second = base64.encode(
+          encodeMigrationPayload(entries: [_entry(name: 'bob@example.com')]));
+      final batch = GoogleAuthParser.parseUri(
+          'otpauth-migration://offline?data=$first&data=$second');
+      expect(batch.accounts.single.accountName, 'alice@example.com');
+
+      // Mirror image: a broken FIRST value fails even though the second is
+      // perfectly valid.
+      expect(
+          () => GoogleAuthParser.parseUri(
+              'otpauth-migration://offline?data=!!!!&data=$second'),
+          throwsA(isA<MalformedMigrationUriException>()));
+    });
+
     test('an empty string is refused', () {
       expect(() => GoogleAuthParser.parseUri('   '),
           throwsA(isA<MalformedMigrationUriException>()));

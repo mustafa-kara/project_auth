@@ -221,6 +221,12 @@ abstract final class GoogleAuthParser {
   ///
   /// Only the value is percent-decoded, by the caller: decoding before the
   /// `&`/`=` split would let an encoded separator forge an extra parameter.
+  ///
+  /// A repeated key (`?data=a&data=b`) resolves to the **first** occurrence and
+  /// the rest are ignored — the same rule `Uri.queryParameters` applies. There
+  /// is no legitimate export with two `data` parameters, so the choice only
+  /// decides which half of a malformed QR is rejected; pinning it keeps the
+  /// answer from drifting into "last wins" on a later refactor.
   static String? _queryValue(String query, String key) {
     if (query.isEmpty) return null;
     for (final pair in query.split('&')) {

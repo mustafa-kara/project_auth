@@ -328,6 +328,9 @@ class _ImportPageState extends State<ImportPage> {
               FilledButton(
                 onPressed: () {
                   Navigator.of(sheetCtx).pop();
+                  // Sheet kapanırken sayfa da sökülmüş olabilir (geri tuşu,
+                  // rota değişimi) → disposed context'le push etme.
+                  if (!mounted) return;
                   // Testlerde sayfa GoRouter'sız pump edilebiliyor (mevcut
                   // önizleme testleri) → `maybeOf` ile sessiz kal.
                   GoRouter.maybeOf(context)?.push(Routes.scan);

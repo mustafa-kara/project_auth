@@ -2,15 +2,19 @@
 ///
 /// `MobileScanner` host VM'de kamera + plugin ister → hiç render EDİLMEZ:
 /// `ScanPage.debugScannerBuilder` yer tutucu bir widget döndürür ve verilen
-/// `onRaw` geri çağrısı, gerçek bir QR karesinin girdiği yolun ta kendisidir.
+/// `onDetect` geri çağrısı, gerçek bir kamera karesinin girdiği yolun ta
+/// kendisidir (`BarcodeCapture` → `_onDetect`).
 /// Migration beyni de (`debugMigration`) enjekte edilir; böylece bu testler
 /// W1'in protobuf gövdelerinden bağımsızdır.
 library;
+
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:project_auth/core/otp/otp_account.dart';
 import 'package:project_auth/core/platform/secure_screen.dart';
 import 'package:project_auth/features/import_export/domain/import_exceptions.dart';
@@ -94,16 +98,28 @@ class _FakeMigration implements MigrationScanController {
   bool get isEmpty => seen.isEmpty;
 }
 
+/// Tek kameradan gelen bir kare: istenen ham değerleri taşıyan `BarcodeCapture`.
+BarcodeCapture _capture(List<String> raws) => BarcodeCapture(
+      barcodes: [for (final raw in raws) Barcode(rawValue: raw)],
+    );
+
 /// Yer tutucu "kamera": her QR için bir düğme. Basmak = o kareyi okumak.
-Widget _fakeScanner(BuildContext context, void Function(String raw) onRaw) =>
+/// `scan:iki` TEK karede iki migration QR'ı yayınlar (kullanıcı iki kodu yan
+/// yana tutmuş).
+Widget _fakeScanner(
+        BuildContext context, void Function(BarcodeCapture capture) onDetect) =>
     Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         for (final raw in const [_qrA, _qrB, _singleToken])
           TextButton(
-            onPressed: () => onRaw(raw),
+            onPressed: () => onDetect(_capture([raw])),
             child: Text('scan:${raw.substring(raw.length - 4)}'),
           ),
+        TextButton(
+          onPressed: () => onDetect(_capture(const [_qrA, _qrB])),
+          child: const Text('scan:iki'),
+        ),
       ],
     );
 
@@ -115,7 +131,9 @@ Future<VaultCubit> _pumpScan(
   required _FakeMigration migration,
   _FakeRepo? repo,
   List<OtpAccount> existing = const [],
-  void Function()? onRestart,
+  Future<void> Function()? onStop,
+  Future<void> Function()? onStart,
+  DateTime Function()? now,
 }) async {
   final vault = VaultCubit(repo ?? _FakeRepo());
   await vault.load();
@@ -125,7 +143,11 @@ Future<VaultCubit> _pumpScan(
   final page = ScanPage(
     debugMigration: migration,
     debugScannerBuilder: _fakeScanner,
-    debugRestartCamera: () async => onRestart?.call(),
+    debugCamera: (
+      stop: onStop ?? () async {},
+      start: onStart ?? () async {},
+    ),
+    debugNow: now,
   );
 
   await tester.pumpWidget(
@@ -240,9 +262,9 @@ void main() {
 
     testWidgets('"Vazgeç" → toplanan kodlar korunur, reset yok', (tester) async {
       final migration = build();
-      var restarts = 0;
+      var starts = 0;
       await _pumpScan(tester,
-          migration: migration, onRestart: () => restarts++);
+          migration: migration, onStart: () async => starts++);
 
       await tester.tap(_scan('AAAA'));
       await tester.pumpAndSettle();
@@ -257,16 +279,21 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(migration.resets, 0);
-      expect(restarts, 0);
+      expect(starts, 0);
       expect(find.text('1/3 kod tarandı'), findsOneWidget);
     });
 
     testWidgets('"Baştan başla" → reset + kamera yeniden başlatılır',
         (tester) async {
       final migration = build();
-      var restarts = 0;
-      await _pumpScan(tester,
-          migration: migration, onRestart: () => restarts++);
+      var stops = 0;
+      var starts = 0;
+      await _pumpScan(
+        tester,
+        migration: migration,
+        onStop: () async => stops++,
+        onStart: () async => starts++,
+      );
 
       await tester.tap(_scan('AAAA'));
       await tester.pumpAndSettle();
@@ -280,7 +307,36 @@ void main() {
       expect(migration.resets, 1);
       // mobile_scanner 7.4 NO_DUPLICATES belleği yalnız stop()/start() ile
       // temizlenir → aynı QR yeniden okunabilsin diye kamera restart ŞART.
-      expect(restarts, 1);
+      expect(stops, 1);
+      expect(starts, 1);
+      expect(find.textContaining('kod tarandı'), findsNothing);
+    });
+
+    testWidgets('stop() hata verse de start() ATLANMAZ', (tester) async {
+      final migration = build();
+      var stops = 0;
+      var starts = 0;
+      await _pumpScan(
+        tester,
+        migration: migration,
+        onStop: () async {
+          stops++;
+          throw StateError('kamera durdurulamadı');
+        },
+        onStart: () async => starts++,
+      );
+
+      await tester.tap(_scan('AAAA'));
+      await tester.pumpAndSettle();
+      await tester.tap(_scan('BBBB'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Baştan başla'));
+      await tester.pumpAndSettle();
+
+      expect(stops, 1);
+      // Yoksa "Baştan başla" sonrası ekran ölü kalırdı: kamera durmuş
+      // sayılıp bir daha başlatılmaz.
+      expect(starts, 1);
       expect(find.textContaining('kod tarandı'), findsNothing);
     });
   });
@@ -472,6 +528,120 @@ void main() {
       expect(vault.state.accounts, isEmpty);
       expect(find.text('1/3 kod tarandı'), findsOneWidget);
     });
+  });
+
+  group('tek karede birden çok barkod', () {
+    testWidgets('migration modunda karedeki TÜM kodlar işlenir',
+        (tester) async {
+      final migration = _FakeMigration(script: const {
+        _qrA: MigrationBatchAdded(1, 2),
+        _qrB: MigrationScanComplete(2, 2),
+      });
+      await _pumpScan(tester, migration: migration);
+
+      await tester.tap(_scan('AAAA'));
+      await tester.pumpAndSettle();
+      expect(find.text('1/2 kod tarandı'), findsOneWidget);
+
+      // Android'de `lastScanned` karenin tamamını yazar → ikinci QR bir daha
+      // yayınlanmaz. Yalnız ilkini alsaydık o kod SONSUZA DEK kaybolurdu.
+      await tester.tap(find.text('scan:iki'));
+      await tester.pumpAndSettle();
+
+      expect(migration.seen, [_qrA, _qrA, _qrB]);
+      expect(find.text('2/2 kod tarandı'), findsOneWidget);
+    });
+
+    testWidgets('tek-token modunda karenin yalnız ilk barkodu işlenir',
+        (tester) async {
+      final migration =
+          _FakeMigration(script: const {_qrA: MigrationBatchAdded(1, 2)});
+      await _pumpScan(tester, migration: migration);
+
+      await tester.tap(find.text('scan:iki'));
+      await tester.pumpAndSettle();
+
+      expect(migration.seen, [_qrA]);
+      expect(find.text('1/2 kod tarandı'), findsOneWidget);
+    });
+  });
+
+  testWidgets('önizleme açılırken gelen ham QR YOK SAYILIR', (tester) async {
+    final stopGate = Completer<void>();
+    final migration = _FakeMigration(
+      script: const {
+        _qrA: MigrationScanComplete(1, 1),
+        _qrB: MigrationBatchAdded(2, 2),
+      },
+      previewResult:
+          ImportPreview(source: ImportSource.googleAuth, toAdd: [_acc('a')]),
+    );
+    await _pumpScan(tester, migration: migration, onStop: () => stopGate.future);
+
+    await tester.tap(_scan('AAAA'));
+    await tester.pumpAndSettle();
+    expect(migration.seen, [_qrA]);
+
+    // "Devam" → `_showPreview` kamerayı durdurmayı BEKLİYOR; iOS'ta bu
+    // pencerede aynı/başka bir kare gelmeye devam eder.
+    await tester.tap(find.widgetWithText(FilledButton, 'Devam'));
+    await tester.pump();
+    await tester.tap(_scan('BBBB'));
+    await tester.pump();
+
+    expect(migration.seen, [_qrA],
+        reason: 'önizleme istendikten sonra gelen kare koleksiyona girmemeli');
+
+    stopGate.complete();
+    await tester.pumpAndSettle();
+    expect(find.text('1 token içe aktarılacak'), findsOneWidget);
+  });
+
+  testWidgets('aynı hata üst üste → tek SnackBar, pencere dolunca yeniden',
+      (tester) async {
+    var now = DateTime(2026, 1, 1);
+    final migration = _FakeMigration(script: const {
+      _qrA: MigrationBatchAdded(1, 2),
+      _qrB: MigrationDuplicateScan(),
+    });
+    await _pumpScan(tester, migration: migration, now: () => now);
+
+    double snackBarValue() =>
+        tester.widget<SnackBar>(find.byType(SnackBar)).animation!.value;
+
+    await tester.tap(_scan('AAAA'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(_scan('BBBB'));
+    await tester.pumpAndSettle();
+    expect(find.text('Bu kod zaten okundu'), findsOneWidget);
+    expect(snackBarValue(), 1.0);
+
+    // Kadrajda duran QR: iOS'ta `noDuplicates` payload karşılaştırmadığı için
+    // aynı olay her karede yeniden gelir. Throttle olmadan her tekrar
+    // `clearSnackBars()` çağırır → gizlenme animasyonu başlar.
+    for (var i = 0; i < 4; i++) {
+      await tester.tap(_scan('BBBB'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 60));
+    }
+    expect(find.byType(SnackBar), findsOneWidget);
+    // Yeniden gösterilseydi `clearSnackBars()` gizlenme animasyonunu
+    // başlatırdı ve değer 1.0'ın altına düşerdi.
+    expect(snackBarValue(), 1.0,
+        reason: 'throttle: SnackBar hiç yeniden gösterilmedi');
+    expect(migration.seen.length, 6, reason: 'kareler yine de işlendi');
+
+    // Pencere dolunca aynı mesaj yeniden gösterilir.
+    now = now.add(ScanPage.errorRepeatWindow);
+    await tester.tap(_scan('BBBB'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 60));
+    expect(snackBarValue(), lessThan(1.0),
+        reason: 'pencere doldu → eski SnackBar gizlenip yenisi kuyruğa girdi');
+
+    await tester.pumpAndSettle();
+    expect(find.text('Bu kod zaten okundu'), findsOneWidget);
   });
 
   group('güvenlik', () {
