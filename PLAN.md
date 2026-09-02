@@ -90,17 +90,25 @@
 
 ## Phase 5 — Import/Export + service catalog (weeks 5–6)
 > **Patch 1 (2026-09-02) — DONE:** Aegis + 2FAS import and the encrypted backup export.
+> **Patch 2 (2026-09-02) — DONE:** Google Authenticator transfer-QR import (hand-written protobuf decoder,
+> multi-QR batch collector, migration mode inside the existing `ScanPage`).
 > **NO server schema change, NO new crypto primitive.** Details: [CHANGELOG 2026-09-02](CHANGELOG.md).
 - [x] **Import: Aegis, 2FAS** ✅ (Patch 1, 2026-09-02) — plain-JSON Aegis (`db`/`header`) and 2FAS schema v4, format
   auto-detection, tolerant per-entry skipping (the file never fails as a whole), Base32-canonicalizing dedupe key,
   preview → confirm → single `VaultCubit.addAll`.
-- [ ] Import: **Google Authenticator** (migration protobuf payload) → **Patch 2**.
+- [x] **Import: Google Authenticator** ✅ (Patch 2, 2026-09-02) — `otpauth-migration://` transfer QR: hand-written
+  protobuf wire decoder (no codegen; proto3 field presence is what keeps a counter-less HOTP entry from being
+  imported with a guessed 0), multi-QR batch collector (any scan order, a foreign `batch_id` is never merged,
+  partial import allowed), migration mode inside the existing `ScanPage` — no new route, no guard or DI change.
 - [x] **Export (encrypted backup)** ✅ (Patch 1, 2026-09-02) — own `projectauth-backup` v1 envelope, Argon2id +
   XChaCha20-Poly1305 through the existing `CryptoService`, KDF parameters bound into the AAD. The backup password is
   independent of the master password.
 - [x] **Issuer logo/matching via `catalog_services`** ✅ — already delivered in Phase 3 Patch 4 (issuer canonicalization;
   `logo_url` is deliberately ignored for offline/privacy).
-- [ ] Tag/folder organization → **Patch 3** (this patch deliberately does not read Aegis/2FAS `groups`).
+- [ ] Tag/folder organization → **Patch 3** (neither patch reads Aegis/2FAS `groups`; Google's payload has no
+  grouping field at all).
+- [ ] Import a migration QR from a **pasted link** or a **saved QR image file** → **Patch 3** (Patch 2 covers the
+  live camera only; both need a decoder the camera path does not have).
 - **Deps note:** `file_picker` is held at **^11.0.3**. `file_picker >=12.1.3` pulls `windows_file_picker` → `win32 ^6.3.0`,
   while `device_info_plus ^12.1.0` requires `win32 ^5.11.0` → the 12.x line does not resolve. 11.0.3 has the same
   `withData` / `saveFile(bytes:)` API.

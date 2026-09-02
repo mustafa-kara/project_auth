@@ -2,6 +2,155 @@
 
 Project progress log. Newest at the top.
 
+## 2026-09-02 (Phase 5 Patch 2 — Google Authenticator import)
+
+Import from a Google Authenticator **transfer QR** (`otpauth-migration://offline?data=…`), single- and
+multi-code exports alike. **NO Supabase schema change, NO new crypto primitive, NO sync-protocol change, and
+[docs/CRYPTO.md](docs/CRYPTO.md) is untouched** — the imported tokens travel the same
+`VaultCubit.addAll → EncryptedVaultRepository → RawTokenStore → pushUpsert` path as Patch 1's.
+host **736/736 → 899/899**, integration unchanged (**50**, not run on a device this patch — see the manual
+checklist below), `flutter analyze --fatal-infos` clean.
+
+### The payload format
+
+Google's export QR is not an `otpauth://` URI: it is a base64 **protobuf** `MigrationPayload` in the `data`
+query parameter. Seven fields, all of them handled:
+
+```
+MigrationPayload { repeated OtpParameters otp_parameters = 1; int32 version = 2;
+                   int32 batch_size = 3; int32 batch_index = 4; int32 batch_id = 5; }
+OtpParameters    { bytes secret = 1; string name = 2; string issuer = 3;
+                   Algorithm algorithm = 4; DigitCount digits = 5; OtpType type = 6; int64 counter = 7; }
+```
+
+`version` is read and validated but is **never a reason to reject** a payload — a future exporter bump must not
+turn a user's tokens into an error message. `batch_id` is a **signed** `int32`: 0 is a perfectly ordinary value
+and a negative one arrives sign-extended as a full 10-byte varint, so the collector's "which export is this?"
+state is a nullable `int?` rather than a sentinel, and the decoder accepts 10-byte varints.
+
+### Why a hand-written protobuf decoder
+
+`features/import_export/data/protobuf_wire.dart` is ~200 lines of `ProtobufReader` (tag / varint /
+length-delimited / skip). No `protobuf` package, no `build_runner`:
+
+- **The project has no codegen anywhere.** Adding a generator and a `.proto` build step for one 7-field message
+  would be the single largest tooling change in the repo, for the smallest payload in it.
+- **Proto3 field presence is the whole HOTP rule.** A generated message hands back `counter == 0` for both "the
+  counter is zero" and "there is no counter field", and the two are not the same token: Patch 1's doctrine is
+  that an HOTP entry with no counter is **skipped**, never defaulted to 0 (a guessed counter silently produces
+  codes the server rejects). Tracking presence is trivial in a hand-written reader and awkward otherwise.
+
+Hard limits, each a `FormatException` rather than an allocation: URI **8 KiB**, decoded payload **64 KiB**
+(estimated from the base64 length *before* decoding), **256** entries per QR, **1024** accounts across an
+export, **16** codes per export, 1024-byte secrets, 512-byte strings, 10-byte varints. Wire types 3/4 (the
+deprecated groups) are refused, unknown fields are skipped, a repeated scalar takes the last value, and strings
+are decoded with `allowMalformed: false` — a mojibake `name` skips that one entry instead of failing the QR.
+
+### The `Uri.queryParameters` trap
+
+`Uri.queryParameters` applies `application/x-www-form-urlencoded` rules, where **`+` means space**. Standard
+base64 uses `+` as a symbol, so any payload whose base64 happens to contain one would silently decode into
+garbage — intermittently, depending on the secret bytes. `GoogleAuthParser` therefore splits `uri.query` on
+`&`/`=` by hand and runs `Uri.decodeComponent` itself. Both the raw and the percent-encoded form of the same QR
+must produce identical accounts; golden vector B (`3e3ffbefbefa…`, chosen so its base64 is `+`-heavy) exists
+exactly to pin that.
+
+### Field mapping
+
+| Proto | → | Rule |
+|---|---|---|
+| `secret` | `secret` | `Base32.encode(bytes)` — encode, not decode: every byte string has a Base32 form, so there is no error path that could quote a secret. Empty → `invalidSecret`. |
+| `name` | `accountName` (+ issuer fallback) | Split on the first `:`, the same rule as the `otpauth://` parser. |
+| `issuer` | `issuer` | The dedicated field wins; otherwise the `name` label prefix; otherwise `null`. Empty account name → issuer → `(isimsiz)`. |
+| `algorithm` | | 0/1 → SHA1, 2 → SHA256, 3 → SHA512, **4 (MD5) → skipped** (`unsupportedType`), anything else → `invalidFields`. |
+| `digits` | | **0 (UNSPECIFIED) → 6**, 1 → 6, 2 → 8, anything else → `invalidFields`. |
+| `type` | | **0 (UNSPECIFIED) → skipped**: HOTP and TOTP are not interchangeable and an unlabelled entry cannot be guessed. 1 → HOTP, 2 → TOTP. |
+| `counter` | | HOTP with **no counter field at all** → `invalidFields`; negative → `invalidFields`; ignored for TOTP. |
+| — | `period` | Always **30**. The format has no period field; Google's exporter only ever writes 30-second TOTP. |
+
+Every skip is a `SkippedEntry(reason, label)` — an `"Issuer (account)"` label at most, **never a secret**, and
+the underlying exception message is never propagated. One bad entry never costs the user the rest of the QR.
+
+### Why Steam is deliberately NOT promoted here
+
+Patch 1 promotes an Aegis/2FAS entry whose issuer is `steam` to `OtpType.steam`. This importer **does not**, on
+purpose: Google Authenticator cannot hold a Steam token in the first place (Steam's codec is 5-digit and
+non-RFC), so an entry that merely *says* "Steam" is an ordinary 6-digit TOTP the user set up under that name.
+Promoting it would rewrite a working token into one that generates wrong codes — the exact failure the Patch 1
+review fixed in the 2FAS heuristic. The `period 30` default has the same shape of reasoning.
+
+### Multi-QR exports — `GoogleMigrationCollector`
+
+A large vault leaves Google as several QRs sharing one `batch_id`, each stamped with its `batch_index` of
+`batch_size`. The collector (`domain/google_migration.dart`, pure Dart) stitches them back:
+
+- The first accepted code **pins** `batch_id` and `batch_size`; the codes may then be scanned **in any order**
+  (`toParsedImport` re-orders by `batchIndex`, so the preview is stable).
+- A code from **another export** (`differentBatch`) is **never merged** — not even partially. Every check runs
+  before a single field is written, so a stray or hostile QR cannot corrupt what the user already scanned; the
+  screen offers "start over" instead.
+- Re-scanning a code already collected is a no-op (`duplicateIndex`), self-inconsistent coordinates (index 3 of
+  2) are `invalidBatch`, and exceeding 1024 accounts is `full`.
+- **A partial import is allowed.** "Bu kadar yeter" imports what has been scanned; the dedupe key means a later
+  complete run adds the rest instead of cloning the first half.
+
+### `mobile_scanner` finding: `noDuplicates` survives a reset (Android)
+
+"Baştan başla" clears the collector, but on Android `DetectionSpeed.noDuplicates` keeps the last emitted payload
+in `MobileScanner.kt`'s `lastScanned` field and refuses to emit that value again. The field is nulled **only**
+in `start()` and `stop()` — so after a reset, the user re-showing the very first QR would have been swallowed by
+the plugin, with no error anywhere. The reset path therefore does `stop()` + `start()`, not just a state clear.
+The mirror-image finding on iOS/macOS: there is **no** payload comparison at all there, `noDuplicates` only
+throttles the frame rate, so the same QR arrives over and over — every duplicate/dialog path is written to be
+re-entrant (`_dialogOpen`), and a late frame arriving after the preview is opened is dropped.
+
+### Screen, entry points and what is deliberately not wired
+
+- **One `ScanPage`, no new route, no guard or DI change.** `_onDetect` asks
+  `GoogleAuthParser.looksLikeMigrationUri(raw)` first and switches into migration mode by *schema detection*;
+  everything else still takes the single-token `otpauth://` path. While a migration is in progress a plain
+  single-token QR is **not** added — mixing one stray code into a batch import is never what the user meant.
+- **`ScanPage` is now wrapped in `SecureScreenScope`.** It was not before, and it is the one screen that renders
+  a QR — i.e. a secret — full-bleed. Cold deep-links into `/scan` previously left screenshot protection off.
+  The ref-counted scope nests safely with the pages that already use it.
+- **`MigrationScanController`** (`features/scan/presentation/migration_scan_controller.dart`) holds every
+  migration rule in plain Dart — no Flutter, no plugin, no `BuildContext` — because `MobileScanner` needs a real
+  camera that the `flutter test` VM does not have. `handleRaw` never throws: a hostile QR is a UI message, and
+  the three failure causes (bad URI, bad base64, bad protobuf) collapse into **one** event on purpose, since the
+  cause is derived from secret material.
+- **Paste guard:** pasting a migration link into the vault's "add by URI" sheet is refused with
+  "Bu bir Google Authenticator aktarım bağlantısı. Ekle → \"QR kod tara\" ile okut." — `add` is never called with
+  a protobuf blob.
+- **`ImportPreviewView`** (`presentation/widgets/import_preview_view.dart`): the preview block moved out of
+  `ImportPage` so the file import and the QR import share one widget and one set of strings (which is why the
+  existing `import_page` preview tests still pass unchanged). `ImportPage` gained a "Google Authenticator (QR)"
+  action with a short how-to sheet.
+- **Deferred to Patch 3:** pasting a migration URI and picking a QR *image file* (both need a decoder the camera
+  path does not), plus tags/folders.
+
+### Tests
+
+`test/support/protobuf_encoder.dart` is a test-only **encoder** — no real Google export may enter this
+repository, since that would be a committed bundle of live secrets, so every fixture is synthesized. It was
+written by hand against the plan's independently derived golden vectors and compared byte for byte before any
+decode was trusted, so the decoder is never checked against itself.
+`end_to_end_test.dart` grew a migration group that runs the real parser, the real collector, the real controller
+and the real `ImportService.previewParsed` (real `detectSource`/`dedupeKey`, `BackupFakeCrypto`): golden vector A
+from raw QR string to a one-token preview; three codes scanned **out of order**, where the repeated token
+collapses to `duplicateInFile`; the same token already in the vault → `alreadyInVault`; and a foreign `batch_id`
+refused with the two already-scanned codes left intact.
+
+### Not verified on a device — manual checklist
+
+Everything above is covered on the host VM against synthesized payloads. Before release:
+
+- export from a **real Google Authenticator** — both a **single-QR** vault and a **multi-QR** one — and import
+  both on a real device; confirm the resulting codes match what Google shows;
+- on **iOS**, watch the UX of the same QR re-triggering (no `lastScanned` there): the counter must not climb, no
+  dialog may stack, and "Baştan başla" must accept the first code again;
+- re-scan an export whose tokens are already in the vault → everything must read "already in your vault", not a
+  second copy.
+
 ## 2026-09-02 (Phase 5 Patch 1 — Import/Export)
 
 Aegis + 2FAS import and a password-encrypted backup export. **NO Supabase schema change, NO new crypto

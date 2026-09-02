@@ -46,9 +46,22 @@ End-to-end (E2E) encrypted, multi-device synchronized **TOTP/HOTP authenticator*
 | Flutter — Phase 3 devices+catalog (Patch 4) | ✅ `devices` record (random `device_id` uuid v4, GLOBAL; signedIn→register, resume→`last_seen` heartbeat + 0-row register-fallback; owner-only RLS). Public read tables (read-only): `catalog_services` → add-token issuer canonicalization (`logo_url` is IGNORED — offline/privacy), `feature_flags` → **`token_sync_enabled` kill-switch** (gate inside `TokenSyncService` → Realtime bypass disabled; `ensureLoaded` cache-ready; fallback=true; token sync ONLY — key_attributes excluded), `announcements` → read-only Settings section (`audience` client-filtered). NO Realtime → fetch+cache. **Cross-account correlation tradeoff documented.** Server schema unchanged; E2E untouched. · **host 413/413** |
 | Flutter — Phase 3.5 hardening | ✅ Security review fixes (release manifest + Auto Backup off, master password **min 12 + ≥3 character classes**, conditional clipboard auto-clear, `resetVault` server tombstone cleanup + `ResetPendingStore` retry, strict `OtpAccount.fromJson`), **ref-counted `SecureScreen`/`SecureScreenScope`** on vault/unlock/setup/recovery, Supabase config **fail-fast** (embedded fallbacks removed, `--dart-define` only), 8 unused codegen/test packages dropped + minor upgrades, **GitHub Actions CI** · **host 454/454** |
 | Flutter — Phase 5 Patch 1 (import/export) | ✅ (2026-09-02) Aegis (plain JSON) + 2FAS (schema v4) import: format auto-detection, tolerant per-entry skipping, Base32-canonicalizing dedupe key, preview → confirm → single `VaultCubit.addAll`. **Encrypted backup export** (`projectauth-backup` v1: Argon2id + XChaCha20-Poly1305 through the existing `CryptoService`, KDF parameters bound into the AAD, backup password independent of the master password). `file_picker ^11.0.3` `DocumentPort`, `/import` `/export` routes + guard, budgeted lock exemption for the system file picker ([docs/CRYPTO.md §17](docs/CRYPTO.md)). **Server schema unchanged.** · **host 713/713** |
+| Flutter — Phase 5 Patch 2 (Google Authenticator import) | ✅ (2026-09-02) `otpauth-migration://` transfer-QR import: hand-written protobuf wire decoder (**no codegen** — proto3 field presence is what keeps a counter-less HOTP entry from being imported with a guessed 0), multi-QR batch collector (any scan order; a code from another export is never merged; partial import allowed), migration mode inside the existing `ScanPage` (no new route, no guard/DI change) + `SecureScreenScope` on the scan screen, shared `ImportPreviewView`, paste guard in the add-by-URI sheet. MD5 and unlabelled-type entries are skipped, not guessed; **Steam is deliberately not promoted** (Google cannot hold a Steam token). **Server schema unchanged, docs/CRYPTO.md unchanged.** · **host 899/899** |
 | Admin panel (Next.js) | ⏳ Phase 6 |
 
 **Live backend project:** `authenticator-dev` (Supabase, eu-central-1, PG17). Details: [PROJECT_INFO.md](supabase/PROJECT_INFO.md).
+
+### Import source support
+
+| Source | Support | Note |
+|---|---|---|
+| Aegis — plain JSON export | ✅ | `db`/`header` schema, auto-detected |
+| 2FAS — schema v4 export | ✅ | `services` |
+| Google Authenticator — transfer QR | ✅ | `otpauth-migration://`, single- and multi-QR exports |
+| project_auth — own encrypted backup | ✅ | `projectauth-backup` v1, opens with the backup password |
+| Aegis / 2FAS — **encrypted** export | ❌ | Recognized and named (`EncryptedSourceException`), not decrypted: export the plain file from the source app |
+
+The QR import needs the live camera; a pasted migration link or a saved QR image file is Patch 3.
 
 ---
 
@@ -60,7 +73,7 @@ End-to-end (E2E) encrypted, multi-device synchronized **TOTP/HOTP authenticator*
 3. **Supabase auth + sync** — DB ✅; Flutter Patch 1 (auth) ✅ + Patch 2 (key_attributes) ✅ + Patch 3 (token sync + changePassword UPDATE) ✅ + Patch 4 (devices + catalog/feature_flags/announcements + token_sync kill-switch) ✅ — **Phase 3 DONE**
    - **Phase 3.5 — CI, deps, hardening (2026-09-01) — DONE:** GitHub Actions (`analyze --fatal-infos` + `test`), unused-dependency cleanup, ref-counted screen-capture protection, Supabase config fail-fast
 4. **Social sign-in + push** — Google/Apple Sign-In, FCM *(developer accounts required)*
-5. **Import/Export + catalog** — Patch 1 (Aegis + 2FAS import, encrypted backup export) ✅ 2026-09-02; Google Authenticator (protobuf) → Patch 2, tags/folders → Patch 3
+5. **Import/Export + catalog** — Patch 1 (Aegis + 2FAS import, encrypted backup export) ✅ 2026-09-02 + Patch 2 (Google Authenticator transfer QR) ✅ 2026-09-02; tags/folders and migration import from a pasted link / QR image file → Patch 3
 6. **Admin panel** — Next.js, analytics, announcements/push, feature flags
 7. **Hardening & release** — security review, store
 
@@ -128,10 +141,11 @@ lib/
   features/
     vault/      data/ — VaultRepository (secure_storage persistence)
                 presentation/{bloc,pages,widgets} — VaultCubit, VaultPage (search), OtpCard
-    scan/       presentation — ScanPage (mobile_scanner QR scanning)
-    import_export/  domain/ — ImportService, BackupService, DocumentPort (pure Dart)
-                data/ — AegisParser, TwoFasParser, FilePickerDocumentPort
-                presentation/pages — ImportPage, ExportPage
+    scan/       presentation — ScanPage (mobile_scanner QR scanning; migration mode),
+                MigrationScanController (camera-free migration brain)
+    import_export/  domain/ — ImportService, BackupService, DocumentPort, GoogleMigrationCollector (pure Dart)
+                data/ — AegisParser, TwoFasParser, ProtobufReader, GoogleAuthParser, FilePickerDocumentPort
+                presentation/pages — ImportPage, ExportPage; widgets/ — ImportPreviewView
   main.dart     DI init + MaterialApp.router + VaultCubit provider
 test/
   core/otp/     RFC 4226/6238 test vectors + URI parse tests

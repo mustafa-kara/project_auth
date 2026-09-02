@@ -8,6 +8,12 @@
 /// passes when the pieces are actually connected the way `locator.dart`
 /// connects them.
 ///
+/// Phase 5 Patch 2 adds the Google Authenticator path to the same idea: the
+/// REAL `GoogleAuthParser`, the REAL `GoogleMigrationCollector` and the REAL
+/// `MigrationScanController` feeding the REAL `ImportService.previewParsed`.
+/// Only the camera is missing — `handleRaw` takes the string a `MobileScanner`
+/// would have produced.
+///
 /// Crypto is [BackupFakeCrypto] because libsodium's plugin does not load on the
 /// host VM (docs/CRYPTO.md §10); the real primitives are covered in
 /// `integration_test/`.
@@ -15,6 +21,7 @@ library;
 
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:project_auth/core/otp/otp_account.dart';
@@ -24,8 +31,10 @@ import 'package:project_auth/features/import_export/domain/backup_service.dart';
 import 'package:project_auth/features/import_export/domain/import_exceptions.dart';
 import 'package:project_auth/features/import_export/domain/import_models.dart';
 import 'package:project_auth/features/import_export/domain/import_service.dart';
+import 'package:project_auth/features/scan/presentation/migration_scan_controller.dart';
 
 import '../../support/fake_crypto.dart';
+import '../../support/protobuf_encoder.dart';
 
 const _backupPassword = 'Yedek-Parolam-123';
 
@@ -39,6 +48,42 @@ ImportService _service(BackupService backup) =>
 
 int _countOf(ImportPreview p, SkipReason reason) =>
     p.skipped.where((e) => e.reason == reason).length;
+
+/// Plan §1 golden vector A, percent-encoded: one TOTP entry
+/// (`Example` / `alice@example.com`, secret bytes `48656c6c6f21deadbeef`),
+/// `batch_size` 1. Pinned as a literal on purpose — if the encoder below and
+/// the decoder ever drifted together, this string would still catch it.
+const _vectorAUri = 'otpauth-migration://offline?data='
+    'Ci4KCkhlbGxvId6tvu8SEWFsaWNlQGV4YW1wbGUuY29tGgdFeGFtcGxlIAEoATACEAEYASAAKAA%3D';
+
+/// A TOTP `OtpParameters` body: SHA1 / 6 digits, the shape Google exports.
+Uint8List _entry({
+  required String secretHex,
+  required String name,
+  required String issuer,
+}) =>
+    encodeOtpParameters(
+      secret: fromHex(secretHex),
+      name: name,
+      issuer: issuer,
+      algorithm: ProtoAlgorithm.sha1,
+      digits: ProtoDigits.six,
+      type: ProtoOtpType.totp,
+    );
+
+/// One QR of a multi-code export: [entries] stamped with the batch coordinates.
+String _batchUri({
+  required List<Uint8List> entries,
+  required int batchIndex,
+  required int batchSize,
+  required int batchId,
+}) =>
+    migrationUri(encodeMigrationPayload(
+      entries: entries,
+      batchSize: batchSize,
+      batchIndex: batchIndex,
+      batchId: batchId,
+    ));
 
 void main() {
   late BackupService backup;
@@ -167,6 +212,139 @@ void main() {
         ),
         throwsA(isA<WrongBackupPasswordException>()),
       );
+    });
+  });
+
+  group('Google Authenticator migration end to end', () {
+    // Same three tokens throughout: #3 repeats #1 (identical secret, issuer and
+    // account name) the way a user who exported an already-duplicated vault
+    // gets it back.
+    const aliceSecretHex = '48656c6c6f21deadbeef'; // Base32 JBSWY3DPEHPK3PXP
+    const bobSecretHex = '4b6579732d666f722d626f62';
+
+    late MigrationScanController controller;
+
+    setUp(() => controller = MigrationScanController(service));
+
+    List<String> threeCodes({int batchId = 77}) {
+      final alice =
+          _entry(secretHex: aliceSecretHex, name: 'alice@example.com', issuer: 'Example');
+      final bob = _entry(secretHex: bobSecretHex, name: 'bob@example.com', issuer: 'ACME');
+      final aliceAgain =
+          _entry(secretHex: aliceSecretHex, name: 'alice@example.com', issuer: 'Example');
+      return <String>[
+        for (final (index, entry) in <Uint8List>[alice, bob, aliceAgain].indexed)
+          _batchUri(
+            entries: <Uint8List>[entry],
+            batchIndex: index,
+            batchSize: 3,
+            batchId: batchId,
+          ),
+      ];
+    }
+
+    test('a single-code export goes from raw QR string to a one-token preview',
+        () {
+      // Real parser: URI → base64 → protobuf → OtpAccount, no stubs anywhere.
+      expect(controller.handleRaw(_vectorAUri), const MigrationScanComplete(1, 1));
+      expect(controller.isComplete, isTrue);
+
+      final preview = controller.preview(existing: const []);
+
+      expect(preview.source, ImportSource.googleAuth);
+      expect(preview.addCount, 1);
+      expect(preview.skipped, isEmpty);
+      final account = preview.toAdd.single;
+      expect(account.secret, 'JBSWY3DPEHPK3PXP');
+      expect(account.issuer, 'Example');
+      expect(account.accountName, 'alice@example.com');
+      expect(account.type, OtpType.totp);
+      expect(account.digits, 6);
+      expect(account.period, 30);
+    });
+
+    test('three codes scanned out of order stitch back together, and the '
+        'repeated token collapses through the real dedupe key', () {
+      final codes = threeCodes();
+
+      // Deliberately 2 → 0 → 1: the collector orders by batchIndex, not by the
+      // order the camera happened to see the codes in.
+      expect(controller.handleRaw(codes[2]), const MigrationBatchAdded(1, 3));
+      expect(controller.handleRaw(codes[0]), const MigrationBatchAdded(2, 3));
+      expect(controller.handleRaw(codes[1]), const MigrationScanComplete(3, 3));
+      expect(controller.isComplete, isTrue);
+
+      final preview = controller.preview(existing: const []);
+
+      expect(preview.source, ImportSource.googleAuth);
+      expect(preview.addCount, 2);
+      expect(_countOf(preview, SkipReason.duplicateInFile), 1);
+      expect(preview.skippedCount, 0);
+      // Ordered by batchIndex: alice (0) then bob (1); the repeat (2) is the
+      // one dropped, so the survivor list is the first-seen pair.
+      expect(preview.toAdd.map((a) => a.accountName),
+          <String>['alice@example.com', 'bob@example.com']);
+    });
+
+    test('a token already in the vault is reported as alreadyInVault', () {
+      final codes = threeCodes();
+      for (final code in codes) {
+        controller.handleRaw(code);
+      }
+      // Same token as code #1/#3, stored with the loose formatting the vault
+      // accepts (lowercase issuer, spaced secret) — only the real dedupe key
+      // canonicalizes both sides onto one match.
+      final existing = <OtpAccount>[
+        OtpAccount(
+          secret: 'jbsw y3dp ehpk 3pxp',
+          type: OtpType.totp,
+          issuer: 'example',
+          accountName: 'Alice@Example.com',
+        ),
+      ];
+
+      final preview = controller.preview(existing: existing);
+
+      // Both copies of alice hit the vault entry; only bob is left to add.
+      expect(_countOf(preview, SkipReason.alreadyInVault), 2);
+      expect(_countOf(preview, SkipReason.duplicateInFile), 0);
+      expect(preview.addCount, 1);
+      expect(preview.toAdd.single.accountName, 'bob@example.com');
+    });
+
+    test('a code from another export is refused and leaves the collected '
+        'codes untouched', () {
+      final codes = threeCodes();
+      expect(controller.handleRaw(codes[0]), const MigrationBatchAdded(1, 3));
+      expect(controller.handleRaw(codes[1]), const MigrationBatchAdded(2, 3));
+
+      // Same coordinates, different batch_id: a QR from a second export.
+      final foreign = _batchUri(
+        entries: <Uint8List>[
+          _entry(
+              secretHex: '4f7468657220657870',
+              name: 'mallory@example.com',
+              issuer: 'Other'),
+        ],
+        batchIndex: 2,
+        batchSize: 3,
+        batchId: 78,
+      );
+
+      expect(controller.handleRaw(foreign), const MigrationDifferentBatch());
+      expect(controller.scannedCount, 2);
+      expect(controller.isComplete, isFalse);
+
+      // Nothing merged: the partial preview is exactly the two codes scanned
+      // before the foreign one, and mallory is nowhere in it.
+      final preview = controller.preview(existing: const []);
+      expect(preview.addCount, 2);
+      expect(preview.toAdd.map((a) => a.accountName),
+          <String>['alice@example.com', 'bob@example.com']);
+      expect(preview.skipped, isEmpty);
+
+      // The rightful third code still completes the export afterwards.
+      expect(controller.handleRaw(codes[2]), const MigrationScanComplete(3, 3));
     });
   });
 
