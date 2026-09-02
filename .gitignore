@@ -98,3 +98,17 @@ docs/Design.md
 
 # FVM: yerel SDK kopyası ignore'lanır; .fvmrc (pin'lenen sürüm) COMMIT edilir.
 .fvm/
+
+# ─────────────────────────────────────────────────────────────────────────────
+# admin/ — Next.js yönetim paneli (Faz 6). Ayrı paket; Flutter analyze/test'e dahil değil.
+# package-lock.json COMMIT EDİLİR (tedarik zinciri: sabit sürümler).
+# ─────────────────────────────────────────────────────────────────────────────
+admin/node_modules/
+admin/.next/
+admin/out/
+admin/coverage/
+admin/next-env.d.ts
+admin/*.tsbuildinfo
+admin/.vercel
+# admin/.env* zaten yukarıdaki .env / .env.* kuralları ile ignore'lanıyor
+# (.env.example istisnası da orada tanımlı).
