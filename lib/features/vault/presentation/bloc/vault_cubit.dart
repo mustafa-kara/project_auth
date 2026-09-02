@@ -15,6 +15,7 @@ import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../../core/otp/otp_account.dart';
+import '../../../import_export/domain/dedupe.dart';
 import '../../data/vault_load_result.dart';
 import '../../data/vault_repository.dart';
 import '../../domain/issuer_catalog.dart';
@@ -101,12 +102,14 @@ class VaultCubit extends Cubit<VaultState> {
         super(const VaultState());
 
   /// Issuer'ı katalog kanonik adına hizalar; eşleşme yok/katalog yok → DEĞİŞTİRMEZ.
+  ///
+  /// Kural `canonicalizerFor` (dedupe.dart) ile TEK KAYNAKTAN gelir: `ImportService`
+  /// önizlemede AYNI dönüşümü uygular. Ayrışırlarsa import "vault'ta var" demezdi ve
+  /// token çiftlenirdi (denetim A2) — bu yüzden kopyalanmaz, delege edilir.
   OtpAccount _canonicalize(OtpAccount account) {
     final catalog = _issuerCatalogResolver?.call();
     if (catalog == null) return account;
-    final canon = catalog.canonicalIssuer(account.issuer);
-    if (canon == null || canon == account.issuer) return account;
-    return account.copyWith(issuer: canon);
+    return canonicalizerFor(catalog)(account);
   }
 
   /// Kill-switch açık mı (null → daima açık).
@@ -304,23 +307,37 @@ class VaultCubit extends Cubit<VaultState> {
   /// (`ImportService.preview` vault'a karşı zaten eler) — bu metot aldığı listeyi
   /// SIRASINI koruyarak ekler.
   ///
-  /// **Tek istisna, id-bazlı son eleme (review takibi):** önizleme ile onay
+  /// **Tek istisna, son eleme (review takibi + denetim A6):** önizleme ile onay
   /// arasında vault değişebilir (sync pull, başka bir sekme, kullanıcı elle
   /// ekledi) → o aralıkta gelen bir satır aynı `id`'ye sahip olabilirdi ve liste
   /// aynı id'yi İKİ KEZ taşırdı (`removeById` ikisini birden siler, sync tek
   /// satırı iki kez push eder). Ucuz bir set kontrolü bunu keser; düşen girdi
   /// zaten vault'ta VAR olduğu için kullanıcı bir şey kaybetmez.
-  Future<void> addAll(List<OtpAccount> accounts) async {
+  ///
+  /// Eleme İKİ ölçütlüdür: `id` VE [keyOf] içerik anahtarı (varsayılan
+  /// `dedupeKey`). Aradaki pull AYNI token'ı BAŞKA bir id ile getirmiş olabilir
+  /// (başka cihazda eklenmiş satır) — id kontrolü onu yakalamaz; içerik anahtarı
+  /// yakalar. Anahtar secret İÇERİR → yalnız bellekte kıyaslanır, loglanmaz.
+  /// [keyOf] null → içerik elemesi YOK (eski davranış; testler için).
+  Future<void> addAll(
+    List<OtpAccount> accounts, {
+    String Function(OtpAccount account)? keyOf = dedupeKey,
+  }) async {
     await _awaitLoaded();
     if (accounts.isEmpty) return; // no-op: yazma da push da yok
-    // Adım E ile aynı kanonikleştirme (katalog yoksa no-op).
+    // Adım E ile aynı kanonikleştirme (katalog yoksa no-op). ImportService de aynı
+    // dönüşümü uygular → içerik anahtarı iki tarafta AYNI issuer'ı görür (A2).
     final normalized = accounts.map(_canonicalize).toList(growable: false);
     return _sequence(() async {
       _guardIntegrity();
       final existingIds = state.accounts.map((a) => a.id).toSet();
+      final existingKeys =
+          keyOf == null ? <String>{} : state.accounts.map(keyOf).toSet();
       final fresh = <OtpAccount>[];
       for (final account in normalized) {
-        if (existingIds.add(account.id)) fresh.add(account);
+        if (!existingIds.add(account.id)) continue;
+        if (keyOf != null && !existingKeys.add(keyOf(account))) continue;
+        fresh.add(account);
       }
       if (fresh.isEmpty) return; // hepsi bu arada eklenmiş → yazma da push da yok
       await _emitAndPersist([...state.accounts, ...fresh]);

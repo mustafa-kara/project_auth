@@ -7,6 +7,8 @@ import 'package:project_auth/core/otp/otp_algorithm.dart';
 import 'package:project_auth/features/import_export/data/aegis_parser.dart';
 import 'package:project_auth/features/import_export/data/twofas_parser.dart';
 import 'package:project_auth/features/import_export/domain/dedupe.dart';
+import 'package:project_auth/features/vault/domain/catalog_repository.dart';
+import 'package:project_auth/features/vault/domain/issuer_catalog.dart';
 
 Map<String, dynamic> _fixture(String name) =>
     jsonDecode(File('test/fixtures/import/$name').readAsStringSync())
@@ -96,6 +98,78 @@ void main() {
         dedupeKey(_account(accountName: 'bob@example.com')),
         isNot(dedupeKey(_account(accountName: 'alice@example.com'))),
       );
+    });
+  });
+
+  // --- Audit A2: the issuer component uses the shared slug normalization ---
+  group('dedupeKey — issuer slug normalization', () {
+    test('punctuation and inner spacing in the issuer are ignored', () {
+      expect(
+        dedupeKey(_account(issuer: 'Amazon Web Services')),
+        dedupeKey(_account(issuer: 'amazon-web-services')),
+      );
+      expect(
+        dedupeKey(_account(issuer: 'Proton Mail')),
+        dedupeKey(_account(issuer: 'protonmail')),
+      );
+    });
+
+    test('the issuer component is the IssuerAvatar/IssuerCatalog slug', () {
+      // Same normalization the avatar and the catalog index use, so the three
+      // cannot disagree about what "the same issuer" means.
+      expect(dedupeKey(_account(issuer: 'Git Hub!')), startsWith('github '));
+    });
+
+    test('an alias is NOT bridged by the slug alone — that needs the catalog',
+        () {
+      // Documents the limit called out in the doc comment: "github.com" slugs
+      // to `githubcom`. Only `canonicalizerFor` maps it onto "GitHub".
+      expect(
+        dedupeKey(_account(issuer: 'github.com')),
+        isNot(dedupeKey(_account(issuer: 'GitHub'))),
+      );
+    });
+  });
+
+  group('canonicalizerFor — catalog-backed issuer alignment', () {
+    IssuerCatalog catalog() => IssuerCatalog(const [
+          CatalogService(
+              id: '1', name: 'GitHub', issuer: 'github.com', logoUrl: null),
+          CatalogService(
+              id: '2', name: 'GitHub', issuer: null, logoUrl: null),
+        ]);
+
+    test('an alias issuer becomes the canonical catalog name', () {
+      final canon = canonicalizerFor(catalog())(_account(issuer: 'github.com'));
+      expect(canon.issuer, 'GitHub');
+      expect(canon.id, isNotNull);
+    });
+
+    test('canonicalized alias and canonical name share one dedupe key', () {
+      final canonicalize = canonicalizerFor(catalog());
+      expect(
+        dedupeKey(canonicalize(_account(issuer: 'github.com'))),
+        dedupeKey(canonicalize(_account(issuer: 'GitHub'))),
+        reason: 'the whole point of A2: vault side and file side must match',
+      );
+    });
+
+    test('an unknown issuer and an empty catalog are both no-ops', () {
+      final account = _account(issuer: 'Nowhere Inc');
+      expect(canonicalizerFor(catalog())(account), same(account));
+      expect(canonicalizerFor(IssuerCatalog.empty())(_account()), isNotNull);
+      expect(canonicalizerFor(IssuerCatalog.empty())(account).issuer,
+          'Nowhere Inc');
+    });
+
+    test('every other field survives the rewrite', () {
+      final account = _account(issuer: 'github.com', type: OtpType.hotp, counter: 7);
+      final canon = canonicalizerFor(catalog())(account);
+      expect(canon.id, account.id);
+      expect(canon.secret, account.secret);
+      expect(canon.accountName, account.accountName);
+      expect(canon.type, OtpType.hotp);
+      expect(canon.counter, 7);
     });
   });
 

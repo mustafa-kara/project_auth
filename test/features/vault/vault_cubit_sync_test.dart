@@ -4,6 +4,7 @@
 /// syncState yansıması. `sync=null` regresyonu mevcut vault_cubit_test'te.
 library;
 
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -78,8 +79,15 @@ class _FakeRemote implements RemoteTokenRepository {
     pullCount++;
     return const RemotePullResult(rows: []);
   }
+  /// A4: açık tutulursa push "uçuşta" kalır (kilit tutulur).
+  Completer<void>? pushGate;
+
   @override
-  Future<void> pushUpsert(String uid, List<RawTokenRecord> records) async => pushCount++;
+  Future<void> pushUpsert(String uid, List<RawTokenRecord> records) async {
+    pushCount++;
+    final gate = pushGate;
+    if (gate != null) await gate.future;
+  }
   @override
   RealtimeChannelHandle subscribe(String uid, void Function() onChange) {
     subscribeCount++;
@@ -367,6 +375,43 @@ void main() {
       cubit.enableLiveSync();
       expect(remote.pullCount, pulls);
       expect(remote.subscribeCount, 0);
+    });
+  });
+
+  // ── Denetim A4 — servis-içi kilit VaultCubit._opChain ile KİLİTLENMEZ ────────
+  group('A4 — kilit etkileşimi (deadlock yok)', () {
+    test('uçuştaki push kullanıcı mutasyonunu BLOKLAMAZ, merge push bitince '
+        'uygulanır', () async {
+      cubit = buildWithSync();
+      await cubit.load();
+      for (var i = 0; i < 8; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      rawStore.dirty = [
+        RawTokenRecord(
+            id: 'd', blob: _blob(), updatedAtMs: 1, serverUpdatedAtIso: null),
+      ];
+      final gate = Completer<void>();
+      remote.pushGate = gate;
+      final importsBefore = rawStore.importCount;
+
+      // syncNow: push kilidi alır ve gate'te bekler; merge kilidi bekler ve
+      // (kilidi aldığında) VaultCubit._opChain'e girer.
+      final sync = cubit.syncNow();
+      await Future<void>.delayed(Duration.zero);
+
+      // Kullanıcı bu sırada token ekliyor: mutasyon _opChain'de, push'u
+      // AWAIT ETMEZ → kilit beklerken bile tamamlanmalı (deadlock yok).
+      await cubit.add(_acc('kullanici')).timeout(const Duration(seconds: 2));
+      expect(cubit.state.accounts.map((a) => a.accountName), ['kullanici']);
+      expect(rawStore.importCount, importsBefore,
+          reason: 'merge push bitmeden diske yazmaz');
+
+      gate.complete();
+      await sync.timeout(const Duration(seconds: 2));
+
+      expect(rawStore.importCount, importsBefore + 1,
+          reason: 'merge push bitince _opChain üzerinden uygulandı');
     });
   });
 }

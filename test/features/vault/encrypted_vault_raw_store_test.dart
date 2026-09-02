@@ -128,6 +128,74 @@ void main() {
     });
   });
 
+  // --- Denetim A1: tombstone diriltme (id koruyan yedek geri yüklemesi) ---
+  group('A1 — canlı kayıt kendi tombstone\'unu düşürür', () {
+    test('sil → yedekten AYNI id ile geri yükle → TEK kayıt, deleted=false',
+        () async {
+      final storage = FakeSecureStorage();
+      final repo = _repo(storage);
+      await repo.load();
+      await repo.save([_acc('a'), _acc('b')]);
+
+      final restored = (await repo.load()).accounts.first;
+      await repo.markDeleted(restored.id);
+      expect((await repo.exportRaw()).firstWhere((r) => r.id == restored.id).deleted,
+          isTrue);
+
+      // Yedek geri yükleme: AYNI id ile canlı kayıt tekrar yazılır.
+      final survivors = (await repo.load()).accounts;
+      await repo.save([...survivors, restored]);
+
+      final raw = await repo.exportRaw();
+      expect(raw.where((r) => r.id == restored.id), hasLength(1),
+          reason: 'canlı + tombstone AYNI id ile diske yazılamaz — '
+              'push onConflict:id ile 21000 verirdi');
+      expect(raw.firstWhere((r) => r.id == restored.id).deleted, isFalse,
+          reason: 'bilinçli diriltme: canlı kazanır');
+      expect(raw.firstWhere((r) => r.id == restored.id).isDirty, isTrue,
+          reason: 'sv=null → push sunucuyu deleted=false yapar');
+      expect((await repo.load()).accounts.map((a) => a.id), contains(restored.id));
+    });
+
+    test('diskte canlı + tombstone (aynı id) → load canlıyı seçer, '
+        'importRemote diski ONARIR', () async {
+      final storage = FakeSecureStorage();
+      final account = _acc('resurrected');
+      final blob = FakeCrypto().encrypt(
+        plaintext: Uint8List.fromList(utf8.encode(jsonEncode(account.toJson()))),
+        key: FakeKeyHandle(),
+        aad: Uint8List.fromList('token|1|${account.id}'.codeUnits),
+      );
+      final record = {
+        'id': account.id,
+        'v': 1,
+        'n': base64Encode(blob.nonce),
+        'c': base64Encode(blob.ciphertext),
+        'updatedAt': 5,
+        'deleted': false,
+      };
+      // Tombstone ÖNCE yazılır → canlı kayıt sonradan görülse bile kazanmalı.
+      storage.data['vault_encrypted_v1'] = jsonEncode([
+        {...record, 'deleted': true, 'updatedAt': 9},
+        record,
+      ]);
+
+      final repo = _repo(storage);
+      final loaded = await repo.load();
+      expect(loaded.accounts.map((a) => a.id), [account.id],
+          reason: 'canlı kayıt tombstone\'a rağmen gösterilir');
+      expect(loaded.corruptedCount, 0);
+
+      // Boş pull bile diski onarır (mükerrer id bir sonraki push\'a taşınmaz).
+      final outcome = await repo.importRemote(const [], pullCursorIso: null);
+      expect(outcome.changed, isTrue);
+      expect(outcome.appliedCount, 0);
+      final raw = await repo.exportRaw();
+      expect(raw, hasLength(1));
+      expect(raw.single.deleted, isFalse);
+    });
+  });
+
   group('importRemote — LWW merge', () {
     test('remote-only → kabul (yeni cihaz restore)', () async {
       final storage = FakeSecureStorage();

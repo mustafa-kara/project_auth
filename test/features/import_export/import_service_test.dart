@@ -312,6 +312,131 @@ void main() {
     });
   });
 
+  // --- Audit A3: entry ceiling (accounts + skipped) ---
+  group('entry ceiling', () {
+    ImportPreview run(int accounts, int skipped) => ImportService.dedupeSync(
+          ParsedImport(
+            source: ImportSource.aegis,
+            accounts: [for (var i = 0; i < accounts; i++) _acc('a$i')],
+            skipped: [
+              for (var i = 0; i < skipped; i++)
+                SkippedEntry(reason: SkipReason.unsupportedType, label: 's$i'),
+            ],
+          ),
+          existing: const [],
+          keyOf: _testKey,
+        );
+
+    test('exactly maxEntries is accepted', () {
+      expect(run(ImportService.maxEntries, 0).addCount, ImportService.maxEntries);
+    });
+
+    test('one entry past the ceiling → ImportTooManyEntriesException', () {
+      expect(
+        () => run(ImportService.maxEntries + 1, 0),
+        throwsA(isA<ImportTooManyEntriesException>()
+            .having((e) => e.entries, 'entries', ImportService.maxEntries + 1)
+            .having((e) => e.max, 'max', ImportService.maxEntries)),
+      );
+    });
+
+    test('skipped entries count towards the ceiling too', () {
+      // A file made of nothing but unmappable rows renders one preview row
+      // each, so it must not sail past the limit.
+      expect(() => run(1, ImportService.maxEntries),
+          throwsA(isA<ImportTooManyEntriesException>()));
+    });
+
+    test('the ceiling matches the scanned Google path', () {
+      expect(ImportService.maxEntries, 1024);
+    });
+
+    test('the file path enforces it through the parse isolate', () async {
+      final tooMany = [
+        for (var i = 0; i < ImportService.maxEntries + 1; i++) _acc('a$i'),
+      ];
+      final svc = service(
+          parsers: [_StubParser(ImportSource.aegis, accounts: tooMany)]);
+      await expectLater(
+        svc.preview(raw: anyJson, existing: const []),
+        throwsA(isA<ImportTooManyEntriesException>()),
+      );
+    });
+
+    test('the message carries no entry content (secret safety)', () {
+      const e = ImportTooManyEntriesException(2000, 1024);
+      expect(e.toString(), 'ImportTooManyEntriesException: 2000 entries exceeds 1024');
+    });
+  });
+
+  // --- Audit A2: issuer canonicalization applied to BOTH sides ---
+  group('canonicalize injection', () {
+    OtpAccount alias(OtpAccount a) =>
+        a.issuer == 'github.com' ? a.copyWith(issuer: 'GitHub') : a;
+
+    test('the vault side is canonicalized before the keys are built', () {
+      // Vault holds the alias, the file holds the canonical name: without the
+      // rewrite these are two different keys and the token lands twice.
+      final preview = ImportService.dedupeSync(
+        ParsedImport(
+            source: ImportSource.aegis,
+            accounts: [_acc('a', issuer: 'GitHub')]),
+        existing: [_acc('a', issuer: 'github.com')],
+        keyOf: _testKey,
+        canonicalize: alias,
+      );
+      expect(preview.toAdd, isEmpty);
+      expect(preview.skipped.single.reason, SkipReason.alreadyInVault);
+    });
+
+    test('the parsed side is canonicalized too, and toAdd carries the '
+        'canonical issuer', () {
+      final preview = ImportService.dedupeSync(
+        ParsedImport(
+            source: ImportSource.aegis,
+            accounts: [_acc('a', issuer: 'github.com')]),
+        existing: const [],
+        keyOf: _testKey,
+        canonicalize: alias,
+      );
+      expect(preview.toAdd.single.issuer, 'GitHub',
+          reason: 'what the preview shows is what addAll will store');
+    });
+
+    test('without the rewrite the same pair is NOT deduped (regression)', () {
+      final preview = ImportService.dedupeSync(
+        ParsedImport(
+            source: ImportSource.aegis,
+            accounts: [_acc('a', issuer: 'GitHub')]),
+        existing: [_acc('a', issuer: 'github.com')],
+        keyOf: _testKey,
+      );
+      expect(preview.addCount, 1);
+    });
+
+    test('previewParsed resolves the canonicalizer per call', () {
+      var resolved = 0;
+      final svc = ImportService(
+        backup: backup,
+        detector: (_) => ImportSource.googleAuth,
+        keyOf: _testKey,
+        canonicalizeResolver: () {
+          resolved++;
+          return alias;
+        },
+      );
+      final preview = svc.previewParsed(
+        ParsedImport(
+            source: ImportSource.googleAuth,
+            accounts: [_acc('a', issuer: 'github.com')]),
+        existing: [_acc('a', issuer: 'GitHub')],
+      );
+      expect(resolved, 1, reason: 'a refreshed catalog is picked up next call');
+      expect(preview.toAdd, isEmpty);
+      expect(preview.skipped.single.reason, SkipReason.alreadyInVault);
+    });
+  });
+
   group('parseAndDedupeSync', () {
     test('parses and deduplicates in one synchronous pass', () {
       final preview = ImportService.parseAndDedupeSync(
