@@ -29,7 +29,7 @@ Node 22+ gerekir (`engines.node: >=22`).
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | sunucu (ön ek gereği herkese açık) | `sb_publishable_…` — düşük yetkili, RLS'e tabi |
 | `SUPABASE_SECRET_KEY` | **yalnız sunucu** | `sb_secret_…` — RLS bypass; asla tarayıcıya gitmez |
 | `DATABASE_URL` | **yalnız sunucu** | `admin_app` login rolü ile Postgres bağlantısı |
-| `SUPABASE_CA_CERT` | **yalnız sunucu** | Postgres CA sertifikası (PEM). Şemada **opsiyonel**, pratikte (a) yolu için **zorunlu** — §5 madde 5 |
+| `SUPABASE_CA_CERT` | **yalnız sunucu** | Postgres CA sertifikası (PEM). Şemada **opsiyonel**, pratikte (a) yolu için **zorunlu** — §5 madde 5. **Sertifika repoda hazır:** `admin/certs/supabase-prod-ca-2021.crt` (yükleme tek satırı `admin/certs/README.txt` içinde) |
 
 > **`NEXT_PUBLIC_` ön eki hakkında:** bugün panelde **tarayıcı tarafı Supabase
 > istemcisi yoktur** (giriş/çıkış ve tüm okumalar sunucu bileşenleri ve server
@@ -44,23 +44,52 @@ sunucuya özel yarısı `src/lib/env.server.ts` (`import 'server-only'`). İkisi
 **tembeldir** (istek anında), bu yüzden `next build` gerçek sırlar olmadan da
 çalışır.
 
-### Operatör adımı — `admin_app` login rolü (bir kez, Dashboard SQL Editor'da)
+### Postgres CA sertifikası (`SUPABASE_CA_CERT`)
 
-> ⏳ **Durum (2026-09-02):** bu migration repoda var ama **canlı projeye (`authenticator-dev`) HENÜZ
-> UYGULANMADI**. Uygulanana ve `admin_app` rolü oluşturulana kadar `/` sayfasındaki sayım kartları hata
-> kartı gösterir; panelin geri kalanı (secret key yolu) çalışır. Ayrıca `public.admin_users` içinde en az
-> bir satır olmalıdır, yoksa kimse `/login`'i geçemez.
+Sertifika **repoda gömülüdür** — Supabase Root 2021 CA herkese açık bir kök
+sertifikadır, sır değildir:
+
+```bash
+# proje kökünden
+export SUPABASE_CA_CERT="$(cat admin/certs/supabase-prod-ca-2021.crt)"
+# ya da .env.local'e tek satır olarak: bkz. admin/certs/README.txt
+```
+
+`admin/certs/README.txt` kaynak URL'i, SHA-256 parmak izini ve yükleme tek
+satırını taşır. **Doğrulandı (2026-09-02):**
+`openssl s_client -connect aws-0-eu-central-1.pooler.supabase.com:5432 -starttls postgres -CAfile admin/certs/supabase-prod-ca-2021.crt`
+→ `Verify return code: 0 (ok)`. Ayrıntı ve zincir dökümü: §5 madde 5.
+
+*Alternatif (aynı dosya, elle indirme):* Dashboard → Database → SSL Configuration.
+Parmak izi eşleşmiyorsa dosyayı kullanmayın.
+
+### Operatör adımı — `admin_app` login rolünün parolası (bir kez, Dashboard SQL Editor'da)
+
+> ✅ **Durum (2026-09-02):** migration **canlı projeye uygulandı** (`authenticator-dev`, DB sürümü
+> `20260902201638`) ve **iki rol de mevcut**: `admin_backend` (NOLOGIN, NOINHERIT; `private` USAGE +
+> `admin_global_stats()` EXECUTE, hiçbir tablo yetkisi yok) ve `admin_app` (LOGIN, `admin_backend` üyesi,
+> `bypassrls`/`superuser`/`createrole` yok). Her iki rol için `public.tokens` ve `public.key_attributes`
+> üzerinde `select` yetkisi **false** olarak ölçüldü.
+>
+> ⏳ **Geriye kalan operatör işleri:** (1) `admin_app` rolünün **parolası henüz yok** — parola atanana kadar
+> rol bağlanamaz; (2) `sb_secret_…` anahtarı `admin/.env.local`'e yapıştırılmalı; (3) `public.admin_users`
+> içinde en az bir satır olmalı — bugün **yok** (`auth.users` yalnızca bir UI-test hesabı içeriyor), yoksa
+> kimse `/login`'i geçemez. Bunlar tamamlanana kadar `/` sayfasındaki sayım kartları hata kartı gösterir;
+> panelin geri kalanı (secret key yolu) çalışır.
 
 `supabase/migrations/20260902201638_admin_backend_role.sql` migration'ı **yalnızca**
 NOLOGIN yetki taşıyıcı rolü (`admin_backend`) oluşturur ve ona `private` şemasında
 `usage` + `private.admin_global_stats()` üzerinde `execute` verir (Desen B —
 init migration'daki yorum bloğu). Login rolü ve parolası **migration'a/transcript'e
-yazılmaz**; operatör elle oluşturur:
+yazılmaz**; parolayı operatör elle atar:
 
 ```sql
 -- Dashboard > SQL Editor (parolayı güvenli bir üreticiden alın, hiçbir yere yapıştırmayın)
-create role admin_app login password '<güçlü-parola>';
-grant admin_backend to admin_app;
+alter role admin_app password '<güçlü-parola>';
+
+-- Rol yoksa (temiz proje) önce:
+--   create role admin_app login password '<güçlü-parola>';
+--   grant admin_backend to admin_app;
 ```
 
 Sonra `DATABASE_URL` bu rolle kurulur. **Panel asla `postgres` süper kullanıcısı
@@ -361,7 +390,28 @@ kaynağından** doğrulandı.
    <https://supabase.com/docs/guides/database/connecting-to-postgres.md> "mümkün
    olan her yerde SSL" der ve "Server root certificate"ın dashboard'dan alınacağını
    belirtir. İkisi de pooler zincirinin genel olarak güvenilir olup olmadığını
-   söylemez. **İndirme yeri: Dashboard → Database → SSL Configuration.**
+   söylemez.
+
+   **Kapanış (2026-09-02): kök sertifika artık repoda.** `admin/certs/supabase-prod-ca-2021.crt`
+   (+ `admin/certs/README.txt`) — Supabase Root 2021 CA, herkese açık bir kök
+   sertifika, sır değil. Aynı gün doğrulandı:
+
+   ```
+   openssl s_client -connect aws-0-eu-central-1.pooler.supabase.com:5432 \
+     -starttls postgres -CAfile admin/certs/supabase-prod-ca-2021.crt
+   → Verify return code: 0 (ok)
+   ```
+
+   - SHA-256 parmak izi:
+     `80:70:25:AD:50:D4:ED:21:9D:2C:9C:7D:29:9C:00:4F:82:4E:B0:0C:F7:F6:5A:FE:F6:07:D0:7B:72:E6:CA:FA`
+   - Geçerlilik: **2021-04-28 → 2031-04-26**
+   - Çalışan indirme adresi:
+     <https://supabase-downloads.s3-ap-southeast-1.amazonaws.com/prod/ssl/prod-ca-2021.crt>
+     (bazı dokümanlardaki `us-west-2` URL'i buraya **301** ile yönlenir; `curl -L`
+     kullanılmazsa S3'ten XML hata gövdesi döner — sessizce bozuk bir "sertifika"
+     dosyası elde edilir). Elle indirme alternatifi: Dashboard → Database → SSL
+     Configuration. Her iki durumda da parmak izini yukarıdakiyle karşılaştırın.
+
    `.env` tek satır taşıyabildiği için PEM'deki literal `\n` dizileri
    `normaliseCaCert()` ile gerçek satır sonlarına çevrilir.
 
@@ -523,7 +573,13 @@ yorum olarak duruyor.
 
 **TLS.** `SUPABASE_CA_CERT` üretimde ayarlanmalıdır (§5 madde 5). Ayarlanmazsa
 panel açılır ve çalışır ama `/` üzerindeki sayım kartları el sıkışma hatası
-gösterir — kapalı düşer, sessizce doğrulamasız bağlanmaz.
+gösterir — kapalı düşer, sessizce doğrulamasız bağlanmaz. Sertifika repoda
+hazırdır: `admin/certs/supabase-prod-ca-2021.crt`, SHA-256 parmak izi
+`80:70:25:AD:50:D4:ED:21:9D:2C:9C:7D:29:9C:00:4F:82:4E:B0:0C:F7:F6:5A:FE:F6:07:D0:7B:72:E6:CA:FA`,
+geçerlilik 2021-04-28 → 2031-04-26; pooler el sıkışması bu dosyayla 2026-09-02'de
+`Verify return code: 0 (ok)` verdi. Yükleme tek satırı `admin/certs/README.txt`
+içinde. **Sertifikanın 2031'de dolduğunu unutmayın** — yenilendiğinde dosya ve
+parmak izi birlikte güncellenmelidir.
 
 ---
 

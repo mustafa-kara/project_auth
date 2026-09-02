@@ -8,14 +8,17 @@ Supabase CLI migration history. The file names are aligned **exactly** with the
 | `20260606152227_init_authenticator.sql` | Initial schema: 8 tables + RLS + admin hook + trigger + Realtime + private aggregate |
 | `20260606152553_rls_initplan_optimization.sql` | `auth.uid()` → `(select auth.uid())` (linter: auth_rls_initplan). FK index moved into init (see NOTE). |
 | `20260606162359_least_privilege_revoke.sql` | Revoke redundant `anon`/`authenticated` table privileges (defense in depth) |
-| `20260902201638_admin_backend_role.sql` | **Phase 6 — NOT YET APPLIED to the live project.** `admin_backend` NOLOGIN privilege carrier + `private` USAGE + `admin_global_stats()` EXECUTE, plus a defensive re-revoke from `public`/`anon`/`authenticated`. Carries **no password**: the login role is created by the operator (`create role admin_app login password '…'; grant admin_backend to admin_app;`) |
+| `20260902201638_admin_backend_role.sql` | **Phase 6 — applied 2026-09-02.** `admin_backend` NOLOGIN privilege carrier + `private` USAGE + `admin_global_stats()` EXECUTE, plus a defensive re-revoke from `public`/`anon`/`authenticated`. Carries **no password**: the login role `admin_app` was created by the operator afterwards (`create role admin_app login; grant admin_backend to admin_app;`) and its password is set separately with `alter role admin_app password '…';` |
 
 ## Applying
 
-- **To the existing live project (`authenticator-dev`): the first three are ALREADY APPLIED.** Do NOT push those again.
-- **`20260902201638_admin_backend_role.sql` is NOT applied yet** — it is the Phase 6 prerequisite. Apply it on its
-  own (`supabase db push`, or paste it into the Dashboard SQL editor), then create the login role by hand; the
-  migration deliberately contains no password. See [../PROJECT_INFO.md](../PROJECT_INFO.md) → Deployment Checklist.
+- **To the existing live project (`authenticator-dev`): all four are ALREADY APPLIED.** Do NOT push them again.
+  `20260902201638_admin_backend_role.sql` — the Phase 6 prerequisite — was applied on **2026-09-02**; the live
+  DB version is `20260902201638` and `list_migrations` returns exactly the four files above, name for name.
+  The login role `admin_app` was created by hand afterwards and granted `admin_backend`; the migration
+  deliberately contains no password, and **the password is still unset** — the operator sets it with
+  `alter role admin_app password '…';` in the Dashboard SQL editor. See
+  [../PROJECT_INFO.md](../PROJECT_INFO.md) → Deployment Checklist.
 - **To a new/clean project:** `supabase link` + `supabase db push` applies all four migrations in order.
 
 ## Fresh-deploy VERIFIED (2026-06-06 — the first three files)
