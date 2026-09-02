@@ -130,7 +130,7 @@ admin_users · key_attributes · tokens · devices · announcements · catalog_s
   certificate, not a secret) is bundled in the repo at `admin/certs/supabase-prod-ca-2021.crt`, with source
   URL, SHA-256 fingerprint and the shell one-liner that loads it into `SUPABASE_CA_CERT` in
   `admin/certs/README.txt`. Verified 2026-09-02:
-  `openssl s_client -connect aws-0-eu-central-1.pooler.supabase.com:5432 -starttls postgres -CAfile admin/certs/supabase-prod-ca-2021.crt`
+  `openssl s_client -connect aws-1-eu-central-1.pooler.supabase.com:5432 -starttls postgres -CAfile admin/certs/supabase-prod-ca-2021.crt`
   → `Verify return code: 0 (ok)`. Fingerprint SHA-256
   `80:70:25:AD:50:D4:ED:21:9D:2C:9C:7D:29:9C:00:4F:82:4E:B0:0C:F7:F6:5A:FE:F6:07:D0:7B:72:E6:CA:FA`,
   validity 2021-04-28 → 2031-04-26.

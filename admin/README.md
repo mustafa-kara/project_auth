@@ -57,7 +57,7 @@ export SUPABASE_CA_CERT="$(cat admin/certs/supabase-prod-ca-2021.crt)"
 
 `admin/certs/README.txt` kaynak URL'i, SHA-256 parmak izini ve yükleme tek
 satırını taşır. **Doğrulandı (2026-09-02):**
-`openssl s_client -connect aws-0-eu-central-1.pooler.supabase.com:5432 -starttls postgres -CAfile admin/certs/supabase-prod-ca-2021.crt`
+`openssl s_client -connect aws-1-eu-central-1.pooler.supabase.com:5432 -starttls postgres -CAfile admin/certs/supabase-prod-ca-2021.crt`
 → `Verify return code: 0 (ok)`. Ayrıntı ve zincir dökümü: §5 madde 5.
 
 *Alternatif (aynı dosya, elle indirme):* Dashboard → Database → SSL Configuration.
@@ -370,7 +370,7 @@ kaynağından** doğrulandı.
    artık onu kullanır: `{ rejectUnauthorized: true, ...(ca ? { ca } : {}) }`.
 
    **`ca` pratikte zorunludur.** Supavisor pooler'ının sunduğu zincir canlı olarak
-   ölçüldü (`openssl s_client -connect aws-0-eu-central-1.pooler.supabase.com:5432
+   ölçüldü (`openssl s_client -connect aws-1-eu-central-1.pooler.supabase.com:5432
    -starttls postgres`, 2026-09-02):
 
    ```
@@ -400,7 +400,7 @@ kaynağından** doğrulandı.
    sertifika, sır değil. Aynı gün doğrulandı:
 
    ```
-   openssl s_client -connect aws-0-eu-central-1.pooler.supabase.com:5432 \
+   openssl s_client -connect aws-1-eu-central-1.pooler.supabase.com:5432 \
      -starttls postgres -CAfile admin/certs/supabase-prod-ca-2021.crt
    → Verify return code: 0 (ok)
    ```

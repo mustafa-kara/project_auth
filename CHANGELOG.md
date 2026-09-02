@@ -141,7 +141,7 @@ the current state of `authenticator-dev` (`vfyqokvgtdxxurroqbtj`), all of it mea
 - **CA bundled.** The Supabase Root 2021 CA (a public root certificate, not a secret) now lives at
   `admin/certs/supabase-prod-ca-2021.crt` with `admin/certs/README.txt` carrying the source URL, the SHA-256
   fingerprint and the one-liner that loads it into `SUPABASE_CA_CERT`. The pooler handshake against it
-  verifies: `openssl s_client -connect aws-0-eu-central-1.pooler.supabase.com:5432 -starttls postgres -CAfile
+  verifies: `openssl s_client -connect aws-1-eu-central-1.pooler.supabase.com:5432 -starttls postgres -CAfile
   admin/certs/supabase-prod-ca-2021.crt` → `Verify return code: 0 (ok)`. Fingerprint SHA-256
   `80:70:25:AD:50:D4:ED:21:9D:2C:9C:7D:29:9C:00:4F:82:4E:B0:0C:F7:F6:5A:FE:F6:07:D0:7B:72:E6:CA:FA`,
   validity 2021-04-28 → 2031-04-26. The download URL that actually works is

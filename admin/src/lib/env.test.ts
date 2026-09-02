@@ -47,7 +47,7 @@ describe('publicEnvSchema', () => {
 })
 
 describe('serverEnvSchema', () => {
-  const validDbUrl = 'postgres://admin_app.ref:pw@aws-0-eu-central-1.pooler.supabase.com:6543/postgres'
+  const validDbUrl = 'postgres://admin_app.ref:pw@aws-1-eu-central-1.pooler.supabase.com:6543/postgres'
 
   it('accepts an sb_secret_ key + postgres URL', () => {
     const result = serverEnvSchema.safeParse({
