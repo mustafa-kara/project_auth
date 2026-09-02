@@ -29,12 +29,12 @@ import '../../domain/import_service.dart';
 /// to render this view, which both entry points (file import, Google
 /// Authenticator scan) share.
 String skipReasonLabel(SkipReason reason) => switch (reason) {
-      SkipReason.unsupportedType => 'Desteklenmeyen token türü',
-      SkipReason.invalidSecret => 'Secret okunamadı',
-      SkipReason.invalidFields => 'Alanlar geçersiz',
-      SkipReason.duplicateInFile => 'Dosyada tekrar ediyor',
-      SkipReason.alreadyInVault => 'Zaten vault\'unda var',
-    };
+  SkipReason.unsupportedType => 'Desteklenmeyen token türü',
+  SkipReason.invalidSecret => 'Secret okunamadı',
+  SkipReason.invalidFields => 'Alanlar geçersiz',
+  SkipReason.duplicateInFile => 'Dosyada tekrar ediyor',
+  SkipReason.alreadyInVault => 'Zaten vault\'unda var',
+};
 
 class ImportPreviewView extends StatelessWidget {
   const ImportPreviewView({
@@ -103,8 +103,9 @@ class ImportPreviewView extends StatelessWidget {
                     Expanded(
                       child: Text(
                         headerDetail!,
-                        style: theme.textTheme.bodySmall
-                            ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
@@ -176,16 +177,20 @@ class ImportPreviewView extends StatelessWidget {
             child: Text(
               '+$rest tane daha',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
           ),
       ],
     );
   }
 
-  Widget _countLine(BuildContext context, IconData icon, String text,
-      {bool emphasis = false}) {
+  Widget _countLine(
+    BuildContext context,
+    IconData icon,
+    String text, {
+    bool emphasis = false,
+  }) {
     final theme = Theme.of(context);
     final color = emphasis
         ? theme.colorScheme.onSurface
@@ -199,10 +204,11 @@ class ImportPreviewView extends StatelessWidget {
           Expanded(
             child: Text(
               text,
-              style: (emphasis
-                      ? theme.textTheme.titleMedium
-                      : theme.textTheme.bodyMedium)
-                  ?.copyWith(color: color),
+              style:
+                  (emphasis
+                          ? theme.textTheme.titleMedium
+                          : theme.textTheme.bodyMedium)
+                      ?.copyWith(color: color),
             ),
           ),
         ],

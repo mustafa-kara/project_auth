@@ -15,11 +15,8 @@ import 'package:project_auth/features/import_export/domain/import_models.dart';
 
 const String _secret = 'JBSWY3DPEHPK3PXP';
 
-OtpAccount _account(String name) => OtpAccount(
-      secret: _secret,
-      type: OtpType.totp,
-      accountName: name,
-    );
+OtpAccount _account(String name) =>
+    OtpAccount(secret: _secret, type: OtpType.totp, accountName: name);
 
 MigrationBatch _batch({
   required int index,
@@ -28,15 +25,14 @@ MigrationBatch _batch({
   int version = 1,
   List<String> names = const ['a'],
   List<SkippedEntry> skipped = const <SkippedEntry>[],
-}) =>
-    MigrationBatch(
-      version: version,
-      batchSize: size,
-      batchIndex: index,
-      batchId: id,
-      accounts: names.map(_account).toList(),
-      skipped: skipped,
-    );
+}) => MigrationBatch(
+  version: version,
+  batchSize: size,
+  batchIndex: index,
+  batchId: id,
+  accounts: names.map(_account).toList(),
+  skipped: skipped,
+);
 
 /// Names of the accounts a collector would hand to the import pipeline.
 List<String> _names(GoogleMigrationCollector collector) =>
@@ -70,8 +66,10 @@ void main() {
     test('three codes scanned in order', () {
       final collector = GoogleMigrationCollector();
       for (var i = 0; i < 3; i++) {
-        expect(collector.add(_batch(index: i, size: 3, names: ['n$i'])),
-            MigrationAddOutcome.added);
+        expect(
+          collector.add(_batch(index: i, size: 3, names: ['n$i'])),
+          MigrationAddOutcome.added,
+        );
         expect(collector.scannedCount, i + 1);
         expect(collector.isComplete, i == 2);
       }
@@ -81,8 +79,10 @@ void main() {
     test('scan order does not change the merged order', () {
       final collector = GoogleMigrationCollector();
       for (final i in const [2, 0, 1]) {
-        expect(collector.add(_batch(index: i, size: 3, names: ['n$i'])),
-            MigrationAddOutcome.added);
+        expect(
+          collector.add(_batch(index: i, size: 3, names: ['n$i'])),
+          MigrationAddOutcome.added,
+        );
       }
       expect(collector.isComplete, isTrue);
       // Emitted by batchIndex, not by arrival: the preview is stable.
@@ -100,14 +100,30 @@ void main() {
 
     test('skipped entries are merged in the same batchIndex order', () {
       final collector = GoogleMigrationCollector();
-      collector.add(_batch(index: 1, size: 2, names: const [], skipped: const [
-        SkippedEntry(reason: SkipReason.unsupportedType, detail: 'second')
-      ]));
-      collector.add(_batch(index: 0, size: 2, names: const [], skipped: const [
-        SkippedEntry(reason: SkipReason.invalidSecret, detail: 'first')
-      ]));
-      expect(collector.toParsedImport().skipped.map((s) => s.detail),
-          orderedEquals(const ['first', 'second']));
+      collector.add(
+        _batch(
+          index: 1,
+          size: 2,
+          names: const [],
+          skipped: const [
+            SkippedEntry(reason: SkipReason.unsupportedType, detail: 'second'),
+          ],
+        ),
+      );
+      collector.add(
+        _batch(
+          index: 0,
+          size: 2,
+          names: const [],
+          skipped: const [
+            SkippedEntry(reason: SkipReason.invalidSecret, detail: 'first'),
+          ],
+        ),
+      );
+      expect(
+        collector.toParsedImport().skipped.map((s) => s.detail),
+        orderedEquals(const ['first', 'second']),
+      );
     });
   });
 
@@ -115,8 +131,10 @@ void main() {
     test('rescanning the same code changes nothing', () {
       final collector = GoogleMigrationCollector();
       collector.add(_batch(index: 0, size: 2, names: ['first']));
-      expect(collector.add(_batch(index: 0, size: 2, names: ['other'])),
-          MigrationAddOutcome.duplicateIndex);
+      expect(
+        collector.add(_batch(index: 0, size: 2, names: ['other'])),
+        MigrationAddOutcome.duplicateIndex,
+      );
       expect(collector.scannedCount, 1);
       // The FIRST scan's data is kept — a repeat never overwrites.
       expect(_names(collector), orderedEquals(const ['first']));
@@ -128,8 +146,9 @@ void main() {
       final collector = GoogleMigrationCollector();
       collector.add(_batch(index: 0, size: 2, id: 7, names: ['mine']));
       expect(
-          collector.add(_batch(index: 1, size: 2, id: 8, names: ['foreign'])),
-          MigrationAddOutcome.differentBatch);
+        collector.add(_batch(index: 1, size: 2, id: 8, names: ['foreign'])),
+        MigrationAddOutcome.differentBatch,
+      );
       expect(collector.scannedCount, 1);
       expect(collector.batchId, 7);
       expect(_names(collector), orderedEquals(const ['mine']));
@@ -138,33 +157,34 @@ void main() {
     test('a different batchSize is refused too', () {
       final collector = GoogleMigrationCollector();
       collector.add(_batch(index: 0, size: 2, id: 7));
-      expect(collector.add(_batch(index: 1, size: 3, id: 7)),
-          MigrationAddOutcome.differentBatch);
+      expect(
+        collector.add(_batch(index: 1, size: 3, id: 7)),
+        MigrationAddOutcome.differentBatch,
+      );
       expect(collector.batchSize, 2);
       expect(collector.scannedCount, 1);
     });
 
-    test(
-        'a foreign code reusing an already scanned index reads as a different '
+    test('a foreign code reusing an already scanned index reads as a different '
         'export, not a duplicate', () {
       final collector = GoogleMigrationCollector();
       collector.add(_batch(index: 0, size: 2, id: 7));
-      expect(collector.add(_batch(index: 0, size: 2, id: 99)),
-          MigrationAddOutcome.differentBatch);
+      expect(
+        collector.add(_batch(index: 0, size: 2, id: 99)),
+        MigrationAddOutcome.differentBatch,
+      );
     });
   });
 
   group('invalidBatch', () {
     test('a batchSize outside 1..maxBatchSize is refused', () {
       final collector = GoogleMigrationCollector();
-      for (final size in [
-        0,
-        -1,
-        GoogleMigrationCollector.maxBatchSize + 1,
-      ]) {
-        expect(collector.add(_batch(index: 0, size: size)),
-            MigrationAddOutcome.invalidBatch,
-            reason: 'batchSize $size');
+      for (final size in [0, -1, GoogleMigrationCollector.maxBatchSize + 1]) {
+        expect(
+          collector.add(_batch(index: 0, size: size)),
+          MigrationAddOutcome.invalidBatch,
+          reason: 'batchSize $size',
+        );
       }
       expect(collector.isEmpty, isTrue);
     });
@@ -172,17 +192,21 @@ void main() {
     test('the maxBatchSize boundary itself is accepted', () {
       final collector = GoogleMigrationCollector();
       expect(
-          collector.add(_batch(
-              index: 0, size: GoogleMigrationCollector.maxBatchSize)),
-          MigrationAddOutcome.added);
+        collector.add(
+          _batch(index: 0, size: GoogleMigrationCollector.maxBatchSize),
+        ),
+        MigrationAddOutcome.added,
+      );
     });
 
     test('a batchIndex outside 0..batchSize-1 is refused', () {
       final collector = GoogleMigrationCollector();
       for (final index in const [-1, 3, 99]) {
-        expect(collector.add(_batch(index: index, size: 3)),
-            MigrationAddOutcome.invalidBatch,
-            reason: 'batchIndex $index');
+        expect(
+          collector.add(_batch(index: index, size: 3)),
+          MigrationAddOutcome.invalidBatch,
+          reason: 'batchIndex $index',
+        );
       }
       expect(collector.isEmpty, isTrue);
     });
@@ -192,8 +216,10 @@ void main() {
       collector.add(_batch(index: 0, size: 2, id: 7));
       // Self-inconsistent AND from another export: the self-inconsistency wins,
       // because "start over?" is the wrong question for a malformed code.
-      expect(collector.add(_batch(index: 9, size: 2, id: 99)),
-          MigrationAddOutcome.invalidBatch);
+      expect(
+        collector.add(_batch(index: 9, size: 2, id: 99)),
+        MigrationAddOutcome.invalidBatch,
+      );
       expect(collector.scannedCount, 1);
     });
   });
@@ -201,29 +227,39 @@ void main() {
   group('batchId edge cases', () {
     test('batchId 0 is a real id, not "unset"', () {
       final collector = GoogleMigrationCollector();
-      expect(collector.add(_batch(index: 0, size: 2, id: 0)),
-          MigrationAddOutcome.added);
+      expect(
+        collector.add(_batch(index: 0, size: 2, id: 0)),
+        MigrationAddOutcome.added,
+      );
       expect(collector.batchId, 0);
       // A second code of the SAME export still merges …
-      expect(collector.add(_batch(index: 1, size: 2, id: 0)),
-          MigrationAddOutcome.added);
+      expect(
+        collector.add(_batch(index: 1, size: 2, id: 0)),
+        MigrationAddOutcome.added,
+      );
       expect(collector.isComplete, isTrue);
     });
 
     test('a nonzero id is refused against a pinned id of 0', () {
       final collector = GoogleMigrationCollector();
       collector.add(_batch(index: 0, size: 2, id: 0));
-      expect(collector.add(_batch(index: 1, size: 2, id: 1)),
-          MigrationAddOutcome.differentBatch);
+      expect(
+        collector.add(_batch(index: 1, size: 2, id: 1)),
+        MigrationAddOutcome.differentBatch,
+      );
     });
 
     test('a negative batchId is a legitimate id', () {
       final collector = GoogleMigrationCollector();
-      expect(collector.add(_batch(index: 0, size: 2, id: -2)),
-          MigrationAddOutcome.added);
+      expect(
+        collector.add(_batch(index: 0, size: 2, id: -2)),
+        MigrationAddOutcome.added,
+      );
       expect(collector.batchId, -2);
-      expect(collector.add(_batch(index: 1, size: 2, id: -2)),
-          MigrationAddOutcome.added);
+      expect(
+        collector.add(_batch(index: 1, size: 2, id: -2)),
+        MigrationAddOutcome.added,
+      );
       expect(collector.scannedCount, 2);
     });
   });
@@ -232,15 +268,23 @@ void main() {
     test('a batch that would exceed maxAccounts is refused whole', () {
       final collector = GoogleMigrationCollector();
       final many = List<String>.generate(
-          GoogleMigrationCollector.maxAccounts, (i) => 'n$i');
-      expect(collector.add(_batch(index: 0, size: 2, names: many)),
-          MigrationAddOutcome.added);
-      expect(collector.add(_batch(index: 1, size: 2, names: const ['one more'])),
-          MigrationAddOutcome.full);
+        GoogleMigrationCollector.maxAccounts,
+        (i) => 'n$i',
+      );
+      expect(
+        collector.add(_batch(index: 0, size: 2, names: many)),
+        MigrationAddOutcome.added,
+      );
+      expect(
+        collector.add(_batch(index: 1, size: 2, names: const ['one more'])),
+        MigrationAddOutcome.full,
+      );
       // Nothing partially merged.
       expect(collector.scannedCount, 1);
-      expect(collector.toParsedImport().accounts,
-          hasLength(GoogleMigrationCollector.maxAccounts));
+      expect(
+        collector.toParsedImport().accounts,
+        hasLength(GoogleMigrationCollector.maxAccounts),
+      );
     });
 
     test('skipped entries count toward the cap too', () {
@@ -252,11 +296,15 @@ void main() {
         (i) => SkippedEntry(reason: SkipReason.invalidFields, label: 's$i'),
       );
       expect(
-          collector.add(
-              _batch(index: 0, size: 2, names: const [], skipped: manySkipped)),
-          MigrationAddOutcome.added);
-      expect(collector.add(_batch(index: 1, size: 2, names: const ['one more'])),
-          MigrationAddOutcome.full);
+        collector.add(
+          _batch(index: 0, size: 2, names: const [], skipped: manySkipped),
+        ),
+        MigrationAddOutcome.added,
+      );
+      expect(
+        collector.add(_batch(index: 1, size: 2, names: const ['one more'])),
+        MigrationAddOutcome.full,
+      );
       expect(collector.scannedCount, 1);
     });
 
@@ -264,34 +312,46 @@ void main() {
       final collector = GoogleMigrationCollector();
       final half = GoogleMigrationCollector.maxAccounts ~/ 2;
       expect(
-          collector.add(_batch(
+        collector.add(
+          _batch(
             index: 0,
             size: 2,
             names: List<String>.generate(half, (i) => 'a$i'),
             skipped: List<SkippedEntry>.generate(
               half,
-              (i) => SkippedEntry(
-                  reason: SkipReason.invalidFields, label: 's$i'),
+              (i) =>
+                  SkippedEntry(reason: SkipReason.invalidFields, label: 's$i'),
             ),
-          )),
-          MigrationAddOutcome.added);
-      expect(collector.add(_batch(index: 1, size: 2, names: const ['extra'])),
-          MigrationAddOutcome.full);
+          ),
+        ),
+        MigrationAddOutcome.added,
+      );
+      expect(
+        collector.add(_batch(index: 1, size: 2, names: const ['extra'])),
+        MigrationAddOutcome.full,
+      );
     });
 
     test('landing exactly on maxAccounts is allowed', () {
       final collector = GoogleMigrationCollector();
       final half = GoogleMigrationCollector.maxAccounts ~/ 2;
-      collector.add(_batch(
+      collector.add(
+        _batch(
           index: 0,
           size: 2,
-          names: List<String>.generate(half, (i) => 'a$i')));
+          names: List<String>.generate(half, (i) => 'a$i'),
+        ),
+      );
       expect(
-          collector.add(_batch(
-              index: 1,
-              size: 2,
-              names: List<String>.generate(half, (i) => 'b$i'))),
-          MigrationAddOutcome.added);
+        collector.add(
+          _batch(
+            index: 1,
+            size: 2,
+            names: List<String>.generate(half, (i) => 'b$i'),
+          ),
+        ),
+        MigrationAddOutcome.added,
+      );
     });
   });
 
@@ -334,12 +394,16 @@ void main() {
     test('after reset a previously foreign export is accepted', () {
       final collector = GoogleMigrationCollector();
       collector.add(_batch(index: 0, size: 2, id: 7));
-      expect(collector.add(_batch(index: 1, size: 3, id: 99)),
-          MigrationAddOutcome.differentBatch);
+      expect(
+        collector.add(_batch(index: 1, size: 3, id: 99)),
+        MigrationAddOutcome.differentBatch,
+      );
 
       collector.reset();
-      expect(collector.add(_batch(index: 1, size: 3, id: 99)),
-          MigrationAddOutcome.added);
+      expect(
+        collector.add(_batch(index: 1, size: 3, id: 99)),
+        MigrationAddOutcome.added,
+      );
       expect(collector.batchId, 99);
       expect(collector.batchSize, 3);
     });

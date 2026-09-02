@@ -97,9 +97,9 @@ class MigrationScanController {
     ImportService service, {
     GoogleMigrationCollector? collector,
     MigrationBatch Function(String raw)? parse,
-  })  : _service = service,
-        _collector = collector ?? GoogleMigrationCollector(),
-        _parse = parse ?? GoogleAuthParser.parseUri;
+  }) : _service = service,
+       _collector = collector ?? GoogleMigrationCollector(),
+       _parse = parse ?? GoogleAuthParser.parseUri;
 
   final ImportService _service;
   final GoogleMigrationCollector _collector;
@@ -121,9 +121,10 @@ class MigrationScanController {
       return const MigrationMalformedQr();
     }
     return switch (_collector.add(batch)) {
-      MigrationAddOutcome.added => _collector.isComplete
-          ? MigrationScanComplete(scannedCount, batchSize)
-          : MigrationBatchAdded(scannedCount, batchSize),
+      MigrationAddOutcome.added =>
+        _collector.isComplete
+            ? MigrationScanComplete(scannedCount, batchSize)
+            : MigrationBatchAdded(scannedCount, batchSize),
       MigrationAddOutcome.duplicateIndex => const MigrationDuplicateScan(),
       MigrationAddOutcome.differentBatch => const MigrationDifferentBatch(),
       MigrationAddOutcome.invalidBatch => const MigrationInvalidBatch(),

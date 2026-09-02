@@ -27,13 +27,43 @@ import 'package:project_auth/features/vault/presentation/bloc/vault_cubit.dart';
 class _MemStorage implements FlutterSecureStorage {
   final Map<String, String> data = {};
   @override
-  Future<String?> read({required String key, dynamic iOptions, dynamic aOptions, dynamic lOptions, dynamic webOptions, dynamic mOptions, dynamic wOptions}) async => data[key];
+  Future<String?> read({
+    required String key,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async => data[key];
   @override
-  Future<void> write({required String key, required String? value, dynamic iOptions, dynamic aOptions, dynamic lOptions, dynamic webOptions, dynamic mOptions, dynamic wOptions}) async {
-    if (value == null) { data.remove(key); } else { data[key] = value; }
+  Future<void> write({
+    required String key,
+    required String? value,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async {
+    if (value == null) {
+      data.remove(key);
+    } else {
+      data[key] = value;
+    }
   }
+
   @override
-  Future<void> delete({required String key, dynamic iOptions, dynamic aOptions, dynamic lOptions, dynamic webOptions, dynamic mOptions, dynamic wOptions}) async => data.remove(key);
+  Future<void> delete({
+    required String key,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async => data.remove(key);
   @override
   noSuchMethod(Invocation i) => throw UnimplementedError('$i');
 }
@@ -51,9 +81,10 @@ class _FakeRawStore implements RawTokenStore {
   @override
   Future<List<RawTokenRecord>> exportRaw() async => const [];
   @override
-  Future<TokenMergeOutcome> importRemote(List<RemoteTokenRow> remote,
-          {required String? pullCursorIso}) async =>
-      TokenMergeOutcome.none;
+  Future<TokenMergeOutcome> importRemote(
+    List<RemoteTokenRow> remote, {
+    required String? pullCursorIso,
+  }) async => TokenMergeOutcome.none;
   @override
   Future<void> markDeleted(String id) async {}
 }
@@ -71,6 +102,7 @@ class _FakeRemote implements RemoteTokenRepository {
     subscribeCount++;
     return _Handle(this);
   }
+
   @override
   Future<void> tombstoneAllRemote(String uid) async {}
   @override
@@ -85,8 +117,13 @@ class _Handle implements RealtimeChannelHandle {
 }
 
 class _FakeLockCubit extends Cubit<VaultLockState> implements VaultLockCubit {
-  _FakeLockCubit() : super(VaultLockState.unlocked(
-            biometricEnrolled: false, deviceBiometricAvailable: false));
+  _FakeLockCubit()
+    : super(
+        VaultLockState.unlocked(
+          biometricEnrolled: false,
+          deviceBiometricAvailable: false,
+        ),
+      );
   @override
   noSuchMethod(Invocation invocation) =>
       throw UnimplementedError('${invocation.memberName}');
@@ -96,118 +133,133 @@ class _FakeLockCubit extends Cubit<VaultLockState> implements VaultLockCubit {
 class _FakeFlagsRepo implements FeatureFlagsRepository {
   bool enabled = true;
   @override
-  Future<List<FeatureFlag>> fetchAll() async =>
-      [FeatureFlag(key: 'token_sync_enabled', enabled: enabled)];
+  Future<List<FeatureFlag>> fetchAll() async => [
+    FeatureFlag(key: 'token_sync_enabled', enabled: enabled),
+  ];
 }
 
 void main() {
-  testWidgets('sync destekleniyor → Canlı senkron toggle görünür, açınca store+subscribe',
-      (tester) async {
-    final storage = _MemStorage();
-    final liveStore = LiveSyncPrefStore(storage: storage);
-    final remote = _FakeRemote();
-    late VaultCubit vault;
-    final sync = TokenSyncService(
-      remote: remote,
-      store: _FakeRawStore(),
-      lastSync: LastSyncStore(storage: storage),
-      uid: 'u1',
-      mergeRemote: (rows, cursor) async => TokenMergeOutcome.none,
-      onStatus: (_) {},
-    );
-    vault = VaultCubit(_EmptyRepo(), sync: sync, rawStore: _FakeRawStore());
+  testWidgets(
+    'sync destekleniyor → Canlı senkron toggle görünür, açınca store+subscribe',
+    (tester) async {
+      final storage = _MemStorage();
+      final liveStore = LiveSyncPrefStore(storage: storage);
+      final remote = _FakeRemote();
+      late VaultCubit vault;
+      final sync = TokenSyncService(
+        remote: remote,
+        store: _FakeRawStore(),
+        lastSync: LastSyncStore(storage: storage),
+        uid: 'u1',
+        mergeRemote: (rows, cursor) async => TokenMergeOutcome.none,
+        onStatus: (_) {},
+      );
+      vault = VaultCubit(_EmptyRepo(), sync: sync, rawStore: _FakeRawStore());
 
-    await tester.pumpWidget(MultiBlocProvider(
-      providers: [
-        BlocProvider<VaultCubit>.value(value: vault),
-        BlocProvider<VaultLockCubit>.value(value: _FakeLockCubit()),
-      ],
-      child: RepositoryProvider<LiveSyncPrefStore>.value(
-        value: liveStore,
-        child: const MaterialApp(home: SettingsPage()),
-      ),
-    ));
-    await tester.pumpAndSettle();
+      await tester.pumpWidget(
+        MultiBlocProvider(
+          providers: [
+            BlocProvider<VaultCubit>.value(value: vault),
+            BlocProvider<VaultLockCubit>.value(value: _FakeLockCubit()),
+          ],
+          child: RepositoryProvider<LiveSyncPrefStore>.value(
+            value: liveStore,
+            child: const MaterialApp(home: SettingsPage()),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
 
-    expect(find.text('Canlı senkron'), findsOneWidget);
-    // Aç.
-    await tester.tap(find.byType(SwitchListTile).last);
-    await tester.pumpAndSettle();
-    expect(await liveStore.read(), isTrue, reason: 'tercih persist edildi');
-    expect(remote.subscribeCount, 1, reason: 'enableLive → subscribe');
+      expect(find.text('Canlı senkron'), findsOneWidget);
+      // Aç.
+      await tester.tap(find.byType(SwitchListTile).last);
+      await tester.pumpAndSettle();
+      expect(await liveStore.read(), isTrue, reason: 'tercih persist edildi');
+      expect(remote.subscribeCount, 1, reason: 'enableLive → subscribe');
 
-    await vault.close();
-  });
+      await vault.close();
+    },
+  );
 
-  testWidgets('token_sync_enabled false olunca toggle REAKTİF gizlenir (review [P2])',
-      (tester) async {
-    final storage = _MemStorage();
-    final liveStore = LiveSyncPrefStore(storage: storage);
-    await liveStore.write(true);
-    final remote = _FakeRemote();
-    late VaultCubit vault;
-    final flagsRepo = _FakeFlagsRepo();
-    final flags = FeatureFlagsService(
-      repo: flagsRepo,
-      cache: FeatureFlagsCacheStore(storage: _MemStorage()),
-    );
-    final sync = TokenSyncService(
-      remote: remote,
-      store: _FakeRawStore(),
-      lastSync: LastSyncStore(storage: storage),
-      uid: 'u1',
-      mergeRemote: (rows, cursor) async => TokenMergeOutcome.none,
-      onStatus: (_) {},
-      isEnabled: () => flags.isEnabled('token_sync_enabled', fallback: true),
-      flagListenable: flags.listenable,
-    );
-    vault = VaultCubit(
-      _EmptyRepo(),
-      sync: sync,
-      rawStore: _FakeRawStore(),
-      tokenSyncEnabled: () => flags.isEnabled('token_sync_enabled', fallback: true),
-    );
+  testWidgets(
+    'token_sync_enabled false olunca toggle REAKTİF gizlenir (review [P2])',
+    (tester) async {
+      final storage = _MemStorage();
+      final liveStore = LiveSyncPrefStore(storage: storage);
+      await liveStore.write(true);
+      final remote = _FakeRemote();
+      late VaultCubit vault;
+      final flagsRepo = _FakeFlagsRepo();
+      final flags = FeatureFlagsService(
+        repo: flagsRepo,
+        cache: FeatureFlagsCacheStore(storage: _MemStorage()),
+      );
+      final sync = TokenSyncService(
+        remote: remote,
+        store: _FakeRawStore(),
+        lastSync: LastSyncStore(storage: storage),
+        uid: 'u1',
+        mergeRemote: (rows, cursor) async => TokenMergeOutcome.none,
+        onStatus: (_) {},
+        isEnabled: () => flags.isEnabled('token_sync_enabled', fallback: true),
+        flagListenable: flags.listenable,
+      );
+      vault = VaultCubit(
+        _EmptyRepo(),
+        sync: sync,
+        rawStore: _FakeRawStore(),
+        tokenSyncEnabled: () =>
+            flags.isEnabled('token_sync_enabled', fallback: true),
+      );
 
-    await tester.pumpWidget(MultiBlocProvider(
-      providers: [
-        BlocProvider<VaultCubit>.value(value: vault),
-        BlocProvider<VaultLockCubit>.value(value: _FakeLockCubit()),
-      ],
-      child: MultiRepositoryProvider(
-        providers: [
-          RepositoryProvider<LiveSyncPrefStore>.value(value: liveStore),
-          RepositoryProvider<FeatureFlagsService>.value(value: flags),
-        ],
-        child: const MaterialApp(home: SettingsPage()),
-      ),
-    ));
-    await tester.pumpAndSettle();
-    // Flag fallback=true (henüz refresh yok) → toggle görünür.
-    expect(find.text('Canlı senkron'), findsOneWidget);
+      await tester.pumpWidget(
+        MultiBlocProvider(
+          providers: [
+            BlocProvider<VaultCubit>.value(value: vault),
+            BlocProvider<VaultLockCubit>.value(value: _FakeLockCubit()),
+          ],
+          child: MultiRepositoryProvider(
+            providers: [
+              RepositoryProvider<LiveSyncPrefStore>.value(value: liveStore),
+              RepositoryProvider<FeatureFlagsService>.value(value: flags),
+            ],
+            child: const MaterialApp(home: SettingsPage()),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      // Flag fallback=true (henüz refresh yok) → toggle görünür.
+      expect(find.text('Canlı senkron'), findsOneWidget);
 
-    // Server token_sync_enabled=false → refresh → listenable notify → REAKTİF gizlenir.
-    flagsRepo.enabled = false;
-    await flags.refresh();
-    await tester.pumpAndSettle();
-    expect(find.text('Canlı senkron'), findsNothing,
-        reason: 'flag false → toggle reaktif gizlendi');
+      // Server token_sync_enabled=false → refresh → listenable notify → REAKTİF gizlenir.
+      flagsRepo.enabled = false;
+      await flags.refresh();
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Canlı senkron'),
+        findsNothing,
+        reason: 'flag false → toggle reaktif gizlendi',
+      );
 
-    await vault.close();
-  });
+      await vault.close();
+    },
+  );
 
   testWidgets('sync desteklenmiyor (uid yok) → toggle GİZLİ', (tester) async {
     final storage = _MemStorage();
     final vault = VaultCubit(_EmptyRepo()); // sync yok
-    await tester.pumpWidget(MultiBlocProvider(
-      providers: [
-        BlocProvider<VaultCubit>.value(value: vault),
-        BlocProvider<VaultLockCubit>.value(value: _FakeLockCubit()),
-      ],
-      child: RepositoryProvider<LiveSyncPrefStore>.value(
-        value: LiveSyncPrefStore(storage: storage),
-        child: const MaterialApp(home: SettingsPage()),
+    await tester.pumpWidget(
+      MultiBlocProvider(
+        providers: [
+          BlocProvider<VaultCubit>.value(value: vault),
+          BlocProvider<VaultLockCubit>.value(value: _FakeLockCubit()),
+        ],
+        child: RepositoryProvider<LiveSyncPrefStore>.value(
+          value: LiveSyncPrefStore(storage: storage),
+          child: const MaterialApp(home: SettingsPage()),
+        ),
       ),
-    ));
+    );
     await tester.pumpAndSettle();
     expect(find.text('Canlı senkron'), findsNothing);
     await vault.close();

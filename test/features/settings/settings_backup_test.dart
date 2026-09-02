@@ -16,8 +16,12 @@ import 'package:project_auth/features/settings/presentation/settings_page.dart';
 
 class _FakeLockCubit extends Cubit<VaultLockState> implements VaultLockCubit {
   _FakeLockCubit()
-      : super(VaultLockState.unlocked(
-            biometricEnrolled: false, deviceBiometricAvailable: false));
+    : super(
+        VaultLockState.unlocked(
+          biometricEnrolled: false,
+          deviceBiometricAvailable: false,
+        ),
+      );
   @override
   noSuchMethod(Invocation invocation) =>
       throw UnimplementedError('${invocation.memberName}');
@@ -30,22 +34,19 @@ Widget _app(GoRouter router, VaultLockCubit lock) =>
     );
 
 GoRouter _router() => GoRouter(
-      initialLocation: Routes.settings,
-      routes: [
-        GoRoute(
-          path: Routes.settings,
-          builder: (_, _) => const SettingsPage(),
-        ),
-        GoRoute(
-          path: Routes.importData,
-          builder: (_, _) => const Scaffold(body: Text('IMPORT-SAYFASI')),
-        ),
-        GoRoute(
-          path: Routes.exportData,
-          builder: (_, _) => const Scaffold(body: Text('EXPORT-SAYFASI')),
-        ),
-      ],
-    );
+  initialLocation: Routes.settings,
+  routes: [
+    GoRoute(path: Routes.settings, builder: (_, _) => const SettingsPage()),
+    GoRoute(
+      path: Routes.importData,
+      builder: (_, _) => const Scaffold(body: Text('IMPORT-SAYFASI')),
+    ),
+    GoRoute(
+      path: Routes.exportData,
+      builder: (_, _) => const Scaffold(body: Text('EXPORT-SAYFASI')),
+    ),
+  ],
+);
 
 void main() {
   late VaultLockCubit lock;

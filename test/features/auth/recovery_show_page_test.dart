@@ -21,8 +21,9 @@ class _FakeLock extends Cubit<VaultLockState> implements VaultLockCubit {
 }
 
 void main() {
-  testWidgets('Panoya kopyala → numaralı format (sıra korunur)',
-      (tester) async {
+  testWidgets('Panoya kopyala → numaralı format (sıra korunur)', (
+    tester,
+  ) async {
     final words = List.generate(24, (i) => 'word$i');
 
     // Capture clipboard writes (no real clipboard in the test env). Also model
@@ -39,8 +40,12 @@ void main() {
         return null;
       },
     );
-    addTearDown(() => tester.binding.defaultBinaryMessenger
-        .setMockMethodCallHandler(SystemChannels.platform, null));
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
 
     // Geniş viewport: 24-kelime grid + kopyala + checkbox + CTA hepsi sığsın
     // (default 800×600'de ListView içeriği fold altında kalıp overflow/clip olmaz).
@@ -77,37 +82,43 @@ void main() {
     // Advance past the 60s window → the recovery key is wiped from the clipboard
     // (and no Timer remains pending at teardown).
     await tester.pump(const Duration(seconds: 61));
-    expect(copied, '', reason: 'recovery key wiped from clipboard after window');
+    expect(
+      copied,
+      '',
+      reason: 'recovery key wiped from clipboard after window',
+    );
   });
 
   testWidgets(
-      'recovery grid textScaler 2.0 altında taşma/overflow yok (Design.md §5 '
-      'dynamic-type test kapısı)', (tester) async {
-    // Recovery, veri kaybı = kilitlenme olan TEK ekran → büyük metin ölçeğinde
-    // 24 kelimelik grid clip/overflow etmemeli (SelectableText sarılır).
-    final words = List.generate(24, (i) => 'kelime$i');
-    tester.view.physicalSize = const Size(1200, 3600);
-    tester.view.devicePixelRatio = 1.0;
-    addTearDown(tester.view.reset);
+    'recovery grid textScaler 2.0 altında taşma/overflow yok (Design.md §5 '
+    'dynamic-type test kapısı)',
+    (tester) async {
+      // Recovery, veri kaybı = kilitlenme olan TEK ekran → büyük metin ölçeğinde
+      // 24 kelimelik grid clip/overflow etmemeli (SelectableText sarılır).
+      final words = List.generate(24, (i) => 'kelime$i');
+      tester.view.physicalSize = const Size(1200, 3600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
 
-    await tester.pumpWidget(
-      MaterialApp(
-        home: MediaQuery(
-          data: const MediaQueryData(textScaler: TextScaler.linear(2.0)),
-          child: BlocProvider<VaultLockCubit>.value(
-            value: _FakeLock(VaultLockState.setupPending(mnemonic: words)),
-            child: const RecoveryShowPage(),
+      await tester.pumpWidget(
+        MaterialApp(
+          home: MediaQuery(
+            data: const MediaQueryData(textScaler: TextScaler.linear(2.0)),
+            child: BlocProvider<VaultLockCubit>.value(
+              value: _FakeLock(VaultLockState.setupPending(mnemonic: words)),
+              child: const RecoveryShowPage(),
+            ),
           ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
+      );
+      await tester.pumpAndSettle();
 
-    // RenderFlex overflow vb. exception fırlatmamalı.
-    expect(tester.takeException(), isNull);
-    // 24 kelime de render edildi (kısaltma/atlama yok).
-    for (final w in words) {
-      expect(find.text(w), findsOneWidget);
-    }
-  });
+      // RenderFlex overflow vb. exception fırlatmamalı.
+      expect(tester.takeException(), isNull);
+      // 24 kelime de render edildi (kısaltma/atlama yok).
+      for (final w in words) {
+        expect(find.text(w), findsOneWidget);
+      }
+    },
+  );
 }

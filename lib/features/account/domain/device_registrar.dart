@@ -11,9 +11,11 @@ import '../data/stable_device_id_store.dart';
 import 'device_repository.dart';
 
 class DeviceRegistrar {
-  DeviceRegistrar({required DeviceRepository repo, required StableDeviceIdStore idStore})
-      : _repo = repo,
-        _idStore = idStore;
+  DeviceRegistrar({
+    required DeviceRepository repo,
+    required StableDeviceIdStore idStore,
+  }) : _repo = repo,
+       _idStore = idStore;
 
   final DeviceRepository _repo;
   final StableDeviceIdStore _idStore;

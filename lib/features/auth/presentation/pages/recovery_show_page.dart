@@ -62,9 +62,14 @@ class _RecoveryShowPageState extends State<RecoveryShowPage> {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
-      ..showSnackBar(const SnackBar(
-          content: Text('Recovery key panoya kopyalandı — '
-              'güvenlik için panoyu 60 sn sonra temizleyeceğiz')));
+      ..showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Recovery key panoya kopyalandı — '
+            'güvenlik için panoyu 60 sn sonra temizleyeceğiz',
+          ),
+        ),
+      );
   }
 
   /// Pano hâlâ bizim kopyaladığımız değeri tutuyorsa temizle.
@@ -80,8 +85,9 @@ class _RecoveryShowPageState extends State<RecoveryShowPage> {
 
   @override
   Widget build(BuildContext context) {
-    final mnemonic =
-        context.select<VaultLockCubit, List<String>>((c) => c.state.mnemonic);
+    final mnemonic = context.select<VaultLockCubit, List<String>>(
+      (c) => c.state.mnemonic,
+    );
     final scheme = Theme.of(context).colorScheme;
 
     final page = AuthScaffold(
@@ -125,8 +131,9 @@ class _RecoveryShowPageState extends State<RecoveryShowPage> {
       ],
       actions: [
         FilledButton(
-          onPressed:
-              _acknowledged ? () => context.goNamed('recoveryVerify') : null,
+          onPressed: _acknowledged
+              ? () => context.goNamed('recoveryVerify')
+              : null,
           child: const Text('Devam'),
         ),
       ],

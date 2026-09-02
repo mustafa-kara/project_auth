@@ -14,13 +14,43 @@ import 'package:uuid/uuid.dart';
 class _FakeStorage implements FlutterSecureStorage {
   final Map<String, String> data = {};
   @override
-  Future<String?> read({required String key, dynamic iOptions, dynamic aOptions, dynamic lOptions, dynamic webOptions, dynamic mOptions, dynamic wOptions}) async => data[key];
+  Future<String?> read({
+    required String key,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async => data[key];
   @override
-  Future<void> write({required String key, required String? value, dynamic iOptions, dynamic aOptions, dynamic lOptions, dynamic webOptions, dynamic mOptions, dynamic wOptions}) async {
-    if (value == null) { data.remove(key); } else { data[key] = value; }
+  Future<void> write({
+    required String key,
+    required String? value,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async {
+    if (value == null) {
+      data.remove(key);
+    } else {
+      data[key] = value;
+    }
   }
+
   @override
-  Future<void> delete({required String key, dynamic iOptions, dynamic aOptions, dynamic lOptions, dynamic webOptions, dynamic mOptions, dynamic wOptions}) async => data.remove(key);
+  Future<void> delete({
+    required String key,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async => data.remove(key);
   @override
   noSuchMethod(Invocation invocation) => throw UnimplementedError();
 }
@@ -42,7 +72,11 @@ class _FakeDeviceRepo implements DeviceRepository {
   bool throwOnTouch = false;
 
   @override
-  Future<void> register(String uid, {required String deviceId, String? name}) async {
+  Future<void> register(
+    String uid, {
+    required String deviceId,
+    String? name,
+  }) async {
     registerCount++;
     lastRegisteredId = deviceId;
     if (throwOnRegister) throw const SyncNetworkError();
@@ -63,7 +97,9 @@ void main() {
   group('StableDeviceIdStore', () {
     test('getOrCreate ilk çağrıda üretir+yazar, ikincide AYNI id', () async {
       final store = StableDeviceIdStore(
-          storage: _FakeStorage(), uuid: _FixedUuid('dev-uuid-1'));
+        storage: _FakeStorage(),
+        uuid: _FixedUuid('dev-uuid-1'),
+      );
       final a = await store.getOrCreate();
       final b = await store.getOrCreate();
       expect(a, 'dev-uuid-1');
@@ -104,19 +140,21 @@ void main() {
 
     test('device_id eksik → FormatException', () {
       expect(
-          () => SupabaseDeviceRepository.parseRow({
-                'created_at': '2026-06-09T08:00:00Z',
-              }),
-          throwsFormatException);
+        () => SupabaseDeviceRepository.parseRow({
+          'created_at': '2026-06-09T08:00:00Z',
+        }),
+        throwsFormatException,
+      );
     });
 
     test('created_at parse edilemez → FormatException', () {
       expect(
-          () => SupabaseDeviceRepository.parseRow({
-                'device_id': 'd1',
-                'created_at': 'not-a-date',
-              }),
-          throwsFormatException);
+        () => SupabaseDeviceRepository.parseRow({
+          'device_id': 'd1',
+          'created_at': 'not-a-date',
+        }),
+        throwsFormatException,
+      );
     });
   });
 
@@ -128,7 +166,10 @@ void main() {
     setUp(() {
       repo = _FakeDeviceRepo();
       storage = _FakeStorage();
-      idStore = StableDeviceIdStore(storage: storage, uuid: _FixedUuid('dev-1'));
+      idStore = StableDeviceIdStore(
+        storage: storage,
+        uuid: _FixedUuid('dev-1'),
+      );
     });
 
     test('onSignedIn → getOrCreate + register', () async {
@@ -162,15 +203,22 @@ void main() {
       expect(repo.registerCount, 0, reason: 'row var → fallback yok');
     });
 
-    test('onResumed: touchLastSeen 0 satır → register FALLBACK (review [P2]#3)', () async {
-      await idStore.getOrCreate();
-      repo.touchReturns = 0; // sunucuda row yok (ilk register düşmüş)
-      final reg = DeviceRegistrar(repo: repo, idStore: idStore);
-      await reg.onResumed('uid-A');
-      expect(repo.touchCount, 1);
-      expect(repo.registerCount, 1, reason: '0 satır → register row oluşturur');
-      expect(repo.lastRegisteredId, 'dev-1');
-    });
+    test(
+      'onResumed: touchLastSeen 0 satır → register FALLBACK (review [P2]#3)',
+      () async {
+        await idStore.getOrCreate();
+        repo.touchReturns = 0; // sunucuda row yok (ilk register düşmüş)
+        final reg = DeviceRegistrar(repo: repo, idStore: idStore);
+        await reg.onResumed('uid-A');
+        expect(repo.touchCount, 1);
+        expect(
+          repo.registerCount,
+          1,
+          reason: '0 satır → register row oluşturur',
+        );
+        expect(repo.lastRegisteredId, 'dev-1');
+      },
+    );
 
     test('onResumed ağ hatası best-effort yutulur', () async {
       await idStore.getOrCreate();

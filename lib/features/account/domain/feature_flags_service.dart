@@ -20,8 +20,8 @@ class FeatureFlagsService {
   FeatureFlagsService({
     required FeatureFlagsRepository repo,
     required FeatureFlagsCacheStore cache,
-  })  : _repo = repo,
-        _cache = cache;
+  }) : _repo = repo,
+       _cache = cache;
 
   final FeatureFlagsRepository _repo;
   final FeatureFlagsCacheStore _cache;
@@ -43,7 +43,9 @@ class FeatureFlagsService {
   /// Belleği hazırlar (cache-ready GARANTİSİ — `start` öncesi await edilir). Bellek doluysa
   /// anında döner; boşsa cache'i ısıt; cache de boşsa bounded `refresh` denemesi (timeout).
   /// Sonunda bellek ya gerçek değer ya boş (→ `isEnabled` fallback). Karar `isEnabled` ile okunur.
-  Future<void> ensureLoaded({Duration timeout = const Duration(seconds: 3)}) async {
+  Future<void> ensureLoaded({
+    Duration timeout = const Duration(seconds: 3),
+  }) async {
     if (_memory != null) return;
     final cached = await _cache.read();
     if (cached != null) {

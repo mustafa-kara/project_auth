@@ -25,10 +25,26 @@ import 'package:project_auth/features/auth/presentation/pages/recovery_verify_pa
 class _FakeStorage implements FlutterSecureStorage {
   final Map<String, String> data = {};
   @override
-  Future<String?> read({required String key, dynamic iOptions, dynamic aOptions, dynamic lOptions, dynamic webOptions, dynamic mOptions, dynamic wOptions}) async =>
-      data[key];
+  Future<String?> read({
+    required String key,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async => data[key];
   @override
-  Future<void> write({required String key, required String? value, dynamic iOptions, dynamic aOptions, dynamic lOptions, dynamic webOptions, dynamic mOptions, dynamic wOptions}) async {
+  Future<void> write({
+    required String key,
+    required String? value,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async {
     if (value == null) {
       data.remove(key);
     } else {
@@ -37,8 +53,15 @@ class _FakeStorage implements FlutterSecureStorage {
   }
 
   @override
-  Future<void> delete({required String key, dynamic iOptions, dynamic aOptions, dynamic lOptions, dynamic webOptions, dynamic mOptions, dynamic wOptions}) async =>
-      data.remove(key);
+  Future<void> delete({
+    required String key,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async => data.remove(key);
   @override
   noSuchMethod(Invocation i) => throw UnimplementedError('$i');
 }
@@ -122,7 +145,9 @@ void main() {
     }
   }
 
-  testWidgets('1 yanlış deneme → inline hata, setupPending KALIR', (tester) async {
+  testWidgets('1 yanlış deneme → inline hata, setupPending KALIR', (
+    tester,
+  ) async {
     await cubit.beginSetup('parola123');
     await pump(tester);
 
@@ -135,8 +160,9 @@ void main() {
     expect(km.issued.single.disposed, isFalse); // pending key canlı
   });
 
-  testWidgets('3 yanlış deneme → cancelSetup → uninitialized + dispose',
-      (tester) async {
+  testWidgets('3 yanlış deneme → cancelSetup → uninitialized + dispose', (
+    tester,
+  ) async {
     await cubit.beginSetup('parola123');
     await pump(tester);
 

@@ -24,8 +24,8 @@ class StableDeviceIdStore {
   final Uuid _uuid;
 
   StableDeviceIdStore({FlutterSecureStorage? storage, Uuid? uuid})
-      : _storage = storage ?? const FlutterSecureStorage(),
-        _uuid = uuid ?? const Uuid();
+    : _storage = storage ?? const FlutterSecureStorage(),
+      _uuid = uuid ?? const Uuid();
 
   /// Kayıtlı device_id; henüz üretilmemişse null.
   Future<String?> read() => _storage.read(key: storageKey);

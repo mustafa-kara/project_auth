@@ -29,12 +29,13 @@ class CountdownRing extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = period <= 0 ? 30 : period;
     final fraction = (remaining / p).clamp(0.0, 1.0);
-    final countdown = Theme.of(context).extension<CountdownColors>() ??
-        CountdownColors.dark;
+    final countdown =
+        Theme.of(context).extension<CountdownColors>() ?? CountdownColors.dark;
     final color = countdown.forRemaining(remaining, p);
     // Kritik = mutlak son 5sn (Design.md §3; periyottan bağımsız — review P3).
     final critical = remaining <= CountdownColors.criticalSeconds;
-    final reduceMotion = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    final reduceMotion =
+        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
 
     final ring = SizedBox(
       width: size,
@@ -45,8 +46,9 @@ class CountdownRing extends StatelessWidget {
           CircularProgressIndicator(
             value: fraction,
             strokeWidth: 3,
-            backgroundColor:
-                Theme.of(context).colorScheme.surfaceContainerHighest,
+            backgroundColor: Theme.of(
+              context,
+            ).colorScheme.surfaceContainerHighest,
             valueColor: AlwaysStoppedAnimation<Color>(color),
           ),
           Text(
@@ -90,10 +92,10 @@ class _PulseState extends State<_Pulse> with SingleTickerProviderStateMixin {
     vsync: this,
     duration: Motion.normal,
   )..repeat(reverse: true);
-  late final Animation<double> _scale =
-      Tween(begin: 0.95, end: 1.05).animate(
-    CurvedAnimation(parent: _c, curve: Curves.easeInOut),
-  );
+  late final Animation<double> _scale = Tween(
+    begin: 0.95,
+    end: 1.05,
+  ).animate(CurvedAnimation(parent: _c, curve: Curves.easeInOut));
 
   @override
   void dispose() {

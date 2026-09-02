@@ -36,9 +36,9 @@ class BiometricServiceImpl implements BiometricService {
     LocalAuthentication? localAuth,
     FlutterSecureStorage? storage,
     DeviceInfoPlugin? deviceInfo,
-  })  : _localAuth = localAuth ?? LocalAuthentication(),
-        _storage = storage ?? const FlutterSecureStorage(),
-        _deviceInfo = deviceInfo ?? DeviceInfoPlugin();
+  }) : _localAuth = localAuth ?? LocalAuthentication(),
+       _storage = storage ?? const FlutterSecureStorage(),
+       _deviceInfo = deviceInfo ?? DeviceInfoPlugin();
 
   /// iOS/macOS: Secure Enclave + currently-enrolled biometrics (biyometri seti
   /// değişirse anahtar OTOMATİK geçersiz). passcode = passcode-set zorunlu + cihaza bağlı.
@@ -144,23 +144,31 @@ class BiometricServiceImpl implements BiometricService {
     final msg = (e.message ?? '').toLowerCase();
     final hay = '$code $msg';
 
-    if (hay.contains('cancel') || hay.contains('usercancel') ||
-        hay.contains('user_cancel') || hay.contains('systemcancel')) {
+    if (hay.contains('cancel') ||
+        hay.contains('usercancel') ||
+        hay.contains('user_cancel') ||
+        hay.contains('systemcancel')) {
       return const BiometricCanceled();
     }
     if (hay.contains('lockout') || hay.contains('locked')) {
       return const BiometricLockout();
     }
     // Anahtar invalidated (biyometri değişti) / bulunamadı / decrypt fail.
-    if (hay.contains('invalidat') || hay.contains('keypermanentlyinvalidated') ||
-        hay.contains('not found') || hay.contains('no_key') ||
+    if (hay.contains('invalidat') ||
+        hay.contains('keypermanentlyinvalidated') ||
+        hay.contains('not found') ||
+        hay.contains('no_key') ||
         hay.contains('keystore') && hay.contains('invalid')) {
       return const BiometricKeyMissing();
     }
-    if (hay.contains('unavailable') || hay.contains('no_hardware') ||
-        hay.contains('nohardware') || hay.contains('not_available') ||
-        hay.contains('notavailable') || hay.contains('not_enrolled') ||
-        hay.contains('notenrolled') || hay.contains('biometric_unavailable')) {
+    if (hay.contains('unavailable') ||
+        hay.contains('no_hardware') ||
+        hay.contains('nohardware') ||
+        hay.contains('not_available') ||
+        hay.contains('notavailable') ||
+        hay.contains('not_enrolled') ||
+        hay.contains('notenrolled') ||
+        hay.contains('biometric_unavailable')) {
       return const BiometricUnavailable();
     }
     return BiometricStorageError('${e.code}: ${e.message ?? ''}'.trim());

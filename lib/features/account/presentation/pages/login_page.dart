@@ -38,17 +38,17 @@ class _LoginPageState extends State<LoginPage> {
 
   void _signIn() {
     context.read<SessionCubit>().signIn(
-          email: _emailCtrl.text.trim(),
-          password: _passwordCtrl.text,
-        );
+      email: _emailCtrl.text.trim(),
+      password: _passwordCtrl.text,
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final busy =
-        context.select<SessionCubit, bool>((c) => c.state.busy);
-    final error =
-        context.select<SessionCubit, AuthError?>((c) => c.state.error);
+    final busy = context.select<SessionCubit, bool>((c) => c.state.busy);
+    final error = context.select<SessionCubit, AuthError?>(
+      (c) => c.state.error,
+    );
     final notConfirmed = error is AuthEmailNotConfirmed;
 
     // Parola alanı içerir → screenshot/recents koruması (SecureScreenScope).
@@ -56,7 +56,8 @@ class _LoginPageState extends State<LoginPage> {
       child: AuthScaffold(
         icon: Icons.login,
         title: 'Giriş yap',
-        description: 'Hesabına giriş yap. Bu parola, vault master parolandan ayrıdır.',
+        description:
+            'Hesabına giriş yap. Bu parola, vault master parolandan ayrıdır.',
         body: [
           AppTextField(
             controller: _emailCtrl,

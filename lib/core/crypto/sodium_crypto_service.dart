@@ -80,7 +80,11 @@ class SodiumCryptoService implements CryptoService {
           alg: CryptoPwhashAlgorithm.argon2id13,
         );
       } finally {
-        passwordI8.fillRange(0, passwordI8.length, 0); // izole içi byte zero-fill
+        passwordI8.fillRange(
+          0,
+          passwordI8.length,
+          0,
+        ); // izole içi byte zero-fill
       }
     });
     return SodiumKeyHandle(kek);

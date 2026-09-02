@@ -152,16 +152,15 @@ class AppSurfaces extends ThemeExtension<AppSurfaces> {
     Color? skeletonBase,
     Color? skeletonHighlight,
     List<Color>? avatarPalette,
-  }) =>
-      AppSurfaces(
-        textTertiary: textTertiary ?? this.textTertiary,
-        successBg: successBg ?? this.successBg,
-        warningBg: warningBg ?? this.warningBg,
-        criticalBg: criticalBg ?? this.criticalBg,
-        skeletonBase: skeletonBase ?? this.skeletonBase,
-        skeletonHighlight: skeletonHighlight ?? this.skeletonHighlight,
-        avatarPalette: avatarPalette ?? this.avatarPalette,
-      );
+  }) => AppSurfaces(
+    textTertiary: textTertiary ?? this.textTertiary,
+    successBg: successBg ?? this.successBg,
+    warningBg: warningBg ?? this.warningBg,
+    criticalBg: criticalBg ?? this.criticalBg,
+    skeletonBase: skeletonBase ?? this.skeletonBase,
+    skeletonHighlight: skeletonHighlight ?? this.skeletonHighlight,
+    avatarPalette: avatarPalette ?? this.avatarPalette,
+  );
 
   @override
   AppSurfaces lerp(ThemeExtension<AppSurfaces>? other, double t) {
@@ -172,8 +171,11 @@ class AppSurfaces extends ThemeExtension<AppSurfaces> {
       warningBg: Color.lerp(warningBg, other.warningBg, t)!,
       criticalBg: Color.lerp(criticalBg, other.criticalBg, t)!,
       skeletonBase: Color.lerp(skeletonBase, other.skeletonBase, t)!,
-      skeletonHighlight:
-          Color.lerp(skeletonHighlight, other.skeletonHighlight, t)!,
+      skeletonHighlight: Color.lerp(
+        skeletonHighlight,
+        other.skeletonHighlight,
+        t,
+      )!,
       avatarPalette: [
         for (var i = 0; i < avatarPalette.length; i++)
           Color.lerp(avatarPalette[i], other.avatarPalette[i], t)!,

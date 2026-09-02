@@ -122,16 +122,14 @@ class _ChipTarget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Semantics(
-        button: true,
-        selected: selected,
-        label: label,
-        onTap: onTap,
-        excludeSemantics: true,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(
-            minHeight: TagChipsBar.minTouchTarget,
-          ),
-          child: child,
-        ),
-      );
+    button: true,
+    selected: selected,
+    label: label,
+    onTap: onTap,
+    excludeSemantics: true,
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: TagChipsBar.minTouchTarget),
+      child: child,
+    ),
+  );
 }

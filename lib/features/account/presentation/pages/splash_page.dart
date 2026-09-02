@@ -34,8 +34,9 @@ class SplashPage extends StatelessWidget {
                 const SizedBox(height: Gap.lg),
                 Text(
                   'project_auth',
-                  style: theme.textTheme.titleMedium
-                      ?.copyWith(color: scheme.onSurface),
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: scheme.onSurface,
+                  ),
                 ),
                 const SizedBox(height: Gap.xl),
                 SizedBox(

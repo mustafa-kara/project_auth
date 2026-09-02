@@ -38,42 +38,41 @@ import '../widgets/import_preview_view.dart';
 
 /// Kaynak biçiminin kullanıcıya gösterilen adı.
 String importSourceLabel(ImportSource source) => switch (source) {
-      ImportSource.aegis => 'Aegis',
-      ImportSource.twofas => '2FAS',
-      ImportSource.googleAuth => 'Google Authenticator',
-      ImportSource.projectauthBackup => 'Şifreli yedek',
-      ImportSource.unknown => 'Bilinmeyen biçim',
-    };
+  ImportSource.aegis => 'Aegis',
+  ImportSource.twofas => '2FAS',
+  ImportSource.googleAuth => 'Google Authenticator',
+  ImportSource.projectauthBackup => 'Şifreli yedek',
+  ImportSource.unknown => 'Bilinmeyen biçim',
+};
 
 /// Dosya seviyesi hataların Türkçe karşılıkları (plan §3.8). Beklenmeyen hata
 /// tipleri jenerik mesaja düşer — teknik detay kullanıcıya gösterilmez.
 String importErrorMessage(Object error) => switch (error) {
-      ImportFileTooLargeException() => 'Dosya çok büyük (max 8 MB).',
-      MalformedImportFileException() =>
-        'Dosya okunamadı — geçerli bir JSON yedeği değil.',
-      UnsupportedImportFormatException() =>
-        'Bu dosya biçimi desteklenmiyor. Aegis (düz JSON), 2FAS veya bu '
-            'uygulamanın yedeği olmalı.',
-      EncryptedSourceException(source: final s) => switch (s) {
-          ImportSource.aegis =>
-            'Bu Aegis yedeği parolayla şifrelenmiş. Aegis\'te "Dışa aktar" '
-                'ekranından şifrelemeyi kapatıp yeniden dışa aktar.',
-          ImportSource.twofas =>
-            'Bu 2FAS yedeği parolayla şifrelenmiş. 2FAS\'ta yedeği parolasız '
-                'dışa aktarıp tekrar dene.',
-          _ => 'Bu yedek parolayla şifrelenmiş — şifresiz olarak yeniden '
-              'dışa aktar.',
-        },
-      ImportTooManyEntriesException() =>
-        'Dosyada çok fazla kayıt var (en fazla 1024).',
-      EmptyImportException() =>
-        'Dosyada içe aktarılacak token bulunamadı.',
-      WrongBackupPasswordException() =>
-        'Parola yanlış ya da dosya bozulmuş.',
-      UnsupportedBackupVersionException() =>
-        'Bu yedek daha yeni bir sürümle oluşturulmuş. Uygulamayı güncelle.',
-      _ => 'İçe aktarma başarısız — tekrar dene.',
-    };
+  ImportFileTooLargeException() => 'Dosya çok büyük (max 8 MB).',
+  MalformedImportFileException() =>
+    'Dosya okunamadı — geçerli bir JSON yedeği değil.',
+  UnsupportedImportFormatException() =>
+    'Bu dosya biçimi desteklenmiyor. Aegis (düz JSON), 2FAS veya bu '
+        'uygulamanın yedeği olmalı.',
+  EncryptedSourceException(source: final s) => switch (s) {
+    ImportSource.aegis =>
+      'Bu Aegis yedeği parolayla şifrelenmiş. Aegis\'te "Dışa aktar" '
+          'ekranından şifrelemeyi kapatıp yeniden dışa aktar.',
+    ImportSource.twofas =>
+      'Bu 2FAS yedeği parolayla şifrelenmiş. 2FAS\'ta yedeği parolasız '
+          'dışa aktarıp tekrar dene.',
+    _ =>
+      'Bu yedek parolayla şifrelenmiş — şifresiz olarak yeniden '
+          'dışa aktar.',
+  },
+  ImportTooManyEntriesException() =>
+    'Dosyada çok fazla kayıt var (en fazla 1024).',
+  EmptyImportException() => 'Dosyada içe aktarılacak token bulunamadı.',
+  WrongBackupPasswordException() => 'Parola yanlış ya da dosya bozulmuş.',
+  UnsupportedBackupVersionException() =>
+    'Bu yedek daha yeni bir sürümle oluşturulmuş. Uygulamayı güncelle.',
+  _ => 'İçe aktarma başarısız — tekrar dene.',
+};
 
 /// Sayfanın hangi adımda olduğu.
 enum _Step { pick, password, preview }
@@ -95,7 +94,8 @@ class ImportPage extends StatefulWidget {
 }
 
 class _ImportPageState extends State<ImportPage> {
-  late final ImportService _service = widget.service ?? locator<ImportService>();
+  late final ImportService _service =
+      widget.service ?? locator<ImportService>();
   late final DocumentPort _documents =
       widget.documents ?? locator<DocumentPort>();
 
@@ -303,41 +303,41 @@ class _ImportPageState extends State<ImportPage> {
   }
 
   Widget _buildPick(BuildContext context) => Column(
-        children: [
-          if (_error != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(Gap.lg, Gap.lg, Gap.lg, 0),
-              child: AppBanner(
-                kind: StatusKind.critical,
-                icon: Icons.error_outline,
-                message: _error!,
-              ),
-            ),
-          Expanded(
-            child: EmptyState(
-              icon: Icons.file_open_outlined,
-              title: 'Yedek dosyası seç',
-              description:
-                  'Aegis veya 2FAS\'ın şifresiz JSON yedeğini ya da bu '
-                  'uygulamayla aldığın şifreli yedeği seç. Dosya cihazından '
-                  'çıkmaz — her şey burada çözülür.',
-              actionLabel: _busy ? 'Açılıyor…' : 'Dosya seç',
-              onAction: _pickFile, // _busy iken metot başında no-op
-              primaryAction: true,
-            ),
+    children: [
+      if (_error != null)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(Gap.lg, Gap.lg, Gap.lg, 0),
+          child: AppBanner(
+            kind: StatusKind.critical,
+            icon: Icons.error_outline,
+            message: _error!,
           ),
-          // Google Authenticator dosya DEĞİL, QR üretir (plan §5b) → ikinci
-          // aksiyon kamerayı açar. `EmptyState` tek CTA taşır, bu yüzden ayrı.
-          Padding(
-            padding: const EdgeInsets.fromLTRB(Gap.lg, 0, Gap.lg, Gap.lg),
-            child: OutlinedButton.icon(
-              onPressed: _busy ? null : _showGoogleGuide,
-              icon: const Icon(Icons.qr_code_scanner_outlined),
-              label: const Text('Google Authenticator (QR)'),
-            ),
-          ),
-        ],
-      );
+        ),
+      Expanded(
+        child: EmptyState(
+          icon: Icons.file_open_outlined,
+          title: 'Yedek dosyası seç',
+          description:
+              'Aegis veya 2FAS\'ın şifresiz JSON yedeğini ya da bu '
+              'uygulamayla aldığın şifreli yedeği seç. Dosya cihazından '
+              'çıkmaz — her şey burada çözülür.',
+          actionLabel: _busy ? 'Açılıyor…' : 'Dosya seç',
+          onAction: _pickFile, // _busy iken metot başında no-op
+          primaryAction: true,
+        ),
+      ),
+      // Google Authenticator dosya DEĞİL, QR üretir (plan §5b) → ikinci
+      // aksiyon kamerayı açar. `EmptyState` tek CTA taşır, bu yüzden ayrı.
+      Padding(
+        padding: const EdgeInsets.fromLTRB(Gap.lg, 0, Gap.lg, Gap.lg),
+        child: OutlinedButton.icon(
+          onPressed: _busy ? null : _showGoogleGuide,
+          icon: const Icon(Icons.qr_code_scanner_outlined),
+          label: const Text('Google Authenticator (QR)'),
+        ),
+      ),
+    ],
+  );
 
   /// Kısa yönerge: kullanıcı Google Authenticator'da aktarım QR'ını nerede
   /// bulacağını bilmiyor. Sheet kapanınca tarama ekranı açılır.
@@ -362,8 +362,8 @@ class _ImportPageState extends State<ImportPage> {
                 'hepsini sırayla okut. QR yerine bağlantıyı kopyaladıysan: '
                 'Ekle → Manuel otpauth:// gir ekranına yapıştır.',
                 style: Theme.of(sheetCtx).textTheme.bodyMedium?.copyWith(
-                      color: Theme.of(sheetCtx).colorScheme.onSurfaceVariant,
-                    ),
+                  color: Theme.of(sheetCtx).colorScheme.onSurfaceVariant,
+                ),
               ),
               const SizedBox(height: Gap.xl),
               FilledButton(
@@ -386,52 +386,52 @@ class _ImportPageState extends State<ImportPage> {
   }
 
   Widget _buildPassword(BuildContext context) => ListView(
-        padding: const EdgeInsets.all(Gap.lg),
-        children: [
-          Text(
-            'Bu dosya şifreli bir yedek',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          const SizedBox(height: Gap.sm),
-          Text(
-            'Yedeği oluştururken belirlediğin parolayı gir. Bu parola master '
-            'parolandan farklı olabilir.',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-          ),
-          const SizedBox(height: Gap.xl),
-          AppTextField(
-            controller: _passwordCtrl,
-            label: 'Yedek parolası',
-            obscure: true,
-            autofocus: true,
-            autocorrect: false,
-            enableSuggestions: false,
-            onSubmitted: (_) {
-              if (!_busy) _submitPassword();
-            },
-          ),
-          if (_error != null) ...[
-            const SizedBox(height: Gap.md),
-            AuthErrorText(_error!),
-          ],
-          const SizedBox(height: Gap.xl),
-          FilledButton(
-            onPressed: _busy ? null : _submitPassword,
-            child: _busy ? const BtnSpinner() : const Text('Devam'),
-          ),
-        ],
-      );
+    padding: const EdgeInsets.all(Gap.lg),
+    children: [
+      Text(
+        'Bu dosya şifreli bir yedek',
+        style: Theme.of(context).textTheme.titleMedium,
+      ),
+      const SizedBox(height: Gap.sm),
+      Text(
+        'Yedeği oluştururken belirlediğin parolayı gir. Bu parola master '
+        'parolandan farklı olabilir.',
+        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        ),
+      ),
+      const SizedBox(height: Gap.xl),
+      AppTextField(
+        controller: _passwordCtrl,
+        label: 'Yedek parolası',
+        obscure: true,
+        autofocus: true,
+        autocorrect: false,
+        enableSuggestions: false,
+        onSubmitted: (_) {
+          if (!_busy) _submitPassword();
+        },
+      ),
+      if (_error != null) ...[
+        const SizedBox(height: Gap.md),
+        AuthErrorText(_error!),
+      ],
+      const SizedBox(height: Gap.xl),
+      FilledButton(
+        onPressed: _busy ? null : _submitPassword,
+        child: _busy ? const BtnSpinner() : const Text('Devam'),
+      ),
+    ],
+  );
 
   /// Önizleme, QR tarama akışıyla ORTAK widget'a delege edilir — iki giriş
   /// noktasının sayı/atlanan listesi ve metinleri birebir aynı kalsın diye.
   Widget _buildPreview(BuildContext context) => ImportPreviewView(
-        preview: _preview!,
-        headerLabel: importSourceLabel(_source ?? ImportSource.unknown),
-        headerDetail: _fileName,
-        error: _error,
-        busy: _busy,
-        onConfirm: _confirmImport,
-      );
+    preview: _preview!,
+    headerLabel: importSourceLabel(_source ?? ImportSource.unknown),
+    headerDetail: _fileName,
+    error: _error,
+    busy: _busy,
+    onConfirm: _confirmImport,
+  );
 }

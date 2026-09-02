@@ -66,14 +66,17 @@ class MigrationProgressBand extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text('$scanned/$total $progressLabel',
-                  style: theme.textTheme.titleMedium),
+              Text(
+                '$scanned/$total $progressLabel',
+                style: theme.textTheme.titleMedium,
+              ),
               if (!complete) ...[
                 const SizedBox(height: Gap.xs),
                 Text(
                   remainingHint,
-                  style: theme.textTheme.bodyMedium
-                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ],
               const SizedBox(height: Gap.md),

@@ -21,8 +21,11 @@ import 'package:project_auth/features/vault/presentation/bloc/vault_cubit.dart';
 
 import 'token_sync_service_test.dart' show FakeSecureStorage;
 
-OtpAccount _acc(String name) =>
-    OtpAccount(secret: 'JBSWY3DPEHPK3PXP', type: OtpType.totp, accountName: name);
+OtpAccount _acc(String name) => OtpAccount(
+  secret: 'JBSWY3DPEHPK3PXP',
+  type: OtpType.totp,
+  accountName: name,
+);
 
 EncryptedBlob _blob() =>
     EncryptedBlob(nonce: Uint8List(24), ciphertext: Uint8List(16));
@@ -32,12 +35,14 @@ class _FakeRepo implements VaultRepository {
   int saveCount = 0;
   _FakeRepo(this.stored);
   @override
-  Future<VaultLoadResult> load() async => VaultLoadResult(accounts: List.of(stored));
+  Future<VaultLoadResult> load() async =>
+      VaultLoadResult(accounts: List.of(stored));
   @override
   Future<void> save(List<OtpAccount> accounts) async {
     saveCount++;
     stored = List.of(accounts);
   }
+
   @override
   Future<void> purgeCorrupted() async {}
 }
@@ -56,12 +61,15 @@ class _FakeRawStore implements RawTokenStore {
   @override
   Future<List<RawTokenRecord>> exportRaw() async => dirty;
   @override
-  Future<TokenMergeOutcome> importRemote(List<RemoteTokenRow> remote,
-      {required String? pullCursorIso}) async {
+  Future<TokenMergeOutcome> importRemote(
+    List<RemoteTokenRow> remote, {
+    required String? pullCursorIso,
+  }) async {
     importCount++;
     lastImportCursor = pullCursorIso;
     return importResult;
   }
+
   @override
   Future<void> markDeleted(String id) async {
     markDeletedCount++;
@@ -79,6 +87,7 @@ class _FakeRemote implements RemoteTokenRepository {
     pullCount++;
     return const RemotePullResult(rows: []);
   }
+
   /// A4: açık tutulursa push "uçuşta" kalır (kilit tutulur).
   Completer<void>? pushGate;
 
@@ -88,11 +97,13 @@ class _FakeRemote implements RemoteTokenRepository {
     final gate = pushGate;
     if (gate != null) await gate.future;
   }
+
   @override
   RealtimeChannelHandle subscribe(String uid, void Function() onChange) {
     subscribeCount++;
     return _NoopHandle();
   }
+
   @override
   Future<void> tombstoneAllRemote(String uid) async {}
   @override
@@ -134,7 +145,11 @@ void main() {
     // add sonrası store'da dirty kayıt oluşur (gerçek repo'da save sv=null yapar).
     rawStore.dirty = [
       RawTokenRecord(
-          id: 'new', blob: _blob(), updatedAtMs: 1, serverUpdatedAtIso: null),
+        id: 'new',
+        blob: _blob(),
+        updatedAtMs: 1,
+        serverUpdatedAtIso: null,
+      ),
     ];
     await cubit.add(_acc('a'));
     await Future<void>.delayed(Duration.zero); // unawaited push tamamlansın
@@ -150,26 +165,35 @@ void main() {
     }
   }
 
-  test('addAll → TEK save + TEK pushChanged (N token için N push DEĞİL)',
-      () async {
-    cubit = buildWithSync();
-    await cubit.load();
-    await drain(); // start()'ın ilk turu bitsin → temiz taban
-    final pushBefore = remote.pushCount;
-    final saveBefore = repo.saveCount;
+  test(
+    'addAll → TEK save + TEK pushChanged (N token için N push DEĞİL)',
+    () async {
+      cubit = buildWithSync();
+      await cubit.load();
+      await drain(); // start()'ın ilk turu bitsin → temiz taban
+      final pushBefore = remote.pushCount;
+      final saveBefore = repo.saveCount;
 
-    rawStore.dirty = [
-      RawTokenRecord(
-          id: 'new', blob: _blob(), updatedAtMs: 1, serverUpdatedAtIso: null),
-    ];
-    await cubit.addAll([_acc('a'), _acc('b'), _acc('c')]);
-    await drain();
+      rawStore.dirty = [
+        RawTokenRecord(
+          id: 'new',
+          blob: _blob(),
+          updatedAtMs: 1,
+          serverUpdatedAtIso: null,
+        ),
+      ];
+      await cubit.addAll([_acc('a'), _acc('b'), _acc('c')]);
+      await drain();
 
-    expect(repo.saveCount - saveBefore, 1, reason: '3 token → tek persist');
-    expect(remote.pushCount - pushBefore, 1,
-        reason: '3 token → tek push (batched)');
-    expect(cubit.state.accounts.length, 3);
-  });
+      expect(repo.saveCount - saveBefore, 1, reason: '3 token → tek persist');
+      expect(
+        remote.pushCount - pushBefore,
+        1,
+        reason: '3 token → tek push (batched)',
+      );
+      expect(cubit.state.accounts.length, 3);
+    },
+  );
 
   test('addAll boş liste → save da push da YOK', () async {
     cubit = buildWithSync();
@@ -180,7 +204,11 @@ void main() {
 
     rawStore.dirty = [
       RawTokenRecord(
-          id: 'new', blob: _blob(), updatedAtMs: 1, serverUpdatedAtIso: null),
+        id: 'new',
+        blob: _blob(),
+        updatedAtMs: 1,
+        serverUpdatedAtIso: null,
+      ),
     ];
     await cubit.addAll(const []);
     await drain();
@@ -211,28 +239,36 @@ void main() {
     expect(cubit.state.accounts.length, 1);
   });
 
-  test('onMergedChanged → reloadFromStore → state diskten güncellenir', () async {
-    cubit = buildWithSync(seed: [_acc('a')]);
-    await cubit.load();
-    expect(cubit.state.accounts.length, 1);
-    // Disk "başka cihazdan" ikinci token kazandı (repo'yu doğrudan güncelle).
-    repo.stored = [_acc('a'), _acc('b')];
-    await cubit.reloadFromStore();
-    expect(cubit.state.accounts.length, 2);
-  });
+  test(
+    'onMergedChanged → reloadFromStore → state diskten güncellenir',
+    () async {
+      cubit = buildWithSync(seed: [_acc('a')]);
+      await cubit.load();
+      expect(cubit.state.accounts.length, 1);
+      // Disk "başka cihazdan" ikinci token kazandı (repo'yu doğrudan güncelle).
+      repo.stored = [_acc('a'), _acc('b')];
+      await cubit.reloadFromStore();
+      expect(cubit.state.accounts.length, 2);
+    },
+  );
 
-  test('updateSyncState → state.syncState yansır (phase + malformedCount)', () async {
-    cubit = buildWithSync();
-    await cubit.load();
-    cubit.updateSyncState(const SyncState(phase: SyncPhase.syncing));
-    expect(cubit.state.syncState.phase, SyncPhase.syncing);
-    cubit.updateSyncState(
-        const SyncState(phase: SyncPhase.idle, malformedCount: 3));
-    expect(cubit.state.syncState.malformedCount, 3);
-    cubit.updateSyncState(
-        const SyncState(phase: SyncPhase.error, error: SyncNetworkError()));
-    expect(cubit.state.syncState.phase, SyncPhase.error);
-  });
+  test(
+    'updateSyncState → state.syncState yansır (phase + malformedCount)',
+    () async {
+      cubit = buildWithSync();
+      await cubit.load();
+      cubit.updateSyncState(const SyncState(phase: SyncPhase.syncing));
+      expect(cubit.state.syncState.phase, SyncPhase.syncing);
+      cubit.updateSyncState(
+        const SyncState(phase: SyncPhase.idle, malformedCount: 3),
+      );
+      expect(cubit.state.syncState.malformedCount, 3);
+      cubit.updateSyncState(
+        const SyncState(phase: SyncPhase.error, error: SyncNetworkError()),
+      );
+      expect(cubit.state.syncState.phase, SyncPhase.error);
+    },
+  );
 
   test('reloadFromStore ilk load bitmeden ÇALIŞMAZ', () async {
     cubit = buildWithSync(seed: [_acc('a')]);
@@ -252,56 +288,98 @@ void main() {
     expect(cubit.state.accounts.any((a) => a.accountName == 'a'), isTrue);
   });
 
-  test('applyRemoteMerge: importRemote (pullCursor ile) + changed → reload (reviewer [P1])',
-      () async {
-    cubit = buildWithSync(seed: [_acc('a')]);
-    await cubit.load();
-    for (var i = 0; i < 10; i++) { await Future<void>.delayed(Duration.zero); } // auto-start zinciri tamamlansın
-    rawStore.importCount = 0; // auto-start'ın import'unu sıfırla → yalnız aşağıyı ölç
-    rawStore.importResult = const TokenMergeOutcome(changed: true, appliedCount: 1);
-    repo.stored = [_acc('a'), _acc('b')]; // import "diske" ikinci token yazmış gibi
-    final outcome = await cubit.applyRemoteMerge(const [], '2026-06-09T09:00:00Z');
-    expect(rawStore.importCount, 1);
-    expect(rawStore.lastImportCursor, '2026-06-09T09:00:00Z');
-    expect(outcome, isNotNull, reason: 'merge çalıştı → non-null');
-    expect(outcome!.changed, isTrue);
-    expect(cubit.state.accounts.length, 2, reason: 'changed → reload state\'i güncelledi');
-  });
+  test(
+    'applyRemoteMerge: importRemote (pullCursor ile) + changed → reload (reviewer [P1])',
+    () async {
+      cubit = buildWithSync(seed: [_acc('a')]);
+      await cubit.load();
+      for (var i = 0; i < 10; i++) {
+        await Future<void>.delayed(Duration.zero);
+      } // auto-start zinciri tamamlansın
+      rawStore.importCount =
+          0; // auto-start'ın import'unu sıfırla → yalnız aşağıyı ölç
+      rawStore.importResult = const TokenMergeOutcome(
+        changed: true,
+        appliedCount: 1,
+      );
+      repo.stored = [
+        _acc('a'),
+        _acc('b'),
+      ]; // import "diske" ikinci token yazmış gibi
+      final outcome = await cubit.applyRemoteMerge(
+        const [],
+        '2026-06-09T09:00:00Z',
+      );
+      expect(rawStore.importCount, 1);
+      expect(rawStore.lastImportCursor, '2026-06-09T09:00:00Z');
+      expect(outcome, isNotNull, reason: 'merge çalıştı → non-null');
+      expect(outcome!.changed, isTrue);
+      expect(
+        cubit.state.accounts.length,
+        2,
+        reason: 'changed → reload state\'i güncelledi',
+      );
+    },
+  );
 
-  test('applyRemoteMerge: vault kapalıysa null döner (cursor ilerletilmemeli — reviewer [P1])',
-      () async {
-    cubit = buildWithSync(seed: [_acc('a')]);
-    await cubit.load();
-    await cubit.close(); // vault kapandı
-    final outcome = await cubit.applyRemoteMerge(
-        const [], '2026-06-09T09:00:00Z');
-    expect(outcome, isNull, reason: 'kapalı → merge yapılamadı → null (cursor ilerlemez)');
-  });
+  test(
+    'applyRemoteMerge: vault kapalıysa null döner (cursor ilerletilmemeli — reviewer [P1])',
+    () async {
+      cubit = buildWithSync(seed: [_acc('a')]);
+      await cubit.load();
+      await cubit.close(); // vault kapandı
+      final outcome = await cubit.applyRemoteMerge(
+        const [],
+        '2026-06-09T09:00:00Z',
+      );
+      expect(
+        outcome,
+        isNull,
+        reason: 'kapalı → merge yapılamadı → null (cursor ilerlemez)',
+      );
+    },
+  );
 
-  test('applyRemoteMerge ile kullanıcı mutasyonu TEK kuyrukta serileşir (reviewer [P1])',
-      () async {
-    cubit = buildWithSync(seed: [_acc('a')]);
-    await cubit.load();
-    for (var i = 0; i < 10; i++) { await Future<void>.delayed(Duration.zero); } // auto-start tamamlansın
-    rawStore.importCount = 0;
-    rawStore.importResult = const TokenMergeOutcome(changed: false, appliedCount: 0);
-    // Eşzamanlı: add (sequencer) + applyRemoteMerge (sequencer) — yarış yok, ikisi de uygulanır.
-    final f1 = cubit.add(_acc('b'));
-    final f2 = cubit.applyRemoteMerge(const [], null);
-    await Future.wait([f1, f2]);
-    expect(rawStore.importCount, 1);
-    expect(cubit.state.accounts.any((a) => a.accountName == 'b'), isTrue,
-        reason: 'add merge tarafından ezilmedi');
-  });
+  test(
+    'applyRemoteMerge ile kullanıcı mutasyonu TEK kuyrukta serileşir (reviewer [P1])',
+    () async {
+      cubit = buildWithSync(seed: [_acc('a')]);
+      await cubit.load();
+      for (var i = 0; i < 10; i++) {
+        await Future<void>.delayed(Duration.zero);
+      } // auto-start tamamlansın
+      rawStore.importCount = 0;
+      rawStore.importResult = const TokenMergeOutcome(
+        changed: false,
+        appliedCount: 0,
+      );
+      // Eşzamanlı: add (sequencer) + applyRemoteMerge (sequencer) — yarış yok, ikisi de uygulanır.
+      final f1 = cubit.add(_acc('b'));
+      final f2 = cubit.applyRemoteMerge(const [], null);
+      await Future.wait([f1, f2]);
+      expect(rawStore.importCount, 1);
+      expect(
+        cubit.state.accounts.any((a) => a.accountName == 'b'),
+        isTrue,
+        reason: 'add merge tarafından ezilmedi',
+      );
+    },
+  );
 
-  test('persisted live=true → unlock başlangıcında subscribe (reviewer [P2] race yok)',
-      () async {
-    cubit = buildWithSync();
-    cubit.liveSyncResolver = () async => true; // kayıtlı tercih AÇIK (async)
-    await cubit.load(); // load() resolver'ı start'tan ÖNCE await eder
-    await Future<void>.delayed(Duration.zero);
-    expect(remote.subscribeCount, 1, reason: 'live=true → start(live:true) → subscribe');
-  });
+  test(
+    'persisted live=true → unlock başlangıcında subscribe (reviewer [P2] race yok)',
+    () async {
+      cubit = buildWithSync();
+      cubit.liveSyncResolver = () async => true; // kayıtlı tercih AÇIK (async)
+      await cubit.load(); // load() resolver'ı start'tan ÖNCE await eder
+      await Future<void>.delayed(Duration.zero);
+      expect(
+        remote.subscribeCount,
+        1,
+        reason: 'live=true → start(live:true) → subscribe',
+      );
+    },
+  );
 
   test('persisted live=false → unlock başlangıcında subscribe YOK', () async {
     cubit = buildWithSync();
@@ -344,19 +422,24 @@ void main() {
       );
       c.liveSyncResolver = () async => true;
       addTearDown(() {
-        if (ensureCalledFirst) expect(ensured, isTrue, reason: 'ensureLoaded çağrıldı');
+        if (ensureCalledFirst) {
+          expect(ensured, isTrue, reason: 'ensureLoaded çağrıldı');
+        }
       });
       return c;
     }
 
-    test('flag false → start ÇAĞRILMAZ (pull/subscribe yok — review [P2]#2)', () async {
-      cubit = buildWithFlag(flagEnabled: false);
-      await cubit.load();
-      await Future<void>.delayed(Duration.zero);
-      expect(remote.pullCount, 0, reason: 'kill-switch: catch-up pull yok');
-      expect(remote.subscribeCount, 0);
-      expect(cubit.syncEnabled, isFalse, reason: 'toggle gizli');
-    });
+    test(
+      'flag false → start ÇAĞRILMAZ (pull/subscribe yok — review [P2]#2)',
+      () async {
+        cubit = buildWithFlag(flagEnabled: false);
+        await cubit.load();
+        await Future<void>.delayed(Duration.zero);
+        expect(remote.pullCount, 0, reason: 'kill-switch: catch-up pull yok');
+        expect(remote.subscribeCount, 0);
+        expect(cubit.syncEnabled, isFalse, reason: 'toggle gizli');
+      },
+    );
 
     test('flag true → start çalışır (Patch 3 davranışı)', () async {
       cubit = buildWithFlag(flagEnabled: true);
@@ -389,7 +472,11 @@ void main() {
       }
       rawStore.dirty = [
         RawTokenRecord(
-            id: 'd', blob: _blob(), updatedAtMs: 1, serverUpdatedAtIso: null),
+          id: 'd',
+          blob: _blob(),
+          updatedAtMs: 1,
+          serverUpdatedAtIso: null,
+        ),
       ];
       final gate = Completer<void>();
       remote.pushGate = gate;
@@ -404,14 +491,20 @@ void main() {
       // AWAIT ETMEZ → kilit beklerken bile tamamlanmalı (deadlock yok).
       await cubit.add(_acc('kullanici')).timeout(const Duration(seconds: 2));
       expect(cubit.state.accounts.map((a) => a.accountName), ['kullanici']);
-      expect(rawStore.importCount, importsBefore,
-          reason: 'merge push bitmeden diske yazmaz');
+      expect(
+        rawStore.importCount,
+        importsBefore,
+        reason: 'merge push bitmeden diske yazmaz',
+      );
 
       gate.complete();
       await sync.timeout(const Duration(seconds: 2));
 
-      expect(rawStore.importCount, importsBefore + 1,
-          reason: 'merge push bitince _opChain üzerinden uygulandı');
+      expect(
+        rawStore.importCount,
+        importsBefore + 1,
+        reason: 'merge push bitince _opChain üzerinden uygulandı',
+      );
     });
   });
 }

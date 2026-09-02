@@ -14,8 +14,8 @@ class LiveSyncPrefStore {
   final String _keyPrefix;
 
   LiveSyncPrefStore({FlutterSecureStorage? storage, String keyPrefix = ''})
-      : _storage = storage ?? const FlutterSecureStorage(),
-        _keyPrefix = keyPrefix;
+    : _storage = storage ?? const FlutterSecureStorage(),
+      _keyPrefix = keyPrefix;
 
   String get _key => '$_keyPrefix$storageKey';
 

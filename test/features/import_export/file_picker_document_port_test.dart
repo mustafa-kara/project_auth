@@ -58,8 +58,10 @@ void main() {
     expect(doc, isNotNull);
     expect(doc!.name, 'yedek.json');
     expect(utf8.decode(doc.bytes), '{"a":1}');
-    expect(calls(), ['pickFile', 'clear'],
-        reason: 'byte\'lar alındıktan SONRA düz metin kopya silinmeli');
+    expect(calls(), [
+      'pickFile',
+      'clear',
+    ], reason: 'byte\'lar alındıktan SONRA düz metin kopya silinmeli');
   });
 
   test('tek dosya seçilir ve tür filtresi uygulanmaz', () async {
@@ -67,9 +69,13 @@ void main() {
 
     await port.pickJson(maxBytes: 1024);
 
-    expect(platform.pickedType, FileType.any,
-        reason: 'uzantı filtresi kullanıcının dosyasını gizler; format '
-            'içerikten doğrulanır');
+    expect(
+      platform.pickedType,
+      FileType.any,
+      reason:
+          'uzantı filtresi kullanıcının dosyasını gizler; format '
+          'içerikten doğrulanır',
+    );
   });
 
   test('kullanıcı iptal ettiğinde de cache temizlenir', () async {
@@ -86,8 +92,10 @@ void main() {
       port.pickJson(maxBytes: 16),
       throwsA(isA<ImportFileTooLargeException>()),
     );
-    expect(calls(), ['pickFile', 'clear'],
-        reason: 'reddedilen dosyanın kopyası da diskte kalmamalı');
+    expect(calls(), [
+      'pickFile',
+      'clear',
+    ], reason: 'reddedilen dosyanın kopyası da diskte kalmamalı');
   });
 
   test('bildirilen boyut aşarsa byte\'lar HİÇ okunmaz', () async {
@@ -99,8 +107,11 @@ void main() {
       port.pickJson(maxBytes: 16),
       throwsA(isA<ImportFileTooLargeException>()),
     );
-    expect(file.readCount, 0,
-        reason: 'devasa dosya belleğe alınmadan reddedilmeli');
+    expect(
+      file.readCount,
+      0,
+      reason: 'devasa dosya belleğe alınmadan reddedilmeli',
+    );
   });
 
   test('byte\'lar okunamazsa malformed hatası verilir', () async {
@@ -141,9 +152,13 @@ void main() {
       expect(image!.name, 'qr.png');
       expect(image.path, '/cache/file_picker/qr.png');
       expect(image.sizeBytes, 32);
-      expect(calls(), ['pickFile'],
-          reason: 'pickJson\'dan farklı: temizliği çağıran yapar, yoksa '
-              'analyzeImage silinmiş bir yolu okurdu');
+      expect(
+        calls(),
+        ['pickFile'],
+        reason:
+            'pickJson\'dan farklı: temizliği çağıran yapar, yoksa '
+            'analyzeImage silinmiş bir yolu okurdu',
+      );
     });
 
     test('görüntü filtresi uygulanır (iOS PHPicker yolu)', () async {
@@ -198,21 +213,27 @@ void main() {
 
       FilePickerDocumentPort.shredCachedCopy(file.path);
 
-      expect(file.existsSync(), isFalse,
-          reason: 'QR görüntüsü canlı bir secret\'ın düz resmi');
+      expect(
+        file.existsSync(),
+        isFalse,
+        reason: 'QR görüntüsü canlı bir secret\'ın düz resmi',
+      );
     });
 
     test('olmayan yol hata vermez (best-effort)', () {
       expect(
-        () => FilePickerDocumentPort
-            .shredCachedCopy('${cache.path}/yok/olmayan.png'),
+        () => FilePickerDocumentPort.shredCachedCopy(
+          '${cache.path}/yok/olmayan.png',
+        ),
         returnsNormally,
       );
     });
 
     test('dosya olmayan yol hata vermez', () {
-      expect(() => FilePickerDocumentPort.shredCachedCopy(cache.path),
-          returnsNormally);
+      expect(
+        () => FilePickerDocumentPort.shredCachedCopy(cache.path),
+        returnsNormally,
+      );
       expect(cache.existsSync(), isTrue, reason: 'dizin silinmemeli');
     });
   });
@@ -222,15 +243,15 @@ void main() {
     late Directory docs;
 
     void seedLeftover(String fileName, List<int> bytes) {
-      File('${docs.path}${Platform.pathSeparator}$fileName')
-          .writeAsBytesSync(bytes);
+      File(
+        '${docs.path}${Platform.pathSeparator}$fileName',
+      ).writeAsBytesSync(bytes);
     }
 
-    FilePickerDocumentPort portFor({bool ios = true}) =>
-        FilePickerDocumentPort(
-          documentsDir: () async => docs,
-          isIOS: () => ios,
-        );
+    FilePickerDocumentPort portFor({bool ios = true}) => FilePickerDocumentPort(
+      documentsDir: () async => docs,
+      isIOS: () => ios,
+    );
 
     setUp(() {
       docs = Directory.systemTemp.createTempSync('pa_docs_');
@@ -242,8 +263,9 @@ void main() {
 
     test('başarılı kayıttan sonra Documents nüshası SİLİNİR', () async {
       const name = 'projectauth-backup-20260902.json';
-      platform.saveResponse =
-          Uri.file('/private/var/mobile/Containers/iCloudDocs/$name');
+      platform.saveResponse = Uri.file(
+        '/private/var/mobile/Containers/iCloudDocs/$name',
+      );
       seedLeftover(name, utf8.encode('{"v":1,"ct":"…"}'));
 
       final saved = await portFor().saveJson(
@@ -266,8 +288,10 @@ void main() {
       seedLeftover(name, utf8.encode('gizli'));
 
       expect(
-        await portFor()
-            .saveJson(fileName: name, bytes: Uint8List.fromList([1, 2, 3])),
+        await portFor().saveJson(
+          fileName: name,
+          bytes: Uint8List.fromList([1, 2, 3]),
+        ),
         isFalse,
       );
       expect(
@@ -293,12 +317,16 @@ void main() {
 
     test('dosya olmayan URI (SAF content:) çözümlemeyi DÜŞÜRMEZ', () async {
       const name = 'saf.json';
-      platform.saveResponse =
-          Uri.parse('content://com.android.providers.downloads/42');
+      platform.saveResponse = Uri.parse(
+        'content://com.android.providers.downloads/42',
+      );
       seedLeftover(name, utf8.encode('gizli'));
 
       expect(
-        await portFor().saveJson(fileName: name, bytes: Uint8List.fromList([1])),
+        await portFor().saveJson(
+          fileName: name,
+          bytes: Uint8List.fromList([1]),
+        ),
         isTrue,
         reason: 'Uri.toFilePath() file: olmayan şemada fırlatır',
       );
@@ -314,8 +342,9 @@ void main() {
       seedLeftover(name, utf8.encode('android SAF yolu ayrı'));
 
       expect(
-        await portFor(ios: false)
-            .saveJson(fileName: name, bytes: Uint8List.fromList([1])),
+        await portFor(
+          ios: false,
+        ).saveJson(fileName: name, bytes: Uint8List.fromList([1])),
         isTrue,
       );
       expect(
@@ -333,18 +362,26 @@ void main() {
       seedLeftover(name, utf8.encode('kullanıcının yedeği'));
 
       expect(
-        await portFor().saveJson(fileName: name, bytes: Uint8List.fromList([1])),
+        await portFor().saveJson(
+          fileName: name,
+          bytes: Uint8List.fromList([1]),
+        ),
         isTrue,
       );
-      expect(File(leftoverPath).existsSync(), isTrue,
-          reason: 'kullanıcının seçtiği dosya silinmemeli');
+      expect(
+        File(leftoverPath).existsSync(),
+        isTrue,
+        reason: 'kullanıcının seçtiği dosya silinmemeli',
+      );
     });
 
     test('nüsha yoksa (temiz platform) hata çıkmaz', () async {
       platform.saveResponse = Uri.file('/tmp/yok.json');
       expect(
-        await portFor()
-            .saveJson(fileName: 'yok.json', bytes: Uint8List.fromList([1])),
+        await portFor().saveJson(
+          fileName: 'yok.json',
+          bytes: Uint8List.fromList([1]),
+        ),
         isTrue,
       );
     });
@@ -436,7 +473,7 @@ final class _FakeFilePickerPlatform extends FilePickerPlatform {
 /// (nüsha geri alınmış, URI iptal edilmiş) taklit eder.
 final class _FakePlatformFile extends PlatformFile {
   _FakePlatformFile({required this.name, required Uint8List bytes})
-      : _bytes = bytes;
+    : _bytes = bytes;
 
   @override
   final String name;

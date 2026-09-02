@@ -44,9 +44,11 @@ class _TokenRecord {
   final String id;
   final int version;
   final EncryptedBlob blob;
-  final int updatedAt; // epoch ms (client-side; sunucu trigger'ı ayrı tutulur — sv)
+  final int
+  updatedAt; // epoch ms (client-side; sunucu trigger'ı ayrı tutulur — sv)
   final bool deleted;
-  final String? serverUpdatedAtIso; // 'sv' — sunucu cursor'u (LWW); null = dirty
+  final String?
+  serverUpdatedAtIso; // 'sv' — sunucu cursor'u (LWW); null = dirty
 
   _TokenRecord({
     required this.id,
@@ -58,23 +60,23 @@ class _TokenRecord {
   });
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'v': version,
-        'n': base64Encode(blob.nonce),
-        'c': base64Encode(blob.ciphertext),
-        'updatedAt': updatedAt,
-        'deleted': deleted,
-        if (serverUpdatedAtIso != null) 'sv': serverUpdatedAtIso,
-      };
+    'id': id,
+    'v': version,
+    'n': base64Encode(blob.nonce),
+    'c': base64Encode(blob.ciphertext),
+    'updatedAt': updatedAt,
+    'deleted': deleted,
+    if (serverUpdatedAtIso != null) 'sv': serverUpdatedAtIso,
+  };
 
   RawTokenRecord toRaw() => RawTokenRecord(
-        id: id,
-        blob: blob,
-        updatedAtMs: updatedAt,
-        version: version,
-        deleted: deleted,
-        serverUpdatedAtIso: serverUpdatedAtIso,
-      );
+    id: id,
+    blob: blob,
+    updatedAtMs: updatedAt,
+    version: version,
+    deleted: deleted,
+    serverUpdatedAtIso: serverUpdatedAtIso,
+  );
 }
 
 class EncryptedVaultRepository implements VaultRepository, RawTokenStore {
@@ -106,10 +108,10 @@ class EncryptedVaultRepository implements VaultRepository, RawTokenStore {
     required CryptoService crypto,
     FlutterSecureStorage? storage,
     String keyPrefix = '',
-  })  : _masterKey = masterKey,
-        _crypto = crypto,
-        _storage = storage ?? const FlutterSecureStorage(),
-        _vaultStorageKey = '$keyPrefix$vaultKey';
+  }) : _masterKey = masterKey,
+       _crypto = crypto,
+       _storage = storage ?? const FlutterSecureStorage(),
+       _vaultStorageKey = '$keyPrefix$vaultKey';
 
   int _nowMs() => DateTime.now().millisecondsSinceEpoch;
 
@@ -131,11 +133,13 @@ class EncryptedVaultRepository implements VaultRepository, RawTokenStore {
       decoded = jsonDecode(raw);
     } on FormatException {
       throw const VaultIntegrityException(
-          'Şifreli vault JSON\'u bozuk (malformed)');
+        'Şifreli vault JSON\'u bozuk (malformed)',
+      );
     }
     if (decoded is! List) {
       throw const VaultIntegrityException(
-          'Şifreli vault beklenen dizi formatında değil');
+        'Şifreli vault beklenen dizi formatında değil',
+      );
     }
 
     final accounts = <OtpAccount>[];
@@ -162,10 +166,14 @@ class EncryptedVaultRepository implements VaultRepository, RawTokenStore {
       // wedges every later push.
       if (_lastById.containsKey(id)) continue;
       try {
-        final plaintext =
-            _crypto.decrypt(blob: parsed.blob, key: _masterKey, aad: _aad(id));
+        final plaintext = _crypto.decrypt(
+          blob: parsed.blob,
+          key: _masterKey,
+          aad: _aad(id),
+        );
         final account = OtpAccount.fromJson(
-            _coerceStringKeys(jsonDecode(utf8.decode(plaintext)) as Map));
+          _coerceStringKeys(jsonDecode(utf8.decode(plaintext)) as Map),
+        );
         accounts.add(account);
         _lastById[id] = _LoadedRecord(
           account: account,
@@ -196,7 +204,8 @@ class EncryptedVaultRepository implements VaultRepository, RawTokenStore {
     // GEÇERLİDİR (kullanıcı hepsini sildi) → integrity hatası DEĞİL.
     if (accounts.isEmpty && corrupted > 0) {
       throw VaultIntegrityException(
-          'Hiçbir kayıt çözülemedi ($corrupted kayıt) — yanlış anahtar/bozulma');
+        'Hiçbir kayıt çözülemedi ($corrupted kayıt) — yanlış anahtar/bozulma',
+      );
     }
 
     return VaultLoadResult(accounts: accounts, corruptedCount: corrupted);
@@ -225,25 +234,33 @@ class EncryptedVaultRepository implements VaultRepository, RawTokenStore {
         // `tags` bu yüzden props'a DAHİLDİR: yalnız etiketi değişen bir token
         // buradan `else` dalına düşer, yeniden şifrelenir ve `updatedAt` tazelenir
         // (bkz. otp_account.dart `props` notu; test: encrypted_vault_raw_store_test).
-        records.add(_TokenRecord(
-          id: account.id,
-          blob: prev.blob,
-          version: prev.version,
-          updatedAt: prev.updatedAt,
-          serverUpdatedAtIso: prev.serverUpdatedAtIso,
-        ).toJson());
+        records.add(
+          _TokenRecord(
+            id: account.id,
+            blob: prev.blob,
+            version: prev.version,
+            updatedAt: prev.updatedAt,
+            serverUpdatedAtIso: prev.serverUpdatedAtIso,
+          ).toJson(),
+        );
       } else {
         // Yeni veya değişmiş → şifrele + updatedAt yenile + sv temizle (dirty).
-        final plaintext =
-            Uint8List.fromList(utf8.encode(jsonEncode(account.toJson())));
+        final plaintext = Uint8List.fromList(
+          utf8.encode(jsonEncode(account.toJson())),
+        );
         final blob = _crypto.encrypt(
-            plaintext: plaintext, key: _masterKey, aad: _aad(account.id));
+          plaintext: plaintext,
+          key: _masterKey,
+          aad: _aad(account.id),
+        );
         final updatedAt = _nowMs();
-        records.add(_TokenRecord(
-          id: account.id,
-          blob: blob,
-          updatedAt: updatedAt,
-        ).toJson());
+        records.add(
+          _TokenRecord(
+            id: account.id,
+            blob: blob,
+            updatedAt: updatedAt,
+          ).toJson(),
+        );
         _lastById[account.id] = _LoadedRecord(
           account: account,
           blob: blob,
@@ -287,8 +304,9 @@ class EncryptedVaultRepository implements VaultRepository, RawTokenStore {
     if (_corruptedRaw.isEmpty) return; // no-op (sağlamlara dokunma)
     _corruptedRaw.clear();
     // Yalnız sağlam (bilinen) kayıtları yeniden yaz — unchanged blob'lar + tombstone korunur.
-    final survivors =
-        _lastById.values.map((r) => r.account).toList(growable: false);
+    final survivors = _lastById.values
+        .map((r) => r.account)
+        .toList(growable: false);
     await _writeRecords(survivors);
   }
 
@@ -348,8 +366,9 @@ class EncryptedVaultRepository implements VaultRepository, RawTokenStore {
     );
     _lastById.remove(id);
     // Canlı kalanları + güncel tombstone'ları ATOMİK yaz.
-    final survivors =
-        _lastById.values.map((r) => r.account).toList(growable: false);
+    final survivors = _lastById.values
+        .map((r) => r.account)
+        .toList(growable: false);
     await _writeRecords(survivors);
   }
 
@@ -423,14 +442,14 @@ class EncryptedVaultRepository implements VaultRepository, RawTokenStore {
       final accept = local == null
           ? true // remote-only → kabul
           : local.serverUpdatedAtIso == null
-              // Lokal dirty (push beklemede): server YALNIZ pull-cursor'dan SONRAki
-              // bir değişiklikse kazanır (başka cihaz); aksi halde kendi echo'muz → KORU.
-              // `pullCursorIso == null` (bu cihaz HİÇ başarılı pull yapmadı) →
-              // "cursor'dan sonra" KANITLANAMAZ → dirty lokal KORUNUR (bkz. doc).
-              ? (pullCursorIso != null &&
-                  _isoNewer(r.serverUpdatedAtIso, pullCursorIso))
-              // sv'de uzlaşılmış: server daha yeniyse kazanır (idempotent).
-              : _isoNewer(r.serverUpdatedAtIso, local.serverUpdatedAtIso!);
+          // Lokal dirty (push beklemede): server YALNIZ pull-cursor'dan SONRAki
+          // bir değişiklikse kazanır (başka cihaz); aksi halde kendi echo'muz → KORU.
+          // `pullCursorIso == null` (bu cihaz HİÇ başarılı pull yapmadı) →
+          // "cursor'dan sonra" KANITLANAMAZ → dirty lokal KORUNUR (bkz. doc).
+          ? (pullCursorIso != null &&
+                _isoNewer(r.serverUpdatedAtIso, pullCursorIso))
+          // sv'de uzlaşılmış: server daha yeniyse kazanır (idempotent).
+          : _isoNewer(r.serverUpdatedAtIso, local.serverUpdatedAtIso!);
 
       if (!accept) continue;
 
@@ -463,7 +482,9 @@ class EncryptedVaultRepository implements VaultRepository, RawTokenStore {
   static bool _isoNewer(String a, String b) {
     final da = DateTime.tryParse(a)?.toUtc();
     final db = DateTime.tryParse(b)?.toUtc();
-    if (da == null || db == null) return false; // güvenli: kıyaslanamazsa kabul etme
+    if (da == null || db == null) {
+      return false; // güvenli: kıyaslanamazsa kabul etme
+    }
     return da.isAfter(db);
   }
 
@@ -482,7 +503,9 @@ class EncryptedVaultRepository implements VaultRepository, RawTokenStore {
       return null;
     }
     final version = map['v'] is num ? (map['v'] as num).toInt() : 1;
-    final updatedAt = map['updatedAt'] is num ? (map['updatedAt'] as num).toInt() : 0;
+    final updatedAt = map['updatedAt'] is num
+        ? (map['updatedAt'] as num).toInt()
+        : 0;
     final deleted = map['deleted'] == true;
     final sv = map['sv'] is String ? map['sv'] as String : null;
     return _TokenRecord(
@@ -495,8 +518,9 @@ class EncryptedVaultRepository implements VaultRepository, RawTokenStore {
     );
   }
 
-  static Map<String, dynamic> _coerceStringKeys(Map<dynamic, dynamic> m) =>
-      {for (final e in m.entries) e.key.toString(): e.value};
+  static Map<String, dynamic> _coerceStringKeys(Map<dynamic, dynamic> m) => {
+    for (final e in m.entries) e.key.toString(): e.value,
+  };
 }
 
 /// `load()` sonrası bellekte tutulan sağlam CANLI kayıt (unchanged-blob karşılaştırması

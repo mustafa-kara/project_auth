@@ -97,43 +97,61 @@ void main() {
     s.masterKey.dispose();
   });
 
-  test('changePassword: yeni parola açar, eski açmaz, masterKey AYNI', () async {
-    final s = await km.setup('Eski-Parola12');
-    final token = sealToken(s.masterKey, 'SEED-DATA');
+  test(
+    'changePassword: yeni parola açar, eski açmaz, masterKey AYNI',
+    () async {
+      final s = await km.setup('Eski-Parola12');
+      final token = sealToken(s.masterKey, 'SEED-DATA');
 
-    final newAttrs = await km.changePassword(s.attrs, s.masterKey, 'Yeni-Parola123');
+      final newAttrs = await km.changePassword(
+        s.attrs,
+        s.masterKey,
+        'Yeni-Parola123',
+      );
 
-    // Yeni parola ile unlock → aynı masterKey (eski token hâlâ açılır)
-    final unlocked = await km.unlock(newAttrs, 'Yeni-Parola123');
-    expect(canOpen(unlocked, token, 'SEED-DATA'), isTrue,
-        reason: 'masterKey değişmedi → eski ciphertext açılmalı');
+      // Yeni parola ile unlock → aynı masterKey (eski token hâlâ açılır)
+      final unlocked = await km.unlock(newAttrs, 'Yeni-Parola123');
+      expect(
+        canOpen(unlocked, token, 'SEED-DATA'),
+        isTrue,
+        reason: 'masterKey değişmedi → eski ciphertext açılmalı',
+      );
 
-    // Eski parola artık açmaz
-    await expectLater(
-      km.unlock(newAttrs, 'Eski-Parola12'),
-      throwsA(isA<WrongPasswordException>()),
-    );
+      // Eski parola artık açmaz
+      await expectLater(
+        km.unlock(newAttrs, 'Eski-Parola12'),
+        throwsA(isA<WrongPasswordException>()),
+      );
 
-    // recovery hâlâ çalışır (recoveryEncryptedMasterKey dokunulmadı)
-    final recovered = await km.recoverUnlock(newAttrs, s.recoveryMnemonic);
-    expect(canOpen(recovered, token, 'SEED-DATA'), isTrue);
+      // recovery hâlâ çalışır (recoveryEncryptedMasterKey dokunulmadı)
+      final recovered = await km.recoverUnlock(newAttrs, s.recoveryMnemonic);
+      expect(canOpen(recovered, token, 'SEED-DATA'), isTrue);
 
-    s.masterKey.dispose();
-    unlocked.dispose();
-    recovered.dispose();
-  });
+      s.masterKey.dispose();
+      unlocked.dispose();
+      recovered.dispose();
+    },
+  );
 
   test('changePassword salt/encryptedMasterKey birlikte güncellenir', () async {
     final s = await km.setup('Ilk-Parola123');
-    final newAttrs = await km.changePassword(s.attrs, s.masterKey, 'Ikinci-Parola12');
+    final newAttrs = await km.changePassword(
+      s.attrs,
+      s.masterKey,
+      'Ikinci-Parola12',
+    );
     // salt değişmeli
     expect(newAttrs.kdfSalt, isNot(s.attrs.kdfSalt));
     // encryptedMasterKey değişmeli (yeni KEK ile sarmalandı)
-    expect(newAttrs.encryptedMasterKey.ciphertext,
-        isNot(s.attrs.encryptedMasterKey.ciphertext));
+    expect(
+      newAttrs.encryptedMasterKey.ciphertext,
+      isNot(s.attrs.encryptedMasterKey.ciphertext),
+    );
     // recovery DOKUNULMAZ
-    expect(newAttrs.recoveryEncryptedMasterKey.ciphertext,
-        s.attrs.recoveryEncryptedMasterKey.ciphertext);
+    expect(
+      newAttrs.recoveryEncryptedMasterKey.ciphertext,
+      s.attrs.recoveryEncryptedMasterKey.ciphertext,
+    );
     s.masterKey.dispose();
   });
 
@@ -143,7 +161,9 @@ void main() {
     await expectLater(km.setup('kisa'), throwsA(isA<WeakPasswordException>()));
     // 12+ karakter AMA tek sınıf (yalnız küçük harf) → kompozisyon kuralı reddeder
     await expectLater(
-        km.setup('parolaparola'), throwsA(isA<WeakPasswordException>()));
+      km.setup('parolaparola'),
+      throwsA(isA<WeakPasswordException>()),
+    );
 
     // changePassword da aynı politikayı uygular
     final s = await km.setup('Gecerli-Parola12');
@@ -156,21 +176,27 @@ void main() {
 
   // --- Biyometri (Patch 5) ---
 
-  test('enrollBiometric → biometricUnlock round-trip: aynı masterKey', () async {
-    final s = await km.setup('Parola123!demo');
-    final token = sealToken(s.masterKey, 'SEED-DATA');
+  test(
+    'enrollBiometric → biometricUnlock round-trip: aynı masterKey',
+    () async {
+      final s = await km.setup('Parola123!demo');
+      final token = sealToken(s.masterKey, 'SEED-DATA');
 
-    final enroll = km.enrollBiometric(s.attrs, s.masterKey);
-    expect(enroll.biometricKeyBytes.length, 32);
-    expect(enroll.attrs.biometricEncryptedMasterKey, isNotNull);
+      final enroll = km.enrollBiometric(s.attrs, s.masterKey);
+      expect(enroll.biometricKeyBytes.length, 32);
+      expect(enroll.attrs.biometricEncryptedMasterKey, isNotNull);
 
-    final unlocked = km.biometricUnlock(enroll.attrs, enroll.biometricKeyBytes);
-    expect(canOpen(unlocked, token, 'SEED-DATA'), isTrue);
+      final unlocked = km.biometricUnlock(
+        enroll.attrs,
+        enroll.biometricKeyBytes,
+      );
+      expect(canOpen(unlocked, token, 'SEED-DATA'), isTrue);
 
-    enroll.biometricKeyBytes.fillRange(0, enroll.biometricKeyBytes.length, 0);
-    s.masterKey.dispose();
-    unlocked.dispose();
-  });
+      enroll.biometricKeyBytes.fillRange(0, enroll.biometricKeyBytes.length, 0);
+      s.masterKey.dispose();
+      unlocked.dispose();
+    },
+  );
 
   test('biometricUnlock bmk yok attrs → BiometricUnwrapException', () async {
     final s = await km.setup('Parola123!demo');
@@ -196,23 +222,31 @@ void main() {
     s.masterKey.dispose();
   });
 
-  test('enrollBiometric changePassword sonrası hâlâ geçerli (masterKey aynı)',
-      () async {
-    final s = await km.setup('Eski-Parola12');
-    final token = sealToken(s.masterKey, 'SEED-DATA');
-    final enroll = km.enrollBiometric(s.attrs, s.masterKey);
+  test(
+    'enrollBiometric changePassword sonrası hâlâ geçerli (masterKey aynı)',
+    () async {
+      final s = await km.setup('Eski-Parola12');
+      final token = sealToken(s.masterKey, 'SEED-DATA');
+      final enroll = km.enrollBiometric(s.attrs, s.masterKey);
 
-    // Parola değişir; copyWith bmk'yı korur
-    final afterChange =
-        await km.changePassword(enroll.attrs, s.masterKey, 'Yeni-Parola123');
-    expect(afterChange.biometricEncryptedMasterKey, isNotNull);
+      // Parola değişir; copyWith bmk'yı korur
+      final afterChange = await km.changePassword(
+        enroll.attrs,
+        s.masterKey,
+        'Yeni-Parola123',
+      );
+      expect(afterChange.biometricEncryptedMasterKey, isNotNull);
 
-    // Aynı biometricKey ile hâlâ açılır (masterKey değişmedi)
-    final unlocked = km.biometricUnlock(afterChange, enroll.biometricKeyBytes);
-    expect(canOpen(unlocked, token, 'SEED-DATA'), isTrue);
+      // Aynı biometricKey ile hâlâ açılır (masterKey değişmedi)
+      final unlocked = km.biometricUnlock(
+        afterChange,
+        enroll.biometricKeyBytes,
+      );
+      expect(canOpen(unlocked, token, 'SEED-DATA'), isTrue);
 
-    enroll.biometricKeyBytes.fillRange(0, enroll.biometricKeyBytes.length, 0);
-    s.masterKey.dispose();
-    unlocked.dispose();
-  });
+      enroll.biometricKeyBytes.fillRange(0, enroll.biometricKeyBytes.length, 0);
+      s.masterKey.dispose();
+      unlocked.dispose();
+    },
+  );
 }

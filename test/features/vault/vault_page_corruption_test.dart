@@ -25,20 +25,42 @@ import 'package:project_auth/features/vault/presentation/pages/vault_page.dart';
 class _MemStorage implements FlutterSecureStorage {
   final Map<String, String> _d = {};
   @override
-  Future<String?> read({required String key, dynamic iOptions, dynamic aOptions, dynamic lOptions, dynamic webOptions, dynamic mOptions, dynamic wOptions}) async => _d[key];
+  Future<String?> read({
+    required String key,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async => _d[key];
   @override
-  Future<void> write({required String key, required String? value, dynamic iOptions, dynamic aOptions, dynamic lOptions, dynamic webOptions, dynamic mOptions, dynamic wOptions}) async {
-    if (value == null) { _d.remove(key); } else { _d[key] = value; }
+  Future<void> write({
+    required String key,
+    required String? value,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async {
+    if (value == null) {
+      _d.remove(key);
+    } else {
+      _d[key] = value;
+    }
   }
+
   @override
   noSuchMethod(Invocation i) => throw UnimplementedError();
 }
 
 OtpAccount _acc(String name) => OtpAccount(
-      secret: 'JBSWY3DPEHPK3PXP',
-      type: OtpType.totp,
-      accountName: name,
-    );
+  secret: 'JBSWY3DPEHPK3PXP',
+  type: OtpType.totp,
+  accountName: name,
+);
 
 class _FakeRepo implements VaultRepository {
   List<OtpAccount> accounts;
@@ -46,7 +68,11 @@ class _FakeRepo implements VaultRepository {
   Object? loadError;
   int purgeCalls = 0;
 
-  _FakeRepo({this.accounts = const [], this.corruptedCount = 0, this.loadError});
+  _FakeRepo({
+    this.accounts = const [],
+    this.corruptedCount = 0,
+    this.loadError,
+  });
 
   @override
   Future<VaultLoadResult> load() async {
@@ -84,18 +110,18 @@ class _FakeLockCubit extends Cubit<VaultLockState> implements VaultLockCubit {
 }
 
 Widget _wrap(VaultCubit vault, VaultLockCubit lock) => MultiBlocProvider(
-      providers: [
-        BlocProvider<VaultCubit>.value(value: vault),
-        BlocProvider<VaultLockCubit>.value(value: lock),
-      ],
-      // disableAnimations: CountdownRing'in kritik-saniye pulse'ı (sonsuz repeat)
-      // reduced-motion'da kapanır → pumpAndSettle gerçek-zamana bağlı asılmaz
-      // (test animasyonu değil corruption UI'ını doğrular).
-      child: const MediaQuery(
-        data: MediaQueryData(disableAnimations: true),
-        child: MaterialApp(home: VaultPage()),
-      ),
-    );
+  providers: [
+    BlocProvider<VaultCubit>.value(value: vault),
+    BlocProvider<VaultLockCubit>.value(value: lock),
+  ],
+  // disableAnimations: CountdownRing'in kritik-saniye pulse'ı (sonsuz repeat)
+  // reduced-motion'da kapanır → pumpAndSettle gerçek-zamana bağlı asılmaz
+  // (test animasyonu değil corruption UI'ını doğrular).
+  child: const MediaQuery(
+    data: MediaQueryData(disableAnimations: true),
+    child: MaterialApp(home: VaultPage()),
+  ),
+);
 
 void main() {
   setUp(() {
@@ -106,7 +132,8 @@ void main() {
     }
     if (!locator.isRegistered<ViewModeStore>()) {
       locator.registerLazySingleton<ViewModeStore>(
-          () => ViewModeStore(storage: _MemStorage()));
+        () => ViewModeStore(storage: _MemStorage()),
+      );
     }
   });
   tearDown(GetIt.instance.reset);
@@ -126,8 +153,9 @@ void main() {
     expect(find.text('Bozuk kayıtları kaldır'), findsOneWidget);
   });
 
-  testWidgets('"Yine de devam et" → banner gizlenir, token kalır',
-      (tester) async {
+  testWidgets('"Yine de devam et" → banner gizlenir, token kalır', (
+    tester,
+  ) async {
     final repo = _FakeRepo(accounts: [_acc('a')], corruptedCount: 1);
     final vault = VaultCubit(repo)..load();
     addTearDown(vault.close);
@@ -144,8 +172,9 @@ void main() {
     expect(repo.purgeCalls, 0); // bozuk kayıtlar silinmedi
   });
 
-  testWidgets('"Bozuk kayıtları kaldır" → onay diyaloğu → purgeCorrupted',
-      (tester) async {
+  testWidgets('"Bozuk kayıtları kaldır" → onay diyaloğu → purgeCorrupted', (
+    tester,
+  ) async {
     final repo = _FakeRepo(accounts: [_acc('a')], corruptedCount: 1);
     final vault = VaultCubit(repo)..load();
     addTearDown(vault.close);
@@ -170,8 +199,9 @@ void main() {
     expect(repo.purgeCalls, 1);
   });
 
-  testWidgets('VaultIntegrityException → integrity ekranı (boş-durum DEĞİL)',
-      (tester) async {
+  testWidgets('VaultIntegrityException → integrity ekranı (boş-durum DEĞİL)', (
+    tester,
+  ) async {
     final repo = _FakeRepo(loadError: const VaultIntegrityException('toptan'));
     final vault = VaultCubit(repo)..load();
     addTearDown(vault.close);
@@ -232,8 +262,9 @@ void main() {
     expect(find.widgetWithText(FloatingActionButton, 'Ekle'), findsNothing);
   });
 
-  testWidgets('sağlam vault\'ta ekleme FAB\'ı görünür (kontrol)',
-      (tester) async {
+  testWidgets('sağlam vault\'ta ekleme FAB\'ı görünür (kontrol)', (
+    tester,
+  ) async {
     final repo = _FakeRepo(accounts: [_acc('a')]);
     final vault = VaultCubit(repo)..load();
     addTearDown(vault.close);
@@ -248,19 +279,23 @@ void main() {
 
   // Canlı OTP kodları ekranda → screenshot/recording/recents koruması. Ref-count'lu
   // scope: sayfa mount iken açık, unmount olunca (son tutucu) kapanır.
-  testWidgets('VaultPage mount → SecureScreen enable, unmount → disable',
-      (tester) async {
+  testWidgets('VaultPage mount → SecureScreen enable, unmount → disable', (
+    tester,
+  ) async {
     const channel = MethodChannel('dev.mustafakara.project_auth/secure_screen');
     final calls = <String>[];
     SecureScreen.debugReset();
-    tester.binding.defaultBinaryMessenger
-        .setMockMethodCallHandler(channel, (call) async {
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+      call,
+    ) async {
       calls.add(call.method);
       return null;
     });
     addTearDown(() {
-      tester.binding.defaultBinaryMessenger
-          .setMockMethodCallHandler(channel, null);
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        channel,
+        null,
+      );
       SecureScreen.debugReset();
     });
 

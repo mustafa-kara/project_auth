@@ -39,13 +39,43 @@ class _StateCubit extends VaultCubit {
 class _MemStorage implements FlutterSecureStorage {
   final Map<String, String> data = {};
   @override
-  Future<String?> read({required String key, dynamic iOptions, dynamic aOptions, dynamic lOptions, dynamic webOptions, dynamic mOptions, dynamic wOptions}) async => data[key];
+  Future<String?> read({
+    required String key,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async => data[key];
   @override
-  Future<void> write({required String key, required String? value, dynamic iOptions, dynamic aOptions, dynamic lOptions, dynamic webOptions, dynamic mOptions, dynamic wOptions}) async {
-    if (value == null) { data.remove(key); } else { data[key] = value; }
+  Future<void> write({
+    required String key,
+    required String? value,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async {
+    if (value == null) {
+      data.remove(key);
+    } else {
+      data[key] = value;
+    }
   }
+
   @override
-  Future<void> delete({required String key, dynamic iOptions, dynamic aOptions, dynamic lOptions, dynamic webOptions, dynamic mOptions, dynamic wOptions}) async => data.remove(key);
+  Future<void> delete({
+    required String key,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async => data.remove(key);
   @override
   noSuchMethod(Invocation i) => throw UnimplementedError('$i');
 }
@@ -58,16 +88,18 @@ class _FakeLockCubit extends Cubit<VaultLockState> implements VaultLockCubit {
 }
 
 Future<void> _pump(WidgetTester tester, _StateCubit cubit) async {
-  await tester.pumpWidget(MultiBlocProvider(
-    providers: [
-      BlocProvider<VaultCubit>.value(value: cubit),
-      BlocProvider<VaultLockCubit>.value(value: _FakeLockCubit()),
-    ],
-    child: const MediaQuery(
-      data: MediaQueryData(disableAnimations: true),
-      child: MaterialApp(home: VaultPage()),
+  await tester.pumpWidget(
+    MultiBlocProvider(
+      providers: [
+        BlocProvider<VaultCubit>.value(value: cubit),
+        BlocProvider<VaultLockCubit>.value(value: _FakeLockCubit()),
+      ],
+      child: const MediaQuery(
+        data: MediaQueryData(disableAnimations: true),
+        child: MaterialApp(home: VaultPage()),
+      ),
     ),
-  ));
+  );
   await tester.pump();
 }
 
@@ -78,7 +110,8 @@ void main() {
     }
     if (!locator.isRegistered<ViewModeStore>()) {
       locator.registerLazySingleton<ViewModeStore>(
-          () => ViewModeStore(storage: _MemStorage()));
+        () => ViewModeStore(storage: _MemStorage()),
+      );
     }
   });
   testWidgets('idle & temiz → gösterge yok', (tester) async {
@@ -91,7 +124,8 @@ void main() {
   });
 
   testWidgets('syncing → dönen ikon + Semantics', (tester) async {
-    final cubit = _StateCubit()..setSync(const SyncState(phase: SyncPhase.syncing));
+    final cubit = _StateCubit()
+      ..setSync(const SyncState(phase: SyncPhase.syncing));
     await _pump(tester, cubit);
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
     expect(find.bySemanticsLabel('Senkronize ediliyor'), findsOneWidget);
@@ -100,14 +134,17 @@ void main() {
 
   testWidgets('error → sync_problem ikonu', (tester) async {
     final cubit = _StateCubit()
-      ..setSync(const SyncState(phase: SyncPhase.error, error: SyncNetworkError()));
+      ..setSync(
+        const SyncState(phase: SyncPhase.error, error: SyncNetworkError()),
+      );
     await _pump(tester, cubit);
     expect(find.byIcon(Icons.sync_problem), findsOneWidget);
     await cubit.close();
   });
 
-  testWidgets('idle + malformedCount>0 → uyarı rozeti (ikon + sayı)',
-      (tester) async {
+  testWidgets('idle + malformedCount>0 → uyarı rozeti (ikon + sayı)', (
+    tester,
+  ) async {
     final cubit = _StateCubit()
       ..setSync(const SyncState(phase: SyncPhase.idle, malformedCount: 2));
     await _pump(tester, cubit);

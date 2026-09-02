@@ -21,9 +21,26 @@ import 'package:project_auth/features/vault/data/encrypted_vault_repository.dart
 class _FakeStorage implements FlutterSecureStorage {
   final Map<String, String> data = {};
   @override
-  Future<String?> read({required String key, dynamic iOptions, dynamic aOptions, dynamic lOptions, dynamic webOptions, dynamic mOptions, dynamic wOptions}) async => data[key];
+  Future<String?> read({
+    required String key,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async => data[key];
   @override
-  Future<void> write({required String key, required String? value, dynamic iOptions, dynamic aOptions, dynamic lOptions, dynamic webOptions, dynamic mOptions, dynamic wOptions}) async {
+  Future<void> write({
+    required String key,
+    required String? value,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async {
     if (value == null) {
       data.remove(key);
     } else {
@@ -32,7 +49,15 @@ class _FakeStorage implements FlutterSecureStorage {
   }
 
   @override
-  Future<void> delete({required String key, dynamic iOptions, dynamic aOptions, dynamic lOptions, dynamic webOptions, dynamic mOptions, dynamic wOptions}) async => data.remove(key);
+  Future<void> delete({
+    required String key,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async => data.remove(key);
   @override
   noSuchMethod(Invocation i) => throw UnimplementedError('$i');
 }
@@ -80,12 +105,19 @@ void main() {
   test('namespace izolasyonu: uid A attrs → uid B namespace null', () async {
     final prefixA = AccountVaultManager.prefixFor('uid-A');
     final prefixB = AccountVaultManager.prefixFor('uid-B');
-    await KeyAttributesStore(storage: storage, keyPrefix: prefixA)
-        .write(_attrs());
-    expect(await KeyAttributesStore(storage: storage, keyPrefix: prefixA).read(),
-        isNotNull);
-    expect(await KeyAttributesStore(storage: storage, keyPrefix: prefixB).read(),
-        isNull, reason: 'B, A\'nın attrs\'ını görmemeli');
+    await KeyAttributesStore(
+      storage: storage,
+      keyPrefix: prefixA,
+    ).write(_attrs());
+    expect(
+      await KeyAttributesStore(storage: storage, keyPrefix: prefixA).read(),
+      isNotNull,
+    );
+    expect(
+      await KeyAttributesStore(storage: storage, keyPrefix: prefixB).read(),
+      isNull,
+      reason: 'B, A\'nın attrs\'ını görmemeli',
+    );
   });
 
   test('legacyVaultExists: uid-siz attrs varsa true', () async {
@@ -94,12 +126,15 @@ void main() {
     expect(await manager.legacyVaultExists(), isTrue);
   });
 
-  test('linkRequired: legacy var + karar yok → true; karar verilince → false', () async {
-    await KeyAttributesStore(storage: storage).write(_attrs());
-    expect(await manager.linkRequired('uid-A'), isTrue);
-    await manager.startFreshVault('uid-A'); // karar (yeni vault)
-    expect(await manager.linkRequired('uid-A'), isFalse);
-  });
+  test(
+    'linkRequired: legacy var + karar yok → true; karar verilince → false',
+    () async {
+      await KeyAttributesStore(storage: storage).write(_attrs());
+      expect(await manager.linkRequired('uid-A'), isTrue);
+      await manager.startFreshVault('uid-A'); // karar (yeni vault)
+      expect(await manager.linkRequired('uid-A'), isFalse);
+    },
+  );
 
   test('linkLegacyToUser: anahtarlar uid namespace\'ine taşınır + bmk TEMİZLENİR + '
       'disable çağrılır + legacy tüketilir (reviewer [P1])', () async {
@@ -112,15 +147,22 @@ void main() {
     final prefix = AccountVaultManager.prefixFor('uid-A');
 
     // attrs taşındı + bmk temizlendi.
-    final moved =
-        await KeyAttributesStore(storage: storage, keyPrefix: prefix).read();
+    final moved = await KeyAttributesStore(
+      storage: storage,
+      keyPrefix: prefix,
+    ).read();
     expect(moved, isNotNull);
-    expect(moved!.biometricEncryptedMasterKey, isNull,
-        reason: 'bmk taşınmaz, temizlenir');
+    expect(
+      moved!.biometricEncryptedMasterKey,
+      isNull,
+      reason: 'bmk taşınmaz, temizlenir',
+    );
 
     // encrypted vault taşındı (ciphertext aynen).
-    expect(storage.data['$prefix${EncryptedVaultRepository.vaultKey}'],
-        '[{"id":"x"}]');
+    expect(
+      storage.data['$prefix${EncryptedVaultRepository.vaultKey}'],
+      '[{"id":"x"}]',
+    );
 
     // biometric.disable çağrıldı.
     expect(biometric.disableCount, 1);
@@ -133,16 +175,19 @@ void main() {
     expect(await manager.activeUid(), 'uid-A');
   });
 
-  test('startFreshVault: legacy\'ye DOKUNMAZ ama bu uid kararlı → linkRequired false; '
-      'PER-UID: başka uid\'e legacy YİNE teklif edilir (reviewer [P3])', () async {
-    await KeyAttributesStore(storage: storage).write(_attrs());
+  test(
+    'startFreshVault: legacy\'ye DOKUNMAZ ama bu uid kararlı → linkRequired false; '
+    'PER-UID: başka uid\'e legacy YİNE teklif edilir (reviewer [P3])',
+    () async {
+      await KeyAttributesStore(storage: storage).write(_attrs());
 
-    await manager.startFreshVault('uid-A');
-    expect(await manager.linkRequired('uid-A'), isFalse); // A karar verdi
-    expect(await manager.legacyVaultExists(), isTrue); // legacy DURUYOR
+      await manager.startFreshVault('uid-A');
+      expect(await manager.linkRequired('uid-A'), isFalse); // A karar verdi
+      expect(await manager.legacyVaultExists(), isTrue); // legacy DURUYOR
 
-    // B henüz karar vermedi → legacy YİNE teklif edilir.
-    expect(await manager.linkRequired('uid-B'), isTrue);
-    expect(await manager.activeUid(), 'uid-A');
-  });
+      // B henüz karar vermedi → legacy YİNE teklif edilir.
+      expect(await manager.linkRequired('uid-B'), isTrue);
+      expect(await manager.activeUid(), 'uid-A');
+    },
+  );
 }

@@ -11,13 +11,43 @@ import 'package:project_auth/features/vault/domain/issuer_catalog.dart';
 class _FakeStorage implements FlutterSecureStorage {
   final Map<String, String> data = {};
   @override
-  Future<String?> read({required String key, dynamic iOptions, dynamic aOptions, dynamic lOptions, dynamic webOptions, dynamic mOptions, dynamic wOptions}) async => data[key];
+  Future<String?> read({
+    required String key,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async => data[key];
   @override
-  Future<void> write({required String key, required String? value, dynamic iOptions, dynamic aOptions, dynamic lOptions, dynamic webOptions, dynamic mOptions, dynamic wOptions}) async {
-    if (value == null) { data.remove(key); } else { data[key] = value; }
+  Future<void> write({
+    required String key,
+    required String? value,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async {
+    if (value == null) {
+      data.remove(key);
+    } else {
+      data[key] = value;
+    }
   }
+
   @override
-  Future<void> delete({required String key, dynamic iOptions, dynamic aOptions, dynamic lOptions, dynamic webOptions, dynamic mOptions, dynamic wOptions}) async => data.remove(key);
+  Future<void> delete({
+    required String key,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async => data.remove(key);
   @override
   noSuchMethod(Invocation invocation) => throw UnimplementedError();
 }
@@ -28,7 +58,11 @@ CatalogService _svc(String name, {String? issuer, String? logo}) =>
 void main() {
   group('CatalogService JSON', () {
     test('round-trip kayıpsız', () {
-      final s = _svc('GitHub', issuer: 'github.com', logo: 'https://x/logo.svg');
+      final s = _svc(
+        'GitHub',
+        issuer: 'github.com',
+        logo: 'https://x/logo.svg',
+      );
       final back = CatalogService.fromJson(s.toJson());
       expect(back.id, s.id);
       expect(back.name, 'GitHub');
@@ -80,13 +114,19 @@ void main() {
       expect(catalog.canonicalIssuer('github'), 'GitHub');
     });
 
-    test('slug normalizasyonu: GitHub / github / GITHUB / git-hub hepsi → GitHub', () {
-      expect(catalog.canonicalIssuer('GitHub'), 'GitHub');
-      expect(catalog.canonicalIssuer('github'), 'GitHub');
-      expect(catalog.canonicalIssuer('GITHUB'), 'GitHub');
-      expect(catalog.canonicalIssuer('git-hub'), 'GitHub',
-          reason: 'slug alfanümerik dışını temizler');
-    });
+    test(
+      'slug normalizasyonu: GitHub / github / GITHUB / git-hub hepsi → GitHub',
+      () {
+        expect(catalog.canonicalIssuer('GitHub'), 'GitHub');
+        expect(catalog.canonicalIssuer('github'), 'GitHub');
+        expect(catalog.canonicalIssuer('GITHUB'), 'GitHub');
+        expect(
+          catalog.canonicalIssuer('git-hub'),
+          'GitHub',
+          reason: 'slug alfanümerik dışını temizler',
+        );
+      },
+    );
 
     test('issuer yoksa name slug ile eşleşir (Google)', () {
       expect(catalog.canonicalIssuer('google'), 'Google');

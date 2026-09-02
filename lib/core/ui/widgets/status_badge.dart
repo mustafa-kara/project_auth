@@ -37,9 +37,9 @@ class StatusBadge extends StatelessWidget {
       StatusKind.warning => (countdown.warning, surfaces.warningBg),
       StatusKind.critical => (scheme.error, surfaces.criticalBg),
       StatusKind.primary => (
-          scheme.primary,
-          scheme.primary.withValues(alpha: 0.12),
-        ),
+        scheme.primary,
+        scheme.primary.withValues(alpha: 0.12),
+      ),
     };
 
     return Semantics(

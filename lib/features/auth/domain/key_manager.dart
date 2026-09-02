@@ -84,12 +84,14 @@ class KeyManager {
     }
     if (password.length < minPasswordLength) {
       throw WeakPasswordException(
-          'Parola en az $minPasswordLength karakter olmalı');
+        'Parola en az $minPasswordLength karakter olmalı',
+      );
     }
     if (passwordClassCount(password) < minPasswordClasses) {
       throw WeakPasswordException(
-          'Parola büyük harf, küçük harf, rakam ve sembolden en az '
-          '$minPasswordClasses farklı tür içermeli');
+        'Parola büyük harf, küçük harf, rakam ve sembolden en az '
+        '$minPasswordClasses farklı tür içermeli',
+      );
     }
   }
 
@@ -187,7 +189,9 @@ class KeyManager {
   /// Recovery mnemonic ile masterKey'i kurtarır. Yanlış/bozuk mnemonic →
   /// [WrongRecoveryKeyException]. (Checksum hatası da buraya düşer.)
   Future<KeyHandle> recoverUnlock(
-      KeyAttributes attrs, List<String> mnemonic) async {
+    KeyAttributes attrs,
+    List<String> mnemonic,
+  ) async {
     Uint8List? recoveryKeyBytes;
     KeyHandle? recoveryKey;
     try {
@@ -260,7 +264,10 @@ class KeyManager {
   ///
   /// **Yalnız `unlocked` iken (masterKey bellekte) çağrılmalı.** Argon2id YOK →
   /// senkron (yavaş kısım yok); yine de `Future` API tutarlılığı için sync döner.
-  BiometricEnrollResult enrollBiometric(KeyAttributes attrs, KeyHandle masterKey) {
+  BiometricEnrollResult enrollBiometric(
+    KeyAttributes attrs,
+    KeyHandle masterKey,
+  ) {
     final biometricKeyBytes = _crypto.randomBytes(32);
     KeyHandle? biometricKey;
     try {
@@ -287,7 +294,9 @@ class KeyManager {
   KeyHandle biometricUnlock(KeyAttributes attrs, Uint8List biometricKeyBytes) {
     final blob = attrs.biometricEncryptedMasterKey;
     if (blob == null) {
-      throw const BiometricUnwrapException('Bu cihazda biyometri enroll edilmemiş');
+      throw const BiometricUnwrapException(
+        'Bu cihazda biyometri enroll edilmemiş',
+      );
     }
     KeyHandle? biometricKey;
     try {

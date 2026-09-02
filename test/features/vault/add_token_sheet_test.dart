@@ -42,7 +42,10 @@ const _singleToken =
     'otpauth://totp/Example:me@example.com?secret=JBSWY3DPEHPK3PXP&issuer=Example';
 
 OtpAccount _acc(String name) => OtpAccount(
-    secret: 'JBSWY3DPEHPK3PXP', type: OtpType.totp, accountName: name);
+  secret: 'JBSWY3DPEHPK3PXP',
+  type: OtpType.totp,
+  accountName: name,
+);
 
 class _MemStorage implements FlutterSecureStorage {
   final Map<String, String> _d = {};
@@ -55,8 +58,7 @@ class _MemStorage implements FlutterSecureStorage {
     dynamic webOptions,
     dynamic mOptions,
     dynamic wOptions,
-  }) async =>
-      _d[key];
+  }) async => _d[key];
   @override
   Future<void> write({
     required String key,
@@ -153,8 +155,9 @@ class _FakeMigration implements MigrationScanController {
 }
 
 /// Sheet'in bağlantı alanı — VaultPage'in arama alanıyla karışmasın.
-final Finder _uriField = find.byWidgetPredicate((w) =>
-    w is TextField && w.decoration?.labelText == 'otpauth:// bağlantısı');
+final Finder _uriField = find.byWidgetPredicate(
+  (w) => w is TextField && w.decoration?.labelText == 'otpauth:// bağlantısı',
+);
 
 /// Sheet'in açık olduğunun işareti. ('Kod ekle' başlığı KULLANILMAZ: boş
 /// vault'un EmptyState CTA'sı da aynı metni taşır.)
@@ -170,16 +173,18 @@ Future<VaultCubit> _openManualSheet(
   final lock = _FakeLockCubit();
   addTearDown(lock.close);
 
-  await tester.pumpWidget(MultiBlocProvider(
-    providers: [
-      BlocProvider<VaultCubit>.value(value: vault),
-      BlocProvider<VaultLockCubit>.value(value: lock),
-    ],
-    child: const MediaQuery(
-      data: MediaQueryData(disableAnimations: true),
-      child: MaterialApp(home: VaultPage()),
+  await tester.pumpWidget(
+    MultiBlocProvider(
+      providers: [
+        BlocProvider<VaultCubit>.value(value: vault),
+        BlocProvider<VaultLockCubit>.value(value: lock),
+      ],
+      child: const MediaQuery(
+        data: MediaQueryData(disableAnimations: true),
+        child: MaterialApp(home: VaultPage()),
+      ),
     ),
-  ));
+  );
   await tester.pumpAndSettle();
 
   await tester.tap(find.text('Ekle'));
@@ -203,21 +208,23 @@ Future<VaultCubit> _pumpSheet(
   addTearDown(vault.close);
   if (existing.isNotEmpty) await vault.addAll(existing);
 
-  await tester.pumpWidget(MaterialApp(
-    home: Scaffold(
-      body: Builder(
-        builder: (c) => TextButton(
-          onPressed: () => showModalBottomSheet<void>(
-            context: c,
-            isScrollControlled: true,
-            builder: (_) =>
-                AddTokenSheet(cubit: vault, debugMigration: migration),
+  await tester.pumpWidget(
+    MaterialApp(
+      home: Scaffold(
+        body: Builder(
+          builder: (c) => TextButton(
+            onPressed: () => showModalBottomSheet<void>(
+              context: c,
+              isScrollControlled: true,
+              builder: (_) =>
+                  AddTokenSheet(cubit: vault, debugMigration: migration),
+            ),
+            child: const Text('sheet aç'),
           ),
-          child: const Text('sheet aç'),
         ),
       ),
     ),
-  ));
+  );
   await tester.tap(find.text('sheet aç'));
   await tester.pumpAndSettle();
   expect(_uriField, findsOneWidget);
@@ -237,23 +244,28 @@ void main() {
     }
     if (!locator.isRegistered<ViewModeStore>()) {
       locator.registerLazySingleton<ViewModeStore>(
-          () => ViewModeStore(storage: _MemStorage()));
+        () => ViewModeStore(storage: _MemStorage()),
+      );
     }
   });
   tearDown(GetIt.instance.reset);
 
-  testWidgets('bozuk aktarım bağlantısı → sabit hata, add ÇAĞRILMAZ',
-      (tester) async {
+  testWidgets('bozuk aktarım bağlantısı → sabit hata, add ÇAĞRILMAZ', (
+    tester,
+  ) async {
     final repo = _FakeRepo();
     final migration = _FakeMigration(
-        script: const {_migrationUri: MigrationMalformedQr()});
+      script: const {_migrationUri: MigrationMalformedQr()},
+    );
     final vault = await _pumpSheet(tester, migration: migration, repo: repo);
 
     await _paste(tester, _migrationUri);
 
     expect(
-      find.text('Bu bağlantı bir Google Authenticator aktarım bağlantısı '
-          'değil ya da bozuk.'),
+      find.text(
+        'Bu bağlantı bir Google Authenticator aktarım bağlantısı '
+        'değil ya da bozuk.',
+      ),
       findsOneWidget,
     );
     expect(vault.state.accounts, isEmpty);
@@ -263,7 +275,8 @@ void main() {
 
   testWidgets('hata metni yapıştırılan bağlantıyı TAŞIMAZ', (tester) async {
     final migration = _FakeMigration(
-        script: const {_migrationUri: MigrationMalformedQr()});
+      script: const {_migrationUri: MigrationMalformedQr()},
+    );
     await _pumpSheet(tester, migration: migration);
 
     await _paste(tester, _migrationUri);
@@ -290,9 +303,12 @@ void main() {
     expect(vault.state.accounts, isEmpty, reason: 'onay bekleniyor');
   });
 
-  testWidgets('eksik aktarım → ilerleme bandı, alan temizlenir', (tester) async {
+  testWidgets('eksik aktarım → ilerleme bandı, alan temizlenir', (
+    tester,
+  ) async {
     final migration = _FakeMigration(
-        script: const {_migrationUri: MigrationBatchAdded(1, 2)});
+      script: const {_migrationUri: MigrationBatchAdded(1, 2)},
+    );
     await _pumpSheet(tester, migration: migration);
 
     await _paste(tester, _migrationUri);
@@ -308,7 +324,9 @@ void main() {
     );
   });
 
-  testWidgets('kalan bağlantı da yapıştırılınca önizleme çıkar', (tester) async {
+  testWidgets('kalan bağlantı da yapıştırılınca önizleme çıkar', (
+    tester,
+  ) async {
     final migration = _FakeMigration(
       script: const {
         _migrationUri: MigrationBatchAdded(1, 2),
@@ -350,8 +368,11 @@ void main() {
     expect(repo.saves, 1, reason: 'tek persist');
     expect(find.text('2 token eklendi'), findsOneWidget);
     expect(_uriField, findsNothing, reason: 'sheet kapanmalı');
-    expect(migration.resets, greaterThanOrEqualTo(1),
-        reason: 'secret\'lar vault\'ta — bellekte tutma');
+    expect(
+      migration.resets,
+      greaterThanOrEqualTo(1),
+      reason: 'secret\'lar vault\'ta — bellekte tutma',
+    );
   });
 
   testWidgets('kaydedilemezse sheet KAPANMAZ', (tester) async {
@@ -373,20 +394,25 @@ void main() {
     expect(find.widgetWithText(FilledButton, 'İçe aktar'), findsOneWidget);
   });
 
-  testWidgets('yabancı aktarımın bağlantısı → baştan başla diyaloğu',
-      (tester) async {
-    final migration = _FakeMigration(script: const {
-      _migrationUri: MigrationBatchAdded(1, 2),
-      _migrationUri2: MigrationDifferentBatch(),
-    });
+  testWidgets('yabancı aktarımın bağlantısı → baştan başla diyaloğu', (
+    tester,
+  ) async {
+    final migration = _FakeMigration(
+      script: const {
+        _migrationUri: MigrationBatchAdded(1, 2),
+        _migrationUri2: MigrationDifferentBatch(),
+      },
+    );
     await _pumpSheet(tester, migration: migration);
 
     await _paste(tester, _migrationUri);
     await _paste(tester, _migrationUri2);
 
     expect(
-      find.text('Bu bağlantı farklı bir dışa aktarmaya ait. '
-          'Baştan başlansın mı?'),
+      find.text(
+        'Bu bağlantı farklı bir dışa aktarmaya ait. '
+        'Baştan başlansın mı?',
+      ),
       findsOneWidget,
     );
 
@@ -394,16 +420,22 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(migration.resets, 1);
-    expect(find.textContaining('bağlantı eklendi'), findsNothing,
-        reason: 'sayaçlar sıfırlandı');
+    expect(
+      find.textContaining('bağlantı eklendi'),
+      findsNothing,
+      reason: 'sayaçlar sıfırlandı',
+    );
   });
 
-  testWidgets('aynı bağlantı ikinci kez → uyarı, sayaç değişmez',
-      (tester) async {
-    final migration = _FakeMigration(script: const {
-      _migrationUri: MigrationBatchAdded(1, 2),
-      _migrationUri2: MigrationDuplicateScan(),
-    });
+  testWidgets('aynı bağlantı ikinci kez → uyarı, sayaç değişmez', (
+    tester,
+  ) async {
+    final migration = _FakeMigration(
+      script: const {
+        _migrationUri: MigrationBatchAdded(1, 2),
+        _migrationUri2: MigrationDuplicateScan(),
+      },
+    );
     await _pumpSheet(tester, migration: migration);
 
     await _paste(tester, _migrationUri);
@@ -414,8 +446,9 @@ void main() {
   });
 
   testWidgets('kapasite aşımı → "çok fazla hesap" uyarısı', (tester) async {
-    final migration =
-        _FakeMigration(script: const {_migrationUri: MigrationScanFull()});
+    final migration = _FakeMigration(
+      script: const {_migrationUri: MigrationScanFull()},
+    );
     await _pumpSheet(tester, migration: migration);
 
     await _paste(tester, _migrationUri);
@@ -432,8 +465,10 @@ void main() {
 
     await _paste(tester, _migrationUri);
 
-    expect(find.text('Bu bağlantılarda içe aktarılacak token bulunamadı.'),
-        findsOneWidget);
+    expect(
+      find.text('Bu bağlantılarda içe aktarılacak token bulunamadı.'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('önizleme vault\'taki tokenlarla dedupe edilir', (tester) async {
@@ -444,17 +479,24 @@ void main() {
         toAdd: [_acc('yeni@x')],
       ),
     );
-    await _pumpSheet(tester,
-        migration: migration, existing: [_acc('mevcut@x')]);
+    await _pumpSheet(
+      tester,
+      migration: migration,
+      existing: [_acc('mevcut@x')],
+    );
 
     await _paste(tester, _migrationUri);
 
-    expect(migration.lastExisting?.length, 1,
-        reason: 'vault\'taki token dedupe girdisi olmalı');
+    expect(
+      migration.lastExisting?.length,
+      1,
+      reason: 'vault\'taki token dedupe girdisi olmalı',
+    );
   });
 
-  testWidgets('normal otpauth:// bağlantısı ETKİLENMEZ (guard dar)',
-      (tester) async {
+  testWidgets('normal otpauth:// bağlantısı ETKİLENMEZ (guard dar)', (
+    tester,
+  ) async {
     final repo = _FakeRepo();
     final vault = await _openManualSheet(tester, repo);
 
@@ -467,8 +509,9 @@ void main() {
     expect(_sheetTitle, findsNothing, reason: 'sheet kapanmalı');
   });
 
-  testWidgets('geçersiz otpauth:// → parse hatası, DI\'ya dokunulmaz',
-      (tester) async {
+  testWidgets('geçersiz otpauth:// → parse hatası, DI\'ya dokunulmaz', (
+    tester,
+  ) async {
     final repo = _FakeRepo();
     final vault = await _openManualSheet(tester, repo);
 

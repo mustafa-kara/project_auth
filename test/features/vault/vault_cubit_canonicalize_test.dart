@@ -13,19 +13,21 @@ import 'package:project_auth/features/vault/presentation/bloc/vault_cubit.dart';
 class _FakeRepo implements VaultRepository {
   List<OtpAccount> stored = [];
   @override
-  Future<VaultLoadResult> load() async => VaultLoadResult(accounts: List.of(stored));
+  Future<VaultLoadResult> load() async =>
+      VaultLoadResult(accounts: List.of(stored));
   @override
-  Future<void> save(List<OtpAccount> accounts) async => stored = List.of(accounts);
+  Future<void> save(List<OtpAccount> accounts) async =>
+      stored = List.of(accounts);
   @override
   Future<void> purgeCorrupted() async {}
 }
 
 OtpAccount _acc(String? issuer) => OtpAccount(
-      secret: 'JBSWY3DPEHPK3PXP',
-      type: OtpType.totp,
-      issuer: issuer,
-      accountName: 'me@example.com',
-    );
+  secret: 'JBSWY3DPEHPK3PXP',
+  type: OtpType.totp,
+  issuer: issuer,
+  accountName: 'me@example.com',
+);
 
 CatalogService _svc(String name, {String? issuer}) =>
     CatalogService(id: 'id-$name', name: name, issuer: issuer, logoUrl: null);
@@ -45,7 +47,9 @@ void main() {
     final catalog = IssuerCatalog([_svc('GitHub', issuer: 'github')]);
     final cubit = build(catalog);
     await cubit.load();
-    await cubit.add(_acc('github.com')); // slug 'githubcom' ≠ 'github' → eşleşmez
+    await cubit.add(
+      _acc('github.com'),
+    ); // slug 'githubcom' ≠ 'github' → eşleşmez
 
     // 'github.com' slug 'githubcom'; katalog 'github' slug 'github' → eşleşmez (no-op).
     expect(repo.stored.single.issuer, 'github.com');

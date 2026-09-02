@@ -54,8 +54,9 @@ class BiometricStorageError implements Exception {
 /// yanlış biometricKey). Yanlış parolanın biyometri karşılığı.
 class BiometricUnwrapException implements Exception {
   final String message;
-  const BiometricUnwrapException(
-      [this.message = 'Biyometrik anahtar ile master key açılamadı']);
+  const BiometricUnwrapException([
+    this.message = 'Biyometrik anahtar ile master key açılamadı',
+  ]);
   @override
   String toString() => 'BiometricUnwrapException: $message';
 }

@@ -53,8 +53,7 @@ class _NoopDocuments implements DocumentPort {
   Future<bool> saveJson({
     required String fileName,
     required Uint8List bytes,
-  }) async =>
-      false;
+  }) async => false;
   @override
   Future<PickedImage?> pickImage({required int maxBytes}) async => null;
   @override
@@ -70,14 +69,12 @@ class _NoopImportService implements ImportService {
     required String raw,
     required List<OtpAccount> existing,
     String? backupPassword,
-  }) async =>
-      const ImportPreview(source: ImportSource.unknown, toAdd: []);
+  }) async => const ImportPreview(source: ImportSource.unknown, toAdd: []);
   @override
   ImportPreview previewParsed(
     ParsedImport parsed, {
     required List<OtpAccount> existing,
-  }) =>
-      throw UnimplementedError();
+  }) => throw UnimplementedError();
   @override
   BackupService get backup => throw UnimplementedError();
   @override
@@ -91,20 +88,17 @@ class _NoopBackup implements BackupService {
     required List<OtpAccount> accounts,
     required String password,
     DateTime? now,
-  }) async =>
-      '{}';
+  }) async => '{}';
   @override
   Future<List<OtpAccount>> import({
     required String json,
     required String password,
-  }) async =>
-      const [];
+  }) async => const [];
   @override
   Future<BackupPayload> importDetailed({
     required String json,
     required String password,
-  }) async =>
-      const BackupPayload(accounts: []);
+  }) async => const BackupPayload(accounts: []);
   @override
   CryptoService get crypto => throw UnimplementedError();
 }
@@ -118,9 +112,9 @@ void main() {
     SecureScreen.debugReset();
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
-      calls.add(call.method);
-      return null;
-    });
+          calls.add(call.method);
+          return null;
+        });
   });
 
   tearDown(() {
@@ -136,13 +130,15 @@ void main() {
     await vault.load();
     addTearDown(vault.close);
 
-    await tester.pumpWidget(MultiBlocProvider(
-      providers: [
-        BlocProvider<VaultLockCubit>.value(value: lock),
-        BlocProvider<VaultCubit>.value(value: vault),
-      ],
-      child: MaterialApp(home: page),
-    ));
+    await tester.pumpWidget(
+      MultiBlocProvider(
+        providers: [
+          BlocProvider<VaultLockCubit>.value(value: lock),
+          BlocProvider<VaultCubit>.value(value: vault),
+        ],
+        child: MaterialApp(home: page),
+      ),
+    );
     await tester.pump();
     expect(calls, ['enable'], reason: 'mount → koruma açılmalı');
     expect(SecureScreen.holderCount, 1);
@@ -153,8 +149,9 @@ void main() {
     expect(SecureScreen.holderCount, 0);
   }
 
-  testWidgets('ImportPage (token listesi + yedek parolası) korunur',
-      (tester) async {
+  testWidgets('ImportPage (token listesi + yedek parolası) korunur', (
+    tester,
+  ) async {
     await expectProtected(
       tester,
       const ImportPage(

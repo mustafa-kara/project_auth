@@ -17,7 +17,7 @@ class LegacyLinkStore {
   final FlutterSecureStorage _storage;
 
   LegacyLinkStore({FlutterSecureStorage? storage})
-      : _storage = storage ?? const FlutterSecureStorage();
+    : _storage = storage ?? const FlutterSecureStorage();
 
   String _key(String uid) => '$_prefix$uid';
 

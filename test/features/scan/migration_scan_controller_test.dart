@@ -15,15 +15,18 @@ import 'package:project_auth/features/import_export/domain/import_service.dart';
 import 'package:project_auth/features/scan/presentation/migration_scan_controller.dart';
 
 OtpAccount _acc(String name) => OtpAccount(
-    secret: 'JBSWY3DPEHPK3PXP', type: OtpType.totp, accountName: name);
+  secret: 'JBSWY3DPEHPK3PXP',
+  type: OtpType.totp,
+  accountName: name,
+);
 
 MigrationBatch _batch({int index = 0, int size = 1}) => MigrationBatch(
-      version: 1,
-      batchSize: size,
-      batchIndex: index,
-      batchId: 7,
-      accounts: [_acc('a$index')],
-    );
+  version: 1,
+  batchSize: size,
+  batchIndex: index,
+  batchId: 7,
+  accounts: [_acc('a$index')],
+);
 
 /// `GoogleMigrationCollector` somut bir sınıf; Dart'ta somut sınıf da
 /// `implements` edilebilir → controller, collector'ın GERÇEK gövdesine değil
@@ -35,8 +38,10 @@ class _FakeCollector implements GoogleMigrationCollector {
   bool complete = false;
   int resets = 0;
   final List<MigrationBatch> added = [];
-  ParsedImport parsed =
-      const ParsedImport(source: ImportSource.googleAuth, accounts: []);
+  ParsedImport parsed = const ParsedImport(
+    source: ImportSource.googleAuth,
+    accounts: [],
+  );
 
   @override
   MigrationAddOutcome add(MigrationBatch batch) {
@@ -87,8 +92,7 @@ class _FakeService implements ImportService {
     required String raw,
     required List<OtpAccount> existing,
     String? backupPassword,
-  }) =>
-      throw UnimplementedError();
+  }) => throw UnimplementedError();
   @override
   BackupService get backup => throw UnimplementedError();
   @override
@@ -102,12 +106,11 @@ void main() {
   setUp(() {
     collector = _FakeCollector();
     service = _FakeService(
-        result: const ImportPreview(source: ImportSource.googleAuth, toAdd: []));
+      result: const ImportPreview(source: ImportSource.googleAuth, toAdd: []),
+    );
   });
 
-  MigrationScanController build({
-    MigrationBatch Function(String raw)? parse,
-  }) =>
+  MigrationScanController build({MigrationBatch Function(String raw)? parse}) =>
       MigrationScanController(
         service,
         collector: collector,
@@ -115,15 +118,24 @@ void main() {
       );
 
   group('bozuk QR', () {
-    test('MalformedMigrationUriException → MigrationMalformedQr, add çağrılmaz',
-        () {
-      final c = build(
-          parse: (_) => throw const MalformedMigrationUriException('nope'));
+    test(
+      'MalformedMigrationUriException → MigrationMalformedQr, add çağrılmaz',
+      () {
+        final c = build(
+          parse: (_) => throw const MalformedMigrationUriException('nope'),
+        );
 
-      expect(c.handleRaw('otpauth-migration://offline?data=xx'),
-          const MigrationMalformedQr());
-      expect(collector.added, isEmpty, reason: 'bozuk QR state\'i kirletmemeli');
-    });
+        expect(
+          c.handleRaw('otpauth-migration://offline?data=xx'),
+          const MigrationMalformedQr(),
+        );
+        expect(
+          collector.added,
+          isEmpty,
+          reason: 'bozuk QR state\'i kirletmemeli',
+        );
+      },
+    );
 
     test('decoder FormatException da aynı olaya düşer (neden gizlenir)', () {
       final c = build(parse: (_) => throw const FormatException('wire type 3'));
@@ -194,10 +206,14 @@ void main() {
   group('olay eşitliği (Equatable)', () {
     test('aynı sayaçlar eşit, farklı tip eşit değil', () {
       expect(const MigrationBatchAdded(1, 3), const MigrationBatchAdded(1, 3));
-      expect(const MigrationBatchAdded(1, 3),
-          isNot(const MigrationBatchAdded(2, 3)));
-      expect(const MigrationBatchAdded(3, 3),
-          isNot(const MigrationScanComplete(3, 3)));
+      expect(
+        const MigrationBatchAdded(1, 3),
+        isNot(const MigrationBatchAdded(2, 3)),
+      );
+      expect(
+        const MigrationBatchAdded(3, 3),
+        isNot(const MigrationScanComplete(3, 3)),
+      );
       expect(const MigrationDuplicateScan(), const MigrationDuplicateScan());
     });
   });
@@ -227,8 +243,10 @@ void main() {
         source: ImportSource.googleAuth,
         accounts: [_acc('yeni')],
       );
-      final expected =
-          ImportPreview(source: ImportSource.googleAuth, toAdd: [_acc('yeni')]);
+      final expected = ImportPreview(
+        source: ImportSource.googleAuth,
+        toAdd: [_acc('yeni')],
+      );
       service = _FakeService(result: expected);
 
       final preview = build().preview(existing: vault);
@@ -238,11 +256,15 @@ void main() {
       expect(service.lastExisting, same(vault));
     });
 
-    test('hiç token yoksa EmptyImportException yukarı çıkar (UI karar verir)',
-        () {
-      service = _FakeService(error: const EmptyImportException());
-      expect(() => build().preview(existing: const []),
-          throwsA(isA<EmptyImportException>()));
-    });
+    test(
+      'hiç token yoksa EmptyImportException yukarı çıkar (UI karar verir)',
+      () {
+        service = _FakeService(error: const EmptyImportException());
+        expect(
+          () => build().preview(existing: const []),
+          throwsA(isA<EmptyImportException>()),
+        );
+      },
+    );
   });
 }

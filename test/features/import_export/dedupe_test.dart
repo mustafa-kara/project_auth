@@ -23,17 +23,16 @@ OtpAccount _account({
   int digits = 6,
   int period = 30,
   int counter = 0,
-}) =>
-    OtpAccount(
-      secret: secret,
-      issuer: issuer,
-      accountName: accountName,
-      type: type,
-      algorithm: algorithm,
-      digits: digits,
-      period: period,
-      counter: counter,
-    );
+}) => OtpAccount(
+  secret: secret,
+  issuer: issuer,
+  accountName: accountName,
+  type: type,
+  algorithm: algorithm,
+  digits: digits,
+  period: period,
+  counter: counter,
+);
 
 void main() {
   group('dedupeKey — secret canonicalization', () {
@@ -52,8 +51,10 @@ void main() {
     });
 
     test('the secret component is upper-case and unpadded', () {
-      expect(dedupeKey(_account(secret: 'jbswy3dpehpk3pxp')),
-          endsWith(' JBSWY3DPEHPK3PXP'));
+      expect(
+        dedupeKey(_account(secret: 'jbswy3dpehpk3pxp')),
+        endsWith(' JBSWY3DPEHPK3PXP'),
+      );
     });
 
     test('a different secret produces a different key', () {
@@ -120,24 +121,29 @@ void main() {
       expect(dedupeKey(_account(issuer: 'Git Hub!')), startsWith('github '));
     });
 
-    test('an alias is NOT bridged by the slug alone — that needs the catalog',
-        () {
-      // Documents the limit called out in the doc comment: "github.com" slugs
-      // to `githubcom`. Only `canonicalizerFor` maps it onto "GitHub".
-      expect(
-        dedupeKey(_account(issuer: 'github.com')),
-        isNot(dedupeKey(_account(issuer: 'GitHub'))),
-      );
-    });
+    test(
+      'an alias is NOT bridged by the slug alone — that needs the catalog',
+      () {
+        // Documents the limit called out in the doc comment: "github.com" slugs
+        // to `githubcom`. Only `canonicalizerFor` maps it onto "GitHub".
+        expect(
+          dedupeKey(_account(issuer: 'github.com')),
+          isNot(dedupeKey(_account(issuer: 'GitHub'))),
+        );
+      },
+    );
   });
 
   group('canonicalizerFor — catalog-backed issuer alignment', () {
     IssuerCatalog catalog() => IssuerCatalog(const [
-          CatalogService(
-              id: '1', name: 'GitHub', issuer: 'github.com', logoUrl: null),
-          CatalogService(
-              id: '2', name: 'GitHub', issuer: null, logoUrl: null),
-        ]);
+      CatalogService(
+        id: '1',
+        name: 'GitHub',
+        issuer: 'github.com',
+        logoUrl: null,
+      ),
+      CatalogService(id: '2', name: 'GitHub', issuer: null, logoUrl: null),
+    ]);
 
     test('an alias issuer becomes the canonical catalog name', () {
       final canon = canonicalizerFor(catalog())(_account(issuer: 'github.com'));
@@ -158,12 +164,18 @@ void main() {
       final account = _account(issuer: 'Nowhere Inc');
       expect(canonicalizerFor(catalog())(account), same(account));
       expect(canonicalizerFor(IssuerCatalog.empty())(_account()), isNotNull);
-      expect(canonicalizerFor(IssuerCatalog.empty())(account).issuer,
-          'Nowhere Inc');
+      expect(
+        canonicalizerFor(IssuerCatalog.empty())(account).issuer,
+        'Nowhere Inc',
+      );
     });
 
     test('every other field survives the rewrite', () {
-      final account = _account(issuer: 'github.com', type: OtpType.hotp, counter: 7);
+      final account = _account(
+        issuer: 'github.com',
+        type: OtpType.hotp,
+        counter: 7,
+      );
       final canon = canonicalizerFor(catalog())(account);
       expect(canon.id, account.id);
       expect(canon.secret, account.secret);
@@ -208,38 +220,46 @@ void main() {
           .parse(_fixture('aegis_plain_v1.json'))
           .accounts
           .first;
-      final twofas =
-          const TwoFasParser().parse(_fixture('twofas_v4.json')).accounts.first;
+      final twofas = const TwoFasParser()
+          .parse(_fixture('twofas_v4.json'))
+          .accounts
+          .first;
       expect(dedupeKey(twofas), dedupeKey(aegis));
     });
 
     test('every 2FAS token in one file has a distinct key', () {
       final parsed = const TwoFasParser().parse(_fixture('twofas_v4.json'));
-      expect(parsed.accounts.map(dedupeKey).toSet(),
-          hasLength(parsed.accounts.length));
+      expect(
+        parsed.accounts.map(dedupeKey).toSet(),
+        hasLength(parsed.accounts.length),
+      );
     });
   });
 
   // --- Phase 5 Patch 3 / K5: tags are the user's organization, not identity ---
   group('tags are NOT part of the key', () {
     OtpAccount tagged(List<String> tags) => OtpAccount(
-          secret: 'JBSWY3DPEHPK3PXP',
-          type: OtpType.totp,
-          issuer: 'GitHub',
-          accountName: 'alice@example.com',
-          tags: tags,
-        );
+      secret: 'JBSWY3DPEHPK3PXP',
+      type: OtpType.totp,
+      issuer: 'GitHub',
+      accountName: 'alice@example.com',
+      tags: tags,
+    );
 
     test('same token, different tags → SAME key', () {
       expect(dedupeKey(tagged(const [])), dedupeKey(tagged(const ['iş'])));
       expect(dedupeKey(tagged(const ['iş'])), dedupeKey(tagged(const ['ev'])));
-      expect(dedupeKey(tagged(const ['iş', 'ev'])),
-          dedupeKey(tagged(const ['ev', 'iş'])));
+      expect(
+        dedupeKey(tagged(const ['iş', 'ev'])),
+        dedupeKey(tagged(const ['ev', 'iş'])),
+      );
     });
 
     test('the key text does not contain a tag at all', () {
-      expect(dedupeKey(tagged(const ['gizlietiket'])),
-          isNot(contains('gizlietiket')));
+      expect(
+        dedupeKey(tagged(const ['gizlietiket'])),
+        isNot(contains('gizlietiket')),
+      );
     });
 
     test('the Aegis fixture rows collapse even though their GROUPS differ', () {
@@ -247,8 +267,11 @@ void main() {
       final parsed = const AegisParser().parse(_fixture('aegis_plain_v1.json'));
       expect(parsed.accounts[0].tags, ['Work']);
       expect(parsed.accounts[1].tags, ['Kişisel']);
-      expect(dedupeKey(parsed.accounts[0]), dedupeKey(parsed.accounts[1]),
-          reason: 'moving a token to another group must not make it look new');
+      expect(
+        dedupeKey(parsed.accounts[0]),
+        dedupeKey(parsed.accounts[1]),
+        reason: 'moving a token to another group must not make it look new',
+      );
     });
   });
 }

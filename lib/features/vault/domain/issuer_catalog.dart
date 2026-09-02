@@ -11,8 +11,7 @@ import '../../../core/ui/widgets/issuer_avatar.dart';
 import 'catalog_repository.dart';
 
 class IssuerCatalog {
-  IssuerCatalog(List<CatalogService> services)
-      : _bySlug = _index(services);
+  IssuerCatalog(List<CatalogService> services) : _bySlug = _index(services);
 
   /// Boş katalog (henüz yüklenmedi/offline) — `canonicalIssuer` daima null döner (no-op).
   IssuerCatalog.empty() : _bySlug = const {};

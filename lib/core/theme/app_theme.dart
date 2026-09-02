@@ -59,28 +59,26 @@ abstract final class AppTheme {
     final isDark = brightness == Brightness.dark;
     // M3 fromSeed taban → türetilmeyen tonlar (secondary/tertiary container vb.)
     // korunur; Design.md §3.1 token'ları el ile override edilir.
-    final scheme = ColorScheme.fromSeed(
-      seedColor: _seed,
-      brightness: brightness,
-    ).copyWith(
-      surface: isDark ? _dCanvas : _lCanvas,
-      surfaceContainerLowest: isDark ? _dCanvas : _lCanvas,
-      surfaceContainerLow: isDark ? _dSurface : _lSurface,
-      surfaceContainer: isDark ? _dSurfaceAlt : _lSurfaceAlt,
-      surfaceContainerHigh: isDark ? _dSurfaceHigh : _lSurfaceHigh,
-      surfaceContainerHighest: isDark ? _dSurfaceHigh : _lSurfaceHigh,
-      outlineVariant: isDark ? _dBorder : _lBorder,
-      outline: isDark ? _dBorderStrong : _lBorderStrong,
-      onSurface: isDark ? _dTextPrimary : _lTextPrimary,
-      onSurfaceVariant: isDark ? _dTextSecondary : _lTextSecondary,
-      primary: isDark ? _dPrimary : _lPrimary,
-      onPrimary: isDark ? _dOnPrimary : _lOnPrimary,
-      primaryContainer: isDark ? _dPrimaryContainer : _lPrimaryContainer,
-      onPrimaryContainer: isDark ? _dTextPrimary : _lTextPrimary,
-      error: isDark ? _dCritical : _lCritical,
-      onError: isDark ? _dOnPrimary : _lOnPrimary,
-      scrim: const Color(0xFF000000),
-    );
+    final scheme =
+        ColorScheme.fromSeed(seedColor: _seed, brightness: brightness).copyWith(
+          surface: isDark ? _dCanvas : _lCanvas,
+          surfaceContainerLowest: isDark ? _dCanvas : _lCanvas,
+          surfaceContainerLow: isDark ? _dSurface : _lSurface,
+          surfaceContainer: isDark ? _dSurfaceAlt : _lSurfaceAlt,
+          surfaceContainerHigh: isDark ? _dSurfaceHigh : _lSurfaceHigh,
+          surfaceContainerHighest: isDark ? _dSurfaceHigh : _lSurfaceHigh,
+          outlineVariant: isDark ? _dBorder : _lBorder,
+          outline: isDark ? _dBorderStrong : _lBorderStrong,
+          onSurface: isDark ? _dTextPrimary : _lTextPrimary,
+          onSurfaceVariant: isDark ? _dTextSecondary : _lTextSecondary,
+          primary: isDark ? _dPrimary : _lPrimary,
+          onPrimary: isDark ? _dOnPrimary : _lOnPrimary,
+          primaryContainer: isDark ? _dPrimaryContainer : _lPrimaryContainer,
+          onPrimaryContainer: isDark ? _dTextPrimary : _lTextPrimary,
+          error: isDark ? _dCritical : _lCritical,
+          onError: isDark ? _dOnPrimary : _lOnPrimary,
+          scrim: const Color(0xFF000000),
+        );
 
     final base = ThemeData(
       useMaterial3: true,

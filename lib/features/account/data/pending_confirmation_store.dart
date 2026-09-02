@@ -13,7 +13,7 @@ class PendingConfirmationStore {
   final FlutterSecureStorage _storage;
 
   PendingConfirmationStore({FlutterSecureStorage? storage})
-      : _storage = storage ?? const FlutterSecureStorage();
+    : _storage = storage ?? const FlutterSecureStorage();
 
   Future<String?> read() => _storage.read(key: storageKey);
 

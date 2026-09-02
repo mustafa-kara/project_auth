@@ -42,25 +42,26 @@ class FakeSecureStorage implements FlutterSecureStorage {
   Future<void>? writeGate;
 
   @override
-  Future<String?> read(
-          {required String key,
-          dynamic iOptions,
-          dynamic aOptions,
-          dynamic lOptions,
-          dynamic webOptions,
-          dynamic mOptions,
-          dynamic wOptions}) async =>
-      data[key];
+  Future<String?> read({
+    required String key,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async => data[key];
   @override
-  Future<void> write(
-      {required String key,
-      required String? value,
-      dynamic iOptions,
-      dynamic aOptions,
-      dynamic lOptions,
-      dynamic webOptions,
-      dynamic mOptions,
-      dynamic wOptions}) async {
+  Future<void> write({
+    required String key,
+    required String? value,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async {
     if (writeGate != null) await writeGate;
     if (failWrites) throw Exception('secure storage write IO hatası (test)');
     if (value == null) {
@@ -71,14 +72,15 @@ class FakeSecureStorage implements FlutterSecureStorage {
   }
 
   @override
-  Future<void> delete(
-      {required String key,
-      dynamic iOptions,
-      dynamic aOptions,
-      dynamic lOptions,
-      dynamic webOptions,
-      dynamic mOptions,
-      dynamic wOptions}) async {
+  Future<void> delete({
+    required String key,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async {
     data.remove(key);
   }
 
@@ -142,10 +144,7 @@ class FakeBiometricService implements BiometricService {
 /// Sahte attrs — gerçek bloblar gerekmiyor (KeyManager fake'lendi). Geçerli salt
 /// (16 byte) ile KeyAttributes ctor validasyonunu geçer.
 KeyAttributes _fakeAttrs() {
-  final blob = EncryptedBlob(
-    nonce: Uint8List(24),
-    ciphertext: Uint8List(16),
-  );
+  final blob = EncryptedBlob(nonce: Uint8List(24), ciphertext: Uint8List(16));
   return KeyAttributes(
     kdfSalt: Uint8List(KeyAttributes.saltBytes),
     kdfOps: 2,
@@ -181,7 +180,11 @@ class FakeKeyManager implements KeyManager {
   @override
   Future<SetupResult> setup(String masterPassword) async {
     if (setupGate != null) await setupGate;
-    return (attrs: _fakeAttrs(), recoveryMnemonic: mnemonic, masterKey: _newKey());
+    return (
+      attrs: _fakeAttrs(),
+      recoveryMnemonic: mnemonic,
+      masterKey: _newKey(),
+    );
   }
 
   @override
@@ -192,23 +195,32 @@ class FakeKeyManager implements KeyManager {
 
   @override
   Future<KeyHandle> recoverUnlock(
-      KeyAttributes attrs, List<String> mnemonic) async {
+    KeyAttributes attrs,
+    List<String> mnemonic,
+  ) async {
     if (wrongRecovery) throw const WrongRecoveryKeyException();
     return _newKey();
   }
 
   @override
   Future<KeyAttributes> changePassword(
-          KeyAttributes attrs, KeyHandle masterKey, String newPassword) async =>
-      _fakeAttrs();
+    KeyAttributes attrs,
+    KeyHandle masterKey,
+    String newPassword,
+  ) async => _fakeAttrs();
 
   /// bmk eklenmiş attrs + 32-bayt sahte key. Gerçek wrap yok (KeyManager fake).
   bool biometricUnwrapFails = false;
 
   @override
   BiometricEnrollResult enrollBiometric(
-      KeyAttributes attrs, KeyHandle masterKey) {
-    final bmkBlob = EncryptedBlob(nonce: Uint8List(24), ciphertext: Uint8List(16));
+    KeyAttributes attrs,
+    KeyHandle masterKey,
+  ) {
+    final bmkBlob = EncryptedBlob(
+      nonce: Uint8List(24),
+      ciphertext: Uint8List(16),
+    );
     return (
       attrs: attrs.copyWith(biometricEncryptedMasterKey: bmkBlob),
       biometricKeyBytes: Uint8List.fromList(List.filled(32, 5)),
@@ -346,7 +358,6 @@ class FakeKeyAttributesRepository implements KeyAttributesRepository {
     updateCount++;
     updated = attrs;
   }
-
 }
 
 void main() {
@@ -401,108 +412,163 @@ void main() {
       expect(migrated, ['migrated']); // migration commitSetup içinde çalıştı
     });
 
-    test('cancelSetup → masterKey dispose, uninitialized, persist YOK', () async {
-      final km = FakeKeyManager();
-      final cubit = _build(km, store);
-      await cubit.beginSetup('parola123');
-      cubit.cancelSetup();
-      expect(cubit.state.status, VaultLockStatus.uninitialized);
-      expect(km.issued.single.disposed, isTrue);
-      expect(storage.data.containsKey(KeyAttributesStore.storageKey), isFalse);
-    });
+    test(
+      'cancelSetup → masterKey dispose, uninitialized, persist YOK',
+      () async {
+        final km = FakeKeyManager();
+        final cubit = _build(km, store);
+        await cubit.beginSetup('parola123');
+        cubit.cancelSetup();
+        expect(cubit.state.status, VaultLockStatus.uninitialized);
+        expect(km.issued.single.disposed, isTrue);
+        expect(
+          storage.data.containsKey(KeyAttributesStore.storageKey),
+          isFalse,
+        );
+      },
+    );
 
-    test('setup restart → önceki pending masterKey dispose edilir (review P2)',
-        () async {
-      final km = FakeKeyManager();
-      final cubit = _build(km, store);
-      await cubit.beginSetup('parola123'); // 1. pending key
-      await cubit.beginSetup('baska456'); // restart → 1. key dispose, 2. üretilir
-      expect(km.issued.length, 2);
-      expect(km.issued[0].disposed, isTrue); // eski pending sızmadı
-      expect(km.issued[1].disposed, isFalse); // yeni pending canlı
-      expect(cubit.state.status, VaultLockStatus.setupPending);
-    });
+    test(
+      'setup restart → önceki pending masterKey dispose edilir (review P2)',
+      () async {
+        final km = FakeKeyManager();
+        final cubit = _build(km, store);
+        await cubit.beginSetup('parola123'); // 1. pending key
+        await cubit.beginSetup(
+          'baska456',
+        ); // restart → 1. key dispose, 2. üretilir
+        expect(km.issued.length, 2);
+        expect(km.issued[0].disposed, isTrue); // eski pending sızmadı
+        expect(km.issued[1].disposed, isFalse); // yeni pending canlı
+        expect(cubit.state.status, VaultLockStatus.setupPending);
+      },
+    );
 
-    test('beginSetup sürerken background → setupPending EMİT ETMEZ, üretilen key '
-        'dispose, uninitialized, persist YOK (review P1)', () async {
-      final gate = Completer<void>();
-      final km = FakeKeyManager(setupGate: gate.future);
-      final cubit = _build(km, store);
+    test(
+      'beginSetup sürerken background → setupPending EMİT ETMEZ, üretilen key '
+      'dispose, uninitialized, persist YOK (review P1)',
+      () async {
+        final gate = Completer<void>();
+        final km = FakeKeyManager(setupGate: gate.future);
+        final cubit = _build(km, store);
 
-      final pending = cubit.beginSetup('parola123'); // setup'ta (Argon2id) asılı
-      await Future<void>.delayed(Duration.zero);
-      cubit.onAppBackgrounded(paused: true); // state uninitialized iken setup devam ediyor
-      gate.complete();
-      await pending;
+        final pending = cubit.beginSetup(
+          'parola123',
+        ); // setup'ta (Argon2id) asılı
+        await Future<void>.delayed(Duration.zero);
+        cubit.onAppBackgrounded(
+          paused: true,
+        ); // state uninitialized iken setup devam ediyor
+        gate.complete();
+        await pending;
 
-      expect(cubit.state.status, VaultLockStatus.uninitialized); // setupPending DEĞİL
-      expect(km.issued.single.disposed, isTrue); // masterKey + mnemonic sızmaz
-      expect(() => cubit.masterKey, throwsStateError);
-      expect(storage.data.containsKey(KeyAttributesStore.storageKey), isFalse);
-    });
+        expect(
+          cubit.state.status,
+          VaultLockStatus.uninitialized,
+        ); // setupPending DEĞİL
+        expect(
+          km.issued.single.disposed,
+          isTrue,
+        ); // masterKey + mnemonic sızmaz
+        expect(() => cubit.masterKey, throwsStateError);
+        expect(
+          storage.data.containsKey(KeyAttributesStore.storageKey),
+          isFalse,
+        );
+      },
+    );
 
-    test('commitSetup migration fail → attrs diskte ama state ATOMİK: key dispose, '
-        'pending temizlenir, locked (setupPending DEĞİL), rethrow (review P2)',
-        () async {
-      final km = FakeKeyManager();
-      final cubit = _build(km, store, migrationFails: true);
-      await cubit.beginSetup('parola123');
+    test(
+      'commitSetup migration fail → attrs diskte ama state ATOMİK: key dispose, '
+      'pending temizlenir, locked (setupPending DEĞİL), rethrow (review P2)',
+      () async {
+        final km = FakeKeyManager();
+        final cubit = _build(km, store, migrationFails: true);
+        await cubit.beginSetup('parola123');
 
-      await expectLater(cubit.commitSetup(), throwsStateError);
-      // attrs YAZILDI (migration'dan önce) → vault var → locked tutarlı.
-      expect(storage.data.containsKey(KeyAttributesStore.storageKey), isTrue);
-      expect(cubit.state.status, VaultLockStatus.locked); // setupPending DEĞİL
-      expect(km.issued.single.disposed, isTrue); // key sızmaz
-      expect(() => cubit.masterKey, throwsStateError);
-    });
+        await expectLater(cubit.commitSetup(), throwsStateError);
+        // attrs YAZILDI (migration'dan önce) → vault var → locked tutarlı.
+        expect(storage.data.containsKey(KeyAttributesStore.storageKey), isTrue);
+        expect(
+          cubit.state.status,
+          VaultLockStatus.locked,
+        ); // setupPending DEĞİL
+        expect(km.issued.single.disposed, isTrue); // key sızmaz
+        expect(() => cubit.masterKey, throwsStateError);
+      },
+    );
 
-    test('commitSetup attrs write FAIL → diske yazılmadı: key dispose, pending '
-        'temizlenir, UNINITIALIZED (locked değil), rethrow (review P2 2.tur)',
-        () async {
-      final km = FakeKeyManager();
-      final cubit = _build(km, store);
-      await cubit.beginSetup('parola123');
+    test(
+      'commitSetup attrs write FAIL → diske yazılmadı: key dispose, pending '
+      'temizlenir, UNINITIALIZED (locked değil), rethrow (review P2 2.tur)',
+      () async {
+        final km = FakeKeyManager();
+        final cubit = _build(km, store);
+        await cubit.beginSetup('parola123');
 
-      storage.failWrites = true; // _attrsStore.write fırlatacak
-      await expectLater(cubit.commitSetup(), throwsA(isA<Exception>()));
+        storage.failWrites = true; // _attrsStore.write fırlatacak
+        await expectLater(cubit.commitSetup(), throwsA(isA<Exception>()));
 
-      // write fail → attrs DİSKE YAZILMADI → vault kurulmadı → uninitialized.
-      expect(storage.data.containsKey(KeyAttributesStore.storageKey), isFalse);
-      expect(cubit.state.status, VaultLockStatus.uninitialized); // locked DEĞİL
-      expect(km.issued.single.disposed, isTrue); // masterKey arka planda sızmaz
-      expect(() => cubit.masterKey, throwsStateError);
-    });
+        // write fail → attrs DİSKE YAZILMADI → vault kurulmadı → uninitialized.
+        expect(
+          storage.data.containsKey(KeyAttributesStore.storageKey),
+          isFalse,
+        );
+        expect(
+          cubit.state.status,
+          VaultLockStatus.uninitialized,
+        ); // locked DEĞİL
+        expect(
+          km.issued.single.disposed,
+          isTrue,
+        ); // masterKey arka planda sızmaz
+        expect(() => cubit.masterKey, throwsStateError);
+      },
+    );
 
-    test('commitSetup write askıdayken BACKGROUND, sonra write FAIL → kesişim: '
-        'key dispose, pending temizlenir, UNINITIALIZED, persist YOK (review P3 3.tur)',
-        () async {
-      // Önceki write-fail testi cleanup'ı doğruluyordu ama background çağrısı YOKTU;
-      // background testi ise write BİTTİKTEN sonra _migrate'te bekletiyordu. Bu test
-      // tam kesişimi kapatır: write _attrsStore.write()'ta ASILIYKEN app background
-      // olur, SONRA write IO hatası verir. Beklenti: write-fail cleanup (uninitialized
-      // + dispose) kazanır; _commitInFlight=true olduğu için onAppBackgrounded
-      // cancelSetup ÇAĞIRMAZ (commit'in finalize etmesini bekler) — yani temizlik
-      // tamamen write catch yoluyla yapılır, çift değil.
-      final gate = Completer<void>();
-      final km = FakeKeyManager();
-      final cubit = _build(km, store);
-      await cubit.beginSetup('parola123');
+    test(
+      'commitSetup write askıdayken BACKGROUND, sonra write FAIL → kesişim: '
+      'key dispose, pending temizlenir, UNINITIALIZED, persist YOK (review P3 3.tur)',
+      () async {
+        // Önceki write-fail testi cleanup'ı doğruluyordu ama background çağrısı YOKTU;
+        // background testi ise write BİTTİKTEN sonra _migrate'te bekletiyordu. Bu test
+        // tam kesişimi kapatır: write _attrsStore.write()'ta ASILIYKEN app background
+        // olur, SONRA write IO hatası verir. Beklenti: write-fail cleanup (uninitialized
+        // + dispose) kazanır; _commitInFlight=true olduğu için onAppBackgrounded
+        // cancelSetup ÇAĞIRMAZ (commit'in finalize etmesini bekler) — yani temizlik
+        // tamamen write catch yoluyla yapılır, çift değil.
+        final gate = Completer<void>();
+        final km = FakeKeyManager();
+        final cubit = _build(km, store);
+        await cubit.beginSetup('parola123');
 
-      storage.writeGate = gate.future; // write burada asılı kalacak
-      storage.failWrites = true; // gate çözülünce throw edecek
+        storage.writeGate = gate.future; // write burada asılı kalacak
+        storage.failWrites = true; // gate çözülünce throw edecek
 
-      final commit = cubit.commitSetup(); // write'ta (askıda) bekliyor
-      await Future<void>.delayed(Duration.zero);
-      cubit.onAppBackgrounded(paused: true); // commit in-flight + setupPending iken background
-      gate.complete(); // write throw eder
-      await expectLater(commit, throwsA(isA<Exception>()));
+        final commit = cubit.commitSetup(); // write'ta (askıda) bekliyor
+        await Future<void>.delayed(Duration.zero);
+        cubit.onAppBackgrounded(
+          paused: true,
+        ); // commit in-flight + setupPending iken background
+        gate.complete(); // write throw eder
+        await expectLater(commit, throwsA(isA<Exception>()));
 
-      // write fail = diske yazılmadı → vault kurulmadı → uninitialized.
-      expect(storage.data.containsKey(KeyAttributesStore.storageKey), isFalse);
-      expect(cubit.state.status, VaultLockStatus.uninitialized); // locked DEĞİL
-      expect(km.issued.single.disposed, isTrue); // masterKey arka planda sızmaz
-      expect(() => cubit.masterKey, throwsStateError);
-    });
+        // write fail = diske yazılmadı → vault kurulmadı → uninitialized.
+        expect(
+          storage.data.containsKey(KeyAttributesStore.storageKey),
+          isFalse,
+        );
+        expect(
+          cubit.state.status,
+          VaultLockStatus.uninitialized,
+        ); // locked DEĞİL
+        expect(
+          km.issued.single.disposed,
+          isTrue,
+        ); // masterKey arka planda sızmaz
+        expect(() => cubit.masterKey, throwsStateError);
+      },
+    );
   });
 
   group('unlock', () {
@@ -546,7 +612,9 @@ void main() {
       final cubit = _build(FakeKeyManager(), store, migrated: migrated);
       await cubit.bootstrap();
       await cubit.recoverWithNewPassword(
-          List.generate(24, (i) => 'word$i'), 'yeniParola1');
+        List.generate(24, (i) => 'word$i'),
+        'yeniParola1',
+      );
       expect(cubit.state.status, VaultLockStatus.unlocked);
       expect(migrated, ['migrated']);
     });
@@ -563,21 +631,26 @@ void main() {
       expect(km.issued, isEmpty);
     });
 
-    test('migration fail → ara key dispose, unlocked DEĞİL (review P1)', () async {
-      await store.write(_fakeAttrs());
-      final km = FakeKeyManager();
-      final cubit = _build(km, store, migrationFails: true);
-      await cubit.bootstrap();
-      await expectLater(
-        cubit.recoverWithNewPassword(
-            List.generate(24, (i) => 'word$i'), 'yeniParola1'),
-        throwsStateError,
-      );
-      expect(cubit.state.status, isNot(VaultLockStatus.unlocked));
-      // recoverUnlock + changePassword key üretti; migration fail → dispose edilmeli.
-      expect(km.issued.every((k) => k.disposed), isTrue);
-      expect(() => cubit.masterKey, throwsStateError);
-    });
+    test(
+      'migration fail → ara key dispose, unlocked DEĞİL (review P1)',
+      () async {
+        await store.write(_fakeAttrs());
+        final km = FakeKeyManager();
+        final cubit = _build(km, store, migrationFails: true);
+        await cubit.bootstrap();
+        await expectLater(
+          cubit.recoverWithNewPassword(
+            List.generate(24, (i) => 'word$i'),
+            'yeniParola1',
+          ),
+          throwsStateError,
+        );
+        expect(cubit.state.status, isNot(VaultLockStatus.unlocked));
+        // recoverUnlock + changePassword key üretti; migration fail → dispose edilmeli.
+        expect(km.issued.every((k) => k.disposed), isTrue);
+        expect(() => cubit.masterKey, throwsStateError);
+      },
+    );
   });
 
   group('lifecycle lock (paused + inactive)', () {
@@ -621,7 +694,8 @@ void main() {
       await cubit.bootstrap();
       await cubit.unlock('parola123');
 
-      cubit.lock(); // locking; post-frame dispose KUYRUKTA ama frame pump ETMİYORUZ
+      cubit
+          .lock(); // locking; post-frame dispose KUYRUKTA ama frame pump ETMİYORUZ
       expect(cubit.state.status, VaultLockStatus.locking);
       expect(km.issued.single.disposed, isFalse);
 
@@ -635,16 +709,21 @@ void main() {
       expect(cubit.state.status, VaultLockStatus.locked);
     });
 
-    test('setupPending iken background → uninitialized, dispose, persist YOK',
-        () async {
-      final km = FakeKeyManager();
-      final cubit = _build(km, store);
-      await cubit.beginSetup('parola123');
-      cubit.onAppBackgrounded(paused: true);
-      expect(cubit.state.status, VaultLockStatus.uninitialized);
-      expect(km.issued.single.disposed, isTrue);
-      expect(storage.data.containsKey(KeyAttributesStore.storageKey), isFalse);
-    });
+    test(
+      'setupPending iken background → uninitialized, dispose, persist YOK',
+      () async {
+        final km = FakeKeyManager();
+        final cubit = _build(km, store);
+        await cubit.beginSetup('parola123');
+        cubit.onAppBackgrounded(paused: true);
+        expect(cubit.state.status, VaultLockStatus.uninitialized);
+        expect(km.issued.single.disposed, isTrue);
+        expect(
+          storage.data.containsKey(KeyAttributesStore.storageKey),
+          isFalse,
+        );
+      },
+    );
 
     test('unlock sürerken background → işlem bitince UNLOCKED EMİT ETMEZ, key '
         'dispose, locked kalır (review P1 complete-after-background)', () async {
@@ -657,7 +736,9 @@ void main() {
 
       final pending = cubit.unlock('parola123'); // _migrate'te asılı kalır
       await Future<void>.delayed(Duration.zero); // recoverUnlock/migrate'e gir
-      cubit.onAppBackgrounded(paused: true); // state locked iken async işlem devam ediyor
+      cubit.onAppBackgrounded(
+        paused: true,
+      ); // state locked iken async işlem devam ediyor
       gate.complete(); // migration tamamlanır
       await pending;
 
@@ -666,25 +747,30 @@ void main() {
       expect(() => cubit.masterKey, throwsStateError);
     });
 
-    test('recoverWithNewPassword sürerken background → unlocked EMİT ETMEZ, key '
-        'dispose (review P1)', () async {
-      await store.write(_fakeAttrs());
-      final km = FakeKeyManager();
-      final gate = Completer<void>();
-      final cubit = _build(km, store, migrateGate: gate.future);
-      await cubit.bootstrap();
+    test(
+      'recoverWithNewPassword sürerken background → unlocked EMİT ETMEZ, key '
+      'dispose (review P1)',
+      () async {
+        await store.write(_fakeAttrs());
+        final km = FakeKeyManager();
+        final gate = Completer<void>();
+        final cubit = _build(km, store, migrateGate: gate.future);
+        await cubit.bootstrap();
 
-      final pending = cubit.recoverWithNewPassword(
-          List.generate(24, (i) => 'word$i'), 'yeniParola1');
-      await Future<void>.delayed(Duration.zero);
-      cubit.onAppBackgrounded(paused: true);
-      gate.complete();
-      await pending;
+        final pending = cubit.recoverWithNewPassword(
+          List.generate(24, (i) => 'word$i'),
+          'yeniParola1',
+        );
+        await Future<void>.delayed(Duration.zero);
+        cubit.onAppBackgrounded(paused: true);
+        gate.complete();
+        await pending;
 
-      expect(cubit.state.status, VaultLockStatus.locked);
-      expect(km.issued.every((k) => k.disposed), isTrue);
-      expect(() => cubit.masterKey, throwsStateError);
-    });
+        expect(cubit.state.status, VaultLockStatus.locked);
+        expect(km.issued.every((k) => k.disposed), isTrue);
+        expect(() => cubit.masterKey, throwsStateError);
+      },
+    );
 
     test('commitSetup sürerken background → unlocked EMİT ETMEZ; attrs yazıldı '
         'için LOCKED (uninitialized değil), key dispose (review P1)', () async {
@@ -716,8 +802,12 @@ void main() {
       }
       final deleted = <String>[];
       final bio = FakeBiometricService();
-      final cubit =
-          _build(FakeKeyManager(), store, deletedSink: deleted, biometric: bio);
+      final cubit = _build(
+        FakeKeyManager(),
+        store,
+        deletedSink: deleted,
+        biometric: bio,
+      );
       await cubit.resetVault();
       expect(cubit.state.status, VaultLockStatus.uninitialized);
       expect(deleted.toSet(), VaultStorageKeys.all.toSet());
@@ -729,81 +819,103 @@ void main() {
 
     test('signed-in reset tombstones the server token rows', () async {
       final tokenRepo = FakeRemoteTokenRepository();
-      final cubit = _build(FakeKeyManager(), store,
-          remoteRepo: FakeKeyAttributesRepository(),
-          remoteTokenRepo: tokenRepo,
-          uid: 'u1');
+      final cubit = _build(
+        FakeKeyManager(),
+        store,
+        remoteRepo: FakeKeyAttributesRepository(),
+        remoteTokenRepo: tokenRepo,
+        uid: 'u1',
+      );
       await cubit.resetVault();
       expect(cubit.state.status, VaultLockStatus.uninitialized);
       expect(tokenRepo.tombstoneCount, 1);
     });
 
-    test('offline tombstone → local reset completes + retry marker SET',
-        () async {
-      for (final k in VaultStorageKeys.all) {
-        storage.data[k] = 'x';
-      }
-      final deleted = <String>[];
-      final tokenRepo = FakeRemoteTokenRepository()
-        ..tombstoneError = const SyncNetworkError();
-      final resetStore = ResetPendingStore(storage: storage);
-      final cubit = _build(FakeKeyManager(), store,
+    test(
+      'offline tombstone → local reset completes + retry marker SET',
+      () async {
+        for (final k in VaultStorageKeys.all) {
+          storage.data[k] = 'x';
+        }
+        final deleted = <String>[];
+        final tokenRepo = FakeRemoteTokenRepository()
+          ..tombstoneError = const SyncNetworkError();
+        final resetStore = ResetPendingStore(storage: storage);
+        final cubit = _build(
+          FakeKeyManager(),
+          store,
           deletedSink: deleted,
           remoteTokenRepo: tokenRepo,
           resetPendingStore: resetStore,
-          uid: 'u1');
-      await cubit.resetVault();
-      // Local reset is guaranteed even when the server can't be reached...
-      expect(cubit.state.status, VaultLockStatus.uninitialized);
-      expect(deleted.toSet(), VaultStorageKeys.all.toSet());
-      // ...and a retry is owed (marker holds the reset instant).
-      expect(await resetStore.pendingSince(), isNotNull);
-    });
+          uid: 'u1',
+        );
+        await cubit.resetVault();
+        // Local reset is guaranteed even when the server can't be reached...
+        expect(cubit.state.status, VaultLockStatus.uninitialized);
+        expect(deleted.toSet(), VaultStorageKeys.all.toSet());
+        // ...and a retry is owed (marker holds the reset instant).
+        expect(await resetStore.pendingSince(), isNotNull);
+      },
+    );
 
     test('successful tombstone clears any prior retry marker', () async {
       final resetStore = ResetPendingStore(storage: storage);
       await resetStore.setPending('2026-01-01T00:00:00.000Z');
-      final cubit = _build(FakeKeyManager(), store,
-          remoteTokenRepo: FakeRemoteTokenRepository(),
-          resetPendingStore: resetStore,
-          uid: 'u1');
+      final cubit = _build(
+        FakeKeyManager(),
+        store,
+        remoteTokenRepo: FakeRemoteTokenRepository(),
+        resetPendingStore: resetStore,
+        uid: 'u1',
+      );
       await cubit.resetVault();
       expect(await resetStore.pendingSince(), isNull);
     });
 
     test('legacy (uid == null) reset does not touch remote', () async {
       final tokenRepo = FakeRemoteTokenRepository();
-      final cubit = _build(FakeKeyManager(), store,
-          remoteTokenRepo: tokenRepo); // uid null
+      final cubit = _build(
+        FakeKeyManager(),
+        store,
+        remoteTokenRepo: tokenRepo,
+      ); // uid null
       await cubit.resetVault();
       expect(tokenRepo.tombstoneCount, 0);
     });
 
-    test('pending reset retried on next unlock — tombstones only pre-reset rows',
-        () async {
-      await store.write(_fakeAttrs());
-      final resetStore = ResetPendingStore(storage: storage);
-      await resetStore.setPending('2026-06-18T12:00:00.000Z');
-      final tokenRepo = FakeRemoteTokenRepository();
-      final cubit = _build(FakeKeyManager(), store,
+    test(
+      'pending reset retried on next unlock — tombstones only pre-reset rows',
+      () async {
+        await store.write(_fakeAttrs());
+        final resetStore = ResetPendingStore(storage: storage);
+        await resetStore.setPending('2026-06-18T12:00:00.000Z');
+        final tokenRepo = FakeRemoteTokenRepository();
+        final cubit = _build(
+          FakeKeyManager(),
+          store,
           remoteTokenRepo: tokenRepo,
           resetPendingStore: resetStore,
-          uid: 'u1');
-      await cubit.bootstrap();
-      await cubit.unlock('parola123');
-      await Future<void>.delayed(Duration.zero); // unawaited replay
-      expect(tokenRepo.tombstoneBeforeCount, 1);
-      expect(tokenRepo.lastTombstoneBefore, '2026-06-18T12:00:00.000Z');
-      expect(await resetStore.pendingSince(), isNull); // cleared on success
-    });
+          uid: 'u1',
+        );
+        await cubit.bootstrap();
+        await cubit.unlock('parola123');
+        await Future<void>.delayed(Duration.zero); // unawaited replay
+        expect(tokenRepo.tombstoneBeforeCount, 1);
+        expect(tokenRepo.lastTombstoneBefore, '2026-06-18T12:00:00.000Z');
+        expect(await resetStore.pendingSince(), isNull); // cleared on success
+      },
+    );
 
     test('no pending marker → unlock does not call remote tombstone', () async {
       await store.write(_fakeAttrs());
       final tokenRepo = FakeRemoteTokenRepository();
-      final cubit = _build(FakeKeyManager(), store,
-          remoteTokenRepo: tokenRepo,
-          resetPendingStore: ResetPendingStore(storage: storage),
-          uid: 'u1');
+      final cubit = _build(
+        FakeKeyManager(),
+        store,
+        remoteTokenRepo: tokenRepo,
+        resetPendingStore: ResetPendingStore(storage: storage),
+        uid: 'u1',
+      );
       await cubit.bootstrap();
       await cubit.unlock('parola123');
       await Future<void>.delayed(Duration.zero);
@@ -824,58 +936,95 @@ void main() {
   // --- Biyometri (Patch 5) ---
 
   group('biyometri bootstrap state', () {
-    test('bmk yok + cihaz available → enrolled false, deviceAvailable true',
-        () async {
-      await store.write(_fakeAttrs()); // bmk yok
-      final cubit = _build(FakeKeyManager(), store,
-          biometric: FakeBiometricService(available: true));
-      await cubit.bootstrap();
-      expect(cubit.state.biometricEnrolled, isFalse);
-      expect(cubit.state.deviceBiometricAvailable, isTrue);
-      expect(cubit.state.biometricUnlockAvailable, isFalse);
-    });
+    test(
+      'bmk yok + cihaz available → enrolled false, deviceAvailable true',
+      () async {
+        await store.write(_fakeAttrs()); // bmk yok
+        final cubit = _build(
+          FakeKeyManager(),
+          store,
+          biometric: FakeBiometricService(available: true),
+        );
+        await cubit.bootstrap();
+        expect(cubit.state.biometricEnrolled, isFalse);
+        expect(cubit.state.deviceBiometricAvailable, isTrue);
+        expect(cubit.state.biometricUnlockAvailable, isFalse);
+      },
+    );
 
-    test('bmk var + cihaz available → enrolled true, unlockAvailable true',
-        () async {
-      final bmk = EncryptedBlob(nonce: Uint8List(24), ciphertext: Uint8List(16));
-      await store.write(_fakeAttrs().copyWith(biometricEncryptedMasterKey: bmk));
-      final cubit = _build(FakeKeyManager(), store,
-          biometric: FakeBiometricService(available: true));
-      await cubit.bootstrap();
-      expect(cubit.state.biometricEnrolled, isTrue);
-      expect(cubit.state.deviceBiometricAvailable, isTrue);
-      expect(cubit.state.biometricUnlockAvailable, isTrue);
-    });
+    test(
+      'bmk var + cihaz available → enrolled true, unlockAvailable true',
+      () async {
+        final bmk = EncryptedBlob(
+          nonce: Uint8List(24),
+          ciphertext: Uint8List(16),
+        );
+        await store.write(
+          _fakeAttrs().copyWith(biometricEncryptedMasterKey: bmk),
+        );
+        final cubit = _build(
+          FakeKeyManager(),
+          store,
+          biometric: FakeBiometricService(available: true),
+        );
+        await cubit.bootstrap();
+        expect(cubit.state.biometricEnrolled, isTrue);
+        expect(cubit.state.deviceBiometricAvailable, isTrue);
+        expect(cubit.state.biometricUnlockAvailable, isTrue);
+      },
+    );
 
-    test('bmk var + cihaz unavailable → enrolled true ama unlockAvailable false',
-        () async {
-      final bmk = EncryptedBlob(nonce: Uint8List(24), ciphertext: Uint8List(16));
-      await store.write(_fakeAttrs().copyWith(biometricEncryptedMasterKey: bmk));
-      final cubit = _build(FakeKeyManager(), store,
-          biometric: FakeBiometricService(available: false));
-      await cubit.bootstrap();
-      expect(cubit.state.biometricEnrolled, isTrue);
-      expect(cubit.state.deviceBiometricAvailable, isFalse);
-      expect(cubit.state.biometricUnlockAvailable, isFalse);
-    });
+    test(
+      'bmk var + cihaz unavailable → enrolled true ama unlockAvailable false',
+      () async {
+        final bmk = EncryptedBlob(
+          nonce: Uint8List(24),
+          ciphertext: Uint8List(16),
+        );
+        await store.write(
+          _fakeAttrs().copyWith(biometricEncryptedMasterKey: bmk),
+        );
+        final cubit = _build(
+          FakeKeyManager(),
+          store,
+          biometric: FakeBiometricService(available: false),
+        );
+        await cubit.bootstrap();
+        expect(cubit.state.biometricEnrolled, isTrue);
+        expect(cubit.state.deviceBiometricAvailable, isFalse);
+        expect(cubit.state.biometricUnlockAvailable, isFalse);
+      },
+    );
   });
 
   group('unlock sonrası biyometri state korunur (reviewer 4.tur P1)', () {
-    test('parola unlock → unlocked state deviceBiometricAvailable taşır', () async {
-      await store.write(_fakeAttrs());
-      final cubit = _build(FakeKeyManager(), store,
-          biometric: FakeBiometricService(available: true));
-      await cubit.bootstrap();
-      await cubit.unlock('parola123');
-      expect(cubit.state.status, VaultLockStatus.unlocked);
-      expect(cubit.state.deviceBiometricAvailable, isTrue,
-          reason: 'Settings switch enable edilebilmeli');
-      expect(cubit.state.biometricEnrolled, isFalse);
-    });
+    test(
+      'parola unlock → unlocked state deviceBiometricAvailable taşır',
+      () async {
+        await store.write(_fakeAttrs());
+        final cubit = _build(
+          FakeKeyManager(),
+          store,
+          biometric: FakeBiometricService(available: true),
+        );
+        await cubit.bootstrap();
+        await cubit.unlock('parola123');
+        expect(cubit.state.status, VaultLockStatus.unlocked);
+        expect(
+          cubit.state.deviceBiometricAvailable,
+          isTrue,
+          reason: 'Settings switch enable edilebilmeli',
+        );
+        expect(cubit.state.biometricEnrolled, isFalse);
+      },
+    );
 
     test('commitSetup → unlocked deviceBiometricAvailable taşır', () async {
-      final cubit = _build(FakeKeyManager(), store,
-          biometric: FakeBiometricService(available: true));
+      final cubit = _build(
+        FakeKeyManager(),
+        store,
+        biometric: FakeBiometricService(available: true),
+      );
       await cubit.beginSetup('parola123');
       await cubit.commitSetup();
       expect(cubit.state.status, VaultLockStatus.unlocked);
@@ -885,8 +1034,10 @@ void main() {
   });
 
   group('enableBiometric / disableBiometric', () {
-    Future<VaultLockCubit> unlocked(FakeBiometricService bio,
-        {FakeKeyManager? km}) async {
+    Future<VaultLockCubit> unlocked(
+      FakeBiometricService bio, {
+      FakeKeyManager? km,
+    }) async {
       await store.write(_fakeAttrs());
       final cubit = _build(km ?? FakeKeyManager(), store, biometric: bio);
       await cubit.bootstrap();
@@ -921,7 +1072,9 @@ void main() {
       final bio = FakeBiometricService(available: false);
       final cubit = await unlocked(bio);
       await expectLater(
-          cubit.enableBiometric(), throwsA(isA<BiometricUnavailable>()));
+        cubit.enableBiometric(),
+        throwsA(isA<BiometricUnavailable>()),
+      );
       expect(bio.enrollCount, 0);
     });
 
@@ -938,10 +1091,17 @@ void main() {
   });
 
   group('biometricUnlock', () {
-    Future<VaultLockCubit> lockedEnrolled(FakeBiometricService bio,
-        {FakeKeyManager? km}) async {
-      final bmk = EncryptedBlob(nonce: Uint8List(24), ciphertext: Uint8List(16));
-      await store.write(_fakeAttrs().copyWith(biometricEncryptedMasterKey: bmk));
+    Future<VaultLockCubit> lockedEnrolled(
+      FakeBiometricService bio, {
+      FakeKeyManager? km,
+    }) async {
+      final bmk = EncryptedBlob(
+        nonce: Uint8List(24),
+        ciphertext: Uint8List(16),
+      );
+      await store.write(
+        _fakeAttrs().copyWith(biometricEncryptedMasterKey: bmk),
+      );
       final cubit = _build(km ?? FakeKeyManager(), store, biometric: bio);
       await cubit.bootstrap();
       return cubit;
@@ -958,8 +1118,9 @@ void main() {
     test('Canceled → sessiz locked, key owned değil', () async {
       final km = FakeKeyManager();
       final cubit = await lockedEnrolled(
-          FakeBiometricService(retrieveError: const BiometricCanceled()),
-          km: km);
+        FakeBiometricService(retrieveError: const BiometricCanceled()),
+        km: km,
+      );
       await cubit.biometricUnlock();
       expect(cubit.state.status, VaultLockStatus.locked);
       expect(cubit.state.error, isNull);
@@ -968,27 +1129,36 @@ void main() {
 
     test('Lockout → locked + biometricLockout', () async {
       final cubit = await lockedEnrolled(
-          FakeBiometricService(retrieveError: const BiometricLockout()));
+        FakeBiometricService(retrieveError: const BiometricLockout()),
+      );
       await cubit.biometricUnlock();
       expect(cubit.state.status, VaultLockStatus.locked);
       expect(cubit.state.error, VaultLockError.biometricLockout);
     });
 
-    test('KeyMissing → bmk PERSIST temizlenir + locked enrolled false', () async {
-      final cubit = await lockedEnrolled(
-          FakeBiometricService(retrieveError: const BiometricKeyMissing()));
-      await cubit.biometricUnlock();
-      expect(cubit.state.status, VaultLockStatus.locked);
-      expect(cubit.state.biometricEnrolled, isFalse);
-      final persisted = await store.read();
-      expect(persisted!.biometricEncryptedMasterKey, isNull,
-          reason: 'döngü önleme: bmk persist temizlendi');
-    });
+    test(
+      'KeyMissing → bmk PERSIST temizlenir + locked enrolled false',
+      () async {
+        final cubit = await lockedEnrolled(
+          FakeBiometricService(retrieveError: const BiometricKeyMissing()),
+        );
+        await cubit.biometricUnlock();
+        expect(cubit.state.status, VaultLockStatus.locked);
+        expect(cubit.state.biometricEnrolled, isFalse);
+        final persisted = await store.read();
+        expect(
+          persisted!.biometricEncryptedMasterKey,
+          isNull,
+          reason: 'döngü önleme: bmk persist temizlendi',
+        );
+      },
+    );
 
     test('KeyMissing + attrs.write FAIL → locked deviceAvail false + '
         'biometricFailed (döngü yok)', () async {
       final cubit = await lockedEnrolled(
-          FakeBiometricService(retrieveError: const BiometricKeyMissing()));
+        FakeBiometricService(retrieveError: const BiometricKeyMissing()),
+      );
       storage.failWrites = true; // clearBiometric write patlasın
       await cubit.biometricUnlock();
       expect(cubit.state.status, VaultLockStatus.locked);
@@ -998,7 +1168,8 @@ void main() {
 
     test('Unavailable → locked deviceBiometricAvailable false', () async {
       final cubit = await lockedEnrolled(
-          FakeBiometricService(retrieveError: const BiometricUnavailable()));
+        FakeBiometricService(retrieveError: const BiometricUnavailable()),
+      );
       await cubit.biometricUnlock();
       expect(cubit.state.status, VaultLockStatus.locked);
       expect(cubit.state.deviceBiometricAvailable, isFalse);
@@ -1006,7 +1177,8 @@ void main() {
 
     test('StorageError → locked + biometricFailed', () async {
       final cubit = await lockedEnrolled(
-          FakeBiometricService(retrieveError: const BiometricStorageError()));
+        FakeBiometricService(retrieveError: const BiometricStorageError()),
+      );
       await cubit.biometricUnlock();
       expect(cubit.state.status, VaultLockStatus.locked);
       expect(cubit.state.error, VaultLockError.biometricFailed);
@@ -1020,40 +1192,51 @@ void main() {
       expect(cubit.state.error, VaultLockError.biometricFailed);
     });
 
-    test('retrieve askıdayken PAUSED → kesin abort: locked, key dispose', () async {
-      final km = FakeKeyManager();
-      final gate = Completer<void>();
-      final cubit = await lockedEnrolled(
+    test(
+      'retrieve askıdayken PAUSED → kesin abort: locked, key dispose',
+      () async {
+        final km = FakeKeyManager();
+        final gate = Completer<void>();
+        final cubit = await lockedEnrolled(
           FakeBiometricService(retrieveGate: gate.future),
-          km: km);
-      final fut = cubit.biometricUnlock();
-      await Future<void>.delayed(Duration.zero);
-      cubit.onAppBackgrounded(paused: true); // gerçek arka plan
-      gate.complete();
-      await fut;
-      expect(cubit.state.status, VaultLockStatus.locked);
-      // key biometricUnlock'tan dönmüş olsa bile owned değil → dispose.
-      for (final k in km.issued) {
-        expect(k.disposed, isTrue);
-      }
-    });
+          km: km,
+        );
+        final fut = cubit.biometricUnlock();
+        await Future<void>.delayed(Duration.zero);
+        cubit.onAppBackgrounded(paused: true); // gerçek arka plan
+        gate.complete();
+        await fut;
+        expect(cubit.state.status, VaultLockStatus.locked);
+        // key biometricUnlock'tan dönmüş olsa bile owned değil → dispose.
+        for (final k in km.issued) {
+          expect(k.disposed, isTrue);
+        }
+      },
+    );
 
-    test('retrieve askıdayken INACTIVE (prompt-in-flight) → abort ETMEZ, unlocked '
-        '(reviewer 2.tur P1)', () async {
-      final km = FakeKeyManager();
-      final gate = Completer<void>();
-      final cubit = await lockedEnrolled(
+    test(
+      'retrieve askıdayken INACTIVE (prompt-in-flight) → abort ETMEZ, unlocked '
+      '(reviewer 2.tur P1)',
+      () async {
+        final km = FakeKeyManager();
+        final gate = Completer<void>();
+        final cubit = await lockedEnrolled(
           FakeBiometricService(retrieveGate: gate.future),
-          km: km);
-      final fut = cubit.biometricUnlock();
-      await Future<void>.delayed(Duration.zero);
-      cubit.onAppBackgrounded(paused: false); // sistem prompt'unun inactive'i
-      gate.complete();
-      await fut;
-      expect(cubit.state.status, VaultLockStatus.unlocked,
-          reason: 'prompt-in-flight inactive abort etmemeli');
-      expect(km.issued.single.disposed, isFalse);
-    });
+          km: km,
+        );
+        final fut = cubit.biometricUnlock();
+        await Future<void>.delayed(Duration.zero);
+        cubit.onAppBackgrounded(paused: false); // sistem prompt'unun inactive'i
+        gate.complete();
+        await fut;
+        expect(
+          cubit.state.status,
+          VaultLockStatus.unlocked,
+          reason: 'prompt-in-flight inactive abort etmemeli',
+        );
+        expect(km.issued.single.disposed, isFalse);
+      },
+    );
   });
 
   // --- Faz 5 Patch 1: sistem dosya seçici akışı kilit muafiyeti (plan §3.2) ---
@@ -1073,18 +1256,20 @@ void main() {
       return cubit;
     }
 
-    test('beginSystemFileFlow sonrası PAUSED kilitlemez (picker arka plan üretir)',
-        () async {
-      final km = FakeKeyManager();
-      final cubit = await unlockedCubit(km);
+    test(
+      'beginSystemFileFlow sonrası PAUSED kilitlemez (picker arka plan üretir)',
+      () async {
+        final km = FakeKeyManager();
+        final cubit = await unlockedCubit(km);
 
-      cubit.beginSystemFileFlow();
-      cubit.onAppBackgrounded(paused: true); // Android SAF picker'ın paused'ı
+        cubit.beginSystemFileFlow();
+        cubit.onAppBackgrounded(paused: true); // Android SAF picker'ın paused'ı
 
-      expect(cubit.state.status, VaultLockStatus.unlocked);
-      expect(km.issued.single.disposed, isFalse);
-      expect(cubit.systemFileFlowActive, isTrue);
-    });
+        expect(cubit.state.status, VaultLockStatus.unlocked);
+        expect(km.issued.single.disposed, isFalse);
+        expect(cubit.systemFileFlowActive, isTrue);
+      },
+    );
 
     test('endSystemFileFlow sonrası PAUSED yeniden kilitler', () async {
       final km = FakeKeyManager();
@@ -1107,8 +1292,11 @@ void main() {
       clock = clock.add(const Duration(minutes: 3)); // bütçe doldu
 
       expect(cubit.systemFileFlowActive, isFalse);
-      expect(cubit.systemFileFlowExpired, isTrue,
-          reason: 'resume\'da main.dart bunu görüp hemen kilitler');
+      expect(
+        cubit.systemFileFlowExpired,
+        isTrue,
+        reason: 'resume\'da main.dart bunu görüp hemen kilitler',
+      );
 
       cubit.onAppBackgrounded(paused: true);
       expect(cubit.state.status, VaultLockStatus.locked);
@@ -1123,26 +1311,33 @@ void main() {
       clock = clock.add(const Duration(minutes: 3)); // picker 3 dk açık kaldı
       cubit.endSystemFileFlow(); // picker sonucu `resumed`'dan ÖNCE gelebilir
 
-      expect(cubit.state.status, VaultLockStatus.locked,
-          reason: 'bütçe aşımı end anında uygulanır — main.dart resume kontrolü '
-              'yarışı kaybedebilir');
+      expect(
+        cubit.state.status,
+        VaultLockStatus.locked,
+        reason:
+            'bütçe aşımı end anında uygulanır — main.dart resume kontrolü '
+            'yarışı kaybedebilir',
+      );
       expect(km.issued.single.disposed, isTrue);
       expect(cubit.systemFileFlowActive, isFalse);
       expect(cubit.systemFileFlowExpired, isFalse, reason: 'bayrak temizlendi');
     });
 
-    test('begin → bütçe İÇİNDE end kilitlemez (normal import/export)', () async {
-      final km = FakeKeyManager();
-      final cubit = await unlockedCubit(km);
+    test(
+      'begin → bütçe İÇİNDE end kilitlemez (normal import/export)',
+      () async {
+        final km = FakeKeyManager();
+        final cubit = await unlockedCubit(km);
 
-      cubit.beginSystemFileFlow(budget: const Duration(minutes: 2));
-      clock = clock.add(const Duration(minutes: 1)); // bütçe içinde
-      cubit.endSystemFileFlow();
+        cubit.beginSystemFileFlow(budget: const Duration(minutes: 2));
+        clock = clock.add(const Duration(minutes: 1)); // bütçe içinde
+        cubit.endSystemFileFlow();
 
-      expect(cubit.state.status, VaultLockStatus.unlocked);
-      expect(km.issued.single.disposed, isFalse);
-      expect(cubit.systemFileFlowActive, isFalse);
-    });
+        expect(cubit.state.status, VaultLockStatus.unlocked);
+        expect(km.issued.single.disposed, isFalse);
+        expect(cubit.systemFileFlowActive, isFalse);
+      },
+    );
 
     test('akış YOKKEN systemFileFlowExpired false (resume no-op)', () async {
       final km = FakeKeyManager();
@@ -1151,35 +1346,42 @@ void main() {
       expect(cubit.systemFileFlowActive, isFalse);
     });
 
-    test('muafiyet onAuthSignedOut\'u ETKİLEMEZ (kimlik kapısı kapandıysa kilit)',
-        () async {
-      final km = FakeKeyManager();
-      final cubit = await unlockedCubit(km);
+    test(
+      'muafiyet onAuthSignedOut\'u ETKİLEMEZ (kimlik kapısı kapandıysa kilit)',
+      () async {
+        final km = FakeKeyManager();
+        final cubit = await unlockedCubit(km);
 
-      cubit.beginSystemFileFlow();
-      cubit.onAuthSignedOut();
+        cubit.beginSystemFileFlow();
+        cubit.onAuthSignedOut();
 
-      expect(cubit.state.status, VaultLockStatus.locked);
-      expect(km.issued.single.disposed, isTrue);
-    });
+        expect(cubit.state.status, VaultLockStatus.locked);
+        expect(km.issued.single.disposed, isTrue);
+      },
+    );
 
     // --- Denetim C10: yenileme serbest, ama MUTLAK tavan var ---
 
-    test('yenileme bütçeyi uzatır (bulut klasörlerinde gezinen kullanıcı)',
-        () async {
-      final km = FakeKeyManager();
-      final cubit = await unlockedCubit(km);
+    test(
+      'yenileme bütçeyi uzatır (bulut klasörlerinde gezinen kullanıcı)',
+      () async {
+        final km = FakeKeyManager();
+        final cubit = await unlockedCubit(km);
 
-      cubit.beginSystemFileFlow(); // 2 dk
-      clock = clock.add(const Duration(minutes: 1, seconds: 50));
-      expect(cubit.systemFileFlowActive, isTrue);
+        cubit.beginSystemFileFlow(); // 2 dk
+        clock = clock.add(const Duration(minutes: 1, seconds: 50));
+        expect(cubit.systemFileFlowActive, isTrue);
 
-      cubit.beginSystemFileFlow(); // yenile → +2 dk
-      clock = clock.add(const Duration(minutes: 1));
+        cubit.beginSystemFileFlow(); // yenile → +2 dk
+        clock = clock.add(const Duration(minutes: 1));
 
-      expect(cubit.systemFileFlowActive, isTrue,
-          reason: 'yenileme olmasaydı bütçe dolmuştu');
-    });
+        expect(
+          cubit.systemFileFlowActive,
+          isTrue,
+          reason: 'yenileme olmasaydı bütçe dolmuştu',
+        );
+      },
+    );
 
     test('10 dakikalık MUTLAK tavan aşılınca yenileme REDDEDİLİR', () async {
       final km = FakeKeyManager();
@@ -1190,16 +1392,22 @@ void main() {
       for (var i = 0; i < 4; i++) {
         clock = clock.add(const Duration(minutes: 2));
         cubit.beginSystemFileFlow();
-        expect(cubit.systemFileFlowActive, isTrue,
-            reason: 'tavana kadar (t=${(i + 1) * 2}dk) yenileme geçerli');
+        expect(
+          cubit.systemFileFlowActive,
+          isTrue,
+          reason: 'tavana kadar (t=${(i + 1) * 2}dk) yenileme geçerli',
+        );
       }
       // t = 8 dk, son yenileme t=10 dk'ya kadar geçerli.
       clock = clock.add(const Duration(minutes: 2)); // t = 10 dk → tavan
       cubit.beginSystemFileFlow(); // REDDEDİLİR (deadline uzatılmaz)
 
       expect(cubit.systemFileFlowActive, isFalse);
-      expect(cubit.systemFileFlowExpired, isTrue,
-          reason: 'main.dart resume kontrolü kilitleyebilsin');
+      expect(
+        cubit.systemFileFlowExpired,
+        isTrue,
+        reason: 'main.dart resume kontrolü kilitleyebilsin',
+      );
 
       // Ve arka plana düşen uygulama artık KİLİTLENİR.
       cubit.onAppBackgrounded(paused: true);
@@ -1207,21 +1415,23 @@ void main() {
       expect(km.issued.single.disposed, isTrue);
     });
 
-    test('tavan endSystemFileFlow ile SIFIRLANIR (sonraki akış tam bütçeli)',
-        () async {
-      final km = FakeKeyManager();
-      final cubit = await unlockedCubit(km);
+    test(
+      'tavan endSystemFileFlow ile SIFIRLANIR (sonraki akış tam bütçeli)',
+      () async {
+        final km = FakeKeyManager();
+        final cubit = await unlockedCubit(km);
 
-      cubit.beginSystemFileFlow();
-      clock = clock.add(VaultLockCubit.systemFileFlowMaxTotal);
-      cubit.endSystemFileFlow(); // bütçe dolmuştu → kilit uygulanır
-      expect(cubit.state.status, VaultLockStatus.locked);
+        cubit.beginSystemFileFlow();
+        clock = clock.add(VaultLockCubit.systemFileFlowMaxTotal);
+        cubit.endSystemFileFlow(); // bütçe dolmuştu → kilit uygulanır
+        expect(cubit.state.status, VaultLockStatus.locked);
 
-      await cubit.unlock('parola123');
-      cubit.beginSystemFileFlow(); // yeni akış → yeni mutlak saat
+        await cubit.unlock('parola123');
+        cubit.beginSystemFileFlow(); // yeni akış → yeni mutlak saat
 
-      expect(cubit.systemFileFlowActive, isTrue);
-    });
+        expect(cubit.systemFileFlowActive, isTrue);
+      },
+    );
   });
 
   // --- Faz 3 Patch 1: onAuthSignedOut (kimlik kapısı kapanınca volatile temizlik) ---
@@ -1239,40 +1449,50 @@ void main() {
       expect(km.issued.single.disposed, isTrue);
     });
 
-    test('setupPending (commit YOK) → cancelSetup → uninitialized (key+mnemonic temiz)',
-        () async {
-      final km = FakeKeyManager();
-      final cubit = _build(km, store);
-      await cubit.bootstrap();
-      await cubit.beginSetup('parola123');
-      expect(cubit.state.status, VaultLockStatus.setupPending);
+    test(
+      'setupPending (commit YOK) → cancelSetup → uninitialized (key+mnemonic temiz)',
+      () async {
+        final km = FakeKeyManager();
+        final cubit = _build(km, store);
+        await cubit.bootstrap();
+        await cubit.beginSetup('parola123');
+        expect(cubit.state.status, VaultLockStatus.setupPending);
 
-      cubit.onAuthSignedOut();
-      expect(cubit.state.status, VaultLockStatus.uninitialized);
-      expect(km.issued.single.disposed, isTrue); // mnemonic+key temizlendi
-    });
+        cubit.onAuthSignedOut();
+        expect(cubit.state.status, VaultLockStatus.uninitialized);
+        expect(km.issued.single.disposed, isTrue); // mnemonic+key temizlendi
+      },
+    );
 
-    test('setupPending + commit-in-flight → cancelSetup ÇAĞRILMAZ + abort; commit '
-        'bitince unlocked EMİT EDİLMEZ (reviewer [P3] :400 kuralı)', () async {
-      final km = FakeKeyManager();
-      final gate = Completer<void>();
-      storage.writeGate = gate.future; // commitSetup attrs.write'da asılı kalır
-      final cubit = _build(km, store);
-      await cubit.bootstrap();
-      await cubit.beginSetup('parola123');
+    test(
+      'setupPending + commit-in-flight → cancelSetup ÇAĞRILMAZ + abort; commit '
+      'bitince unlocked EMİT EDİLMEZ (reviewer [P3] :400 kuralı)',
+      () async {
+        final km = FakeKeyManager();
+        final gate = Completer<void>();
+        storage.writeGate =
+            gate.future; // commitSetup attrs.write'da asılı kalır
+        final cubit = _build(km, store);
+        await cubit.bootstrap();
+        await cubit.beginSetup('parola123');
 
-      final commit = cubit.commitSetup(); // _commitInFlight = true, write askıda
-      // signOut commit sürerken: cancelSetup ÇAĞRILMAMALI (no-op gibi), abort set.
-      cubit.onAuthSignedOut();
-      expect(cubit.state.status, VaultLockStatus.setupPending,
-          reason: 'commit sürerken cancelSetup çağrılmaz');
+        final commit = cubit
+            .commitSetup(); // _commitInFlight = true, write askıda
+        // signOut commit sürerken: cancelSetup ÇAĞRILMAMALI (no-op gibi), abort set.
+        cubit.onAuthSignedOut();
+        expect(
+          cubit.state.status,
+          VaultLockStatus.setupPending,
+          reason: 'commit sürerken cancelSetup çağrılmaz',
+        );
 
-      gate.complete(); // write tamamlanır → commit devam eder
-      await commit;
-      // abort nedeniyle unlocked EMİT EDİLMEZ; attrs yazıldıysa locked.
-      expect(cubit.state.status, isNot(VaultLockStatus.unlocked));
-      expect(cubit.state.status, VaultLockStatus.locked);
-    });
+        gate.complete(); // write tamamlanır → commit devam eder
+        await commit;
+        // abort nedeniyle unlocked EMİT EDİLMEZ; attrs yazıldıysa locked.
+        expect(cubit.state.status, isNot(VaultLockStatus.unlocked));
+        expect(cubit.state.status, VaultLockStatus.locked);
+      },
+    );
 
     test('locking → senkron dispose + locked', () async {
       await store.write(_fakeAttrs());
@@ -1299,34 +1519,52 @@ void main() {
       cubit.onAuthSignedOut(); // _abortToBackground = true
       migrateGate.complete();
       await unlocking;
-      expect(cubit.state.status, isNot(VaultLockStatus.unlocked),
-          reason: 'abort sonrası unlocked emit edilmemeli');
+      expect(
+        cubit.state.status,
+        isNot(VaultLockStatus.unlocked),
+        reason: 'abort sonrası unlocked emit edilmemeli',
+      );
       expect(km.issued.single.disposed, isTrue);
     });
   });
 
   // --- Faz 3 Patch 2: restore (yeni cihaz) + backfill (upload) ---
   group('Patch 2 — bootstrap restore', () {
-    test('lokal attrs VAR → fetch ATLANIR + locked (Patch 1 korunur)', () async {
-      await store.write(_fakeAttrs()); // lokal var
-      final repo = FakeKeyAttributesRepository()..remote = _fakeAttrs();
-      final cubit = _build(FakeKeyManager(), store, remoteRepo: repo, uid: 'uid-A');
-      await cubit.bootstrap();
-      expect(cubit.state.status, VaultLockStatus.locked);
-      expect(repo.uploadCount, 0); // backfill bootstrap'ta değil unlocked'ta
-      await cubit.close();
-    });
+    test(
+      'lokal attrs VAR → fetch ATLANIR + locked (Patch 1 korunur)',
+      () async {
+        await store.write(_fakeAttrs()); // lokal var
+        final repo = FakeKeyAttributesRepository()..remote = _fakeAttrs();
+        final cubit = _build(
+          FakeKeyManager(),
+          store,
+          remoteRepo: repo,
+          uid: 'uid-A',
+        );
+        await cubit.bootstrap();
+        expect(cubit.state.status, VaultLockStatus.locked);
+        expect(repo.uploadCount, 0); // backfill bootstrap'ta değil unlocked'ta
+        await cubit.close();
+      },
+    );
 
-    test('remoteRepo=null → eski davranış (uninitialized, regresyon)', () async {
-      final cubit = _build(FakeKeyManager(), store); // remoteRepo yok
-      await cubit.bootstrap();
-      expect(cubit.state.status, VaultLockStatus.uninitialized);
-      await cubit.close();
-    });
+    test(
+      'remoteRepo=null → eski davranış (uninitialized, regresyon)',
+      () async {
+        final cubit = _build(FakeKeyManager(), store); // remoteRepo yok
+        await cubit.bootstrap();
+        expect(cubit.state.status, VaultLockStatus.uninitialized);
+        await cubit.close();
+      },
+    );
 
     test('uid=null → restore yok (uninitialized)', () async {
       final repo = FakeKeyAttributesRepository()..remote = _fakeAttrs();
-      final cubit = _build(FakeKeyManager(), store, remoteRepo: repo); // uid yok
+      final cubit = _build(
+        FakeKeyManager(),
+        store,
+        remoteRepo: repo,
+      ); // uid yok
       await cubit.bootstrap();
       expect(cubit.state.status, VaultLockStatus.uninitialized);
       await cubit.close();
@@ -1334,7 +1572,12 @@ void main() {
 
     test('remote VAR → lokale yazılır + locked (yeni cihaz restore)', () async {
       final repo = FakeKeyAttributesRepository()..remote = _fakeAttrs();
-      final cubit = _build(FakeKeyManager(), store, remoteRepo: repo, uid: 'uid-A');
+      final cubit = _build(
+        FakeKeyManager(),
+        store,
+        remoteRepo: repo,
+        uid: 'uid-A',
+      );
       await cubit.bootstrap();
       expect(cubit.state.status, VaultLockStatus.locked);
       // server-wins: lokale yazıldı (sonraki bootstrap fetch atlar).
@@ -1344,81 +1587,143 @@ void main() {
 
     test('remote 0-row (gerçek yeni hesap) → uninitialized (setup)', () async {
       final repo = FakeKeyAttributesRepository()..remote = null; // 0-row
-      final cubit = _build(FakeKeyManager(), store, remoteRepo: repo, uid: 'uid-A');
+      final cubit = _build(
+        FakeKeyManager(),
+        store,
+        remoteRepo: repo,
+        uid: 'uid-A',
+      );
       await cubit.bootstrap();
       expect(cubit.state.status, VaultLockStatus.uninitialized);
       await cubit.close();
     });
 
-    test('remote AĞ HATASI → restoreFailed (setup\'a DÜŞMEZ — kritik)', () async {
-      final repo = FakeKeyAttributesRepository()
-        ..fetchError = const SyncNetworkError();
-      final cubit = _build(FakeKeyManager(), store, remoteRepo: repo, uid: 'uid-A');
-      await cubit.bootstrap();
-      expect(cubit.state.status, VaultLockStatus.restoreFailed);
-      expect(cubit.state.status, isNot(VaultLockStatus.uninitialized)); // çift-vault yok
-      await cubit.close();
-    });
+    test(
+      'remote AĞ HATASI → restoreFailed (setup\'a DÜŞMEZ — kritik)',
+      () async {
+        final repo = FakeKeyAttributesRepository()
+          ..fetchError = const SyncNetworkError();
+        final cubit = _build(
+          FakeKeyManager(),
+          store,
+          remoteRepo: repo,
+          uid: 'uid-A',
+        );
+        await cubit.bootstrap();
+        expect(cubit.state.status, VaultLockStatus.restoreFailed);
+        expect(
+          cubit.state.status,
+          isNot(VaultLockStatus.uninitialized),
+        ); // çift-vault yok
+        await cubit.close();
+      },
+    );
 
-    test('remote VAR ama LOKAL write IO hatası → restoreFailed (restoring\'te ASILMAZ, '
-        'setup DEĞİL, unhandled future YOK — reviewer [P2])', () async {
-      final repo = FakeKeyAttributesRepository()..remote = _fakeAttrs();
-      storage.failWrites = true; // _attrsStore.write Keychain/Keystore IO hatası
-      final cubit = _build(FakeKeyManager(), store, remoteRepo: repo, uid: 'uid-A');
-      await cubit.bootstrap(); // kabaran hata YOK (catch (_) yakalar)
-      expect(cubit.state.status, VaultLockStatus.restoreFailed);
-      expect(cubit.state.status, isNot(VaultLockStatus.restoring)); // asılı kalmaz
-      expect(cubit.state.status, isNot(VaultLockStatus.uninitialized)); // setup'a düşmez
-      await cubit.close();
-    });
+    test(
+      'remote VAR ama LOKAL write IO hatası → restoreFailed (restoring\'te ASILMAZ, '
+      'setup DEĞİL, unhandled future YOK — reviewer [P2])',
+      () async {
+        final repo = FakeKeyAttributesRepository()..remote = _fakeAttrs();
+        storage.failWrites =
+            true; // _attrsStore.write Keychain/Keystore IO hatası
+        final cubit = _build(
+          FakeKeyManager(),
+          store,
+          remoteRepo: repo,
+          uid: 'uid-A',
+        );
+        await cubit.bootstrap(); // kabaran hata YOK (catch (_) yakalar)
+        expect(cubit.state.status, VaultLockStatus.restoreFailed);
+        expect(
+          cubit.state.status,
+          isNot(VaultLockStatus.restoring),
+        ); // asılı kalmaz
+        expect(
+          cubit.state.status,
+          isNot(VaultLockStatus.uninitialized),
+        ); // setup'a düşmez
+        await cubit.close();
+      },
+    );
 
-    test('fetch PENDING iken state=restoring (asla uninitialized/setup — review [P1] #1)',
-        () async {
-      final gate = Completer<void>();
-      final repo = FakeKeyAttributesRepository()
-        ..remote = _fakeAttrs()
-        ..fetchGate = gate.future;
-      final cubit = _build(FakeKeyManager(), store, remoteRepo: repo, uid: 'uid-A');
-      final booting = cubit.bootstrap(); // fetch'te asılı
-      await Future<void>.delayed(Duration.zero);
-      expect(cubit.state.status, VaultLockStatus.restoring,
-          reason: 'fetch sürerken /setup görünmemeli');
-      gate.complete();
-      await booting;
-      expect(cubit.state.status, VaultLockStatus.locked);
-      await cubit.close();
-    });
+    test(
+      'fetch PENDING iken state=restoring (asla uninitialized/setup — review [P1] #1)',
+      () async {
+        final gate = Completer<void>();
+        final repo = FakeKeyAttributesRepository()
+          ..remote = _fakeAttrs()
+          ..fetchGate = gate.future;
+        final cubit = _build(
+          FakeKeyManager(),
+          store,
+          remoteRepo: repo,
+          uid: 'uid-A',
+        );
+        final booting = cubit.bootstrap(); // fetch'te asılı
+        await Future<void>.delayed(Duration.zero);
+        expect(
+          cubit.state.status,
+          VaultLockStatus.restoring,
+          reason: 'fetch sürerken /setup görünmemeli',
+        );
+        gate.complete();
+        await booting;
+        expect(cubit.state.status, VaultLockStatus.locked);
+        await cubit.close();
+      },
+    );
 
-    test('retryRestore: restoreFailed → tekrar dener → başarı locked', () async {
-      final repo = FakeKeyAttributesRepository()
-        ..fetchError = const SyncNetworkError();
-      final cubit = _build(FakeKeyManager(), store, remoteRepo: repo, uid: 'uid-A');
-      await cubit.bootstrap();
-      expect(cubit.state.status, VaultLockStatus.restoreFailed);
-      // ağ geldi: hata temizle + remote dolu.
-      repo
-        ..fetchError = null
-        ..remote = _fakeAttrs();
-      await cubit.retryRestore();
-      expect(cubit.state.status, VaultLockStatus.locked);
-      await cubit.close();
-    });
+    test(
+      'retryRestore: restoreFailed → tekrar dener → başarı locked',
+      () async {
+        final repo = FakeKeyAttributesRepository()
+          ..fetchError = const SyncNetworkError();
+        final cubit = _build(
+          FakeKeyManager(),
+          store,
+          remoteRepo: repo,
+          uid: 'uid-A',
+        );
+        await cubit.bootstrap();
+        expect(cubit.state.status, VaultLockStatus.restoreFailed);
+        // ağ geldi: hata temizle + remote dolu.
+        repo
+          ..fetchError = null
+          ..remote = _fakeAttrs();
+        await cubit.retryRestore();
+        expect(cubit.state.status, VaultLockStatus.locked);
+        await cubit.close();
+      },
+    );
 
-    test('retryRestore yalnız restoreFailed\'da çalışır (başka state no-op)', () async {
-      final repo = FakeKeyAttributesRepository()..remote = _fakeAttrs();
-      final cubit = _build(FakeKeyManager(), store, remoteRepo: repo, uid: 'uid-A');
-      await cubit.bootstrap(); // locked
-      await cubit.retryRestore(); // no-op
-      expect(cubit.state.status, VaultLockStatus.locked);
-      await cubit.close();
-    });
+    test(
+      'retryRestore yalnız restoreFailed\'da çalışır (başka state no-op)',
+      () async {
+        final repo = FakeKeyAttributesRepository()..remote = _fakeAttrs();
+        final cubit = _build(
+          FakeKeyManager(),
+          store,
+          remoteRepo: repo,
+          uid: 'uid-A',
+        );
+        await cubit.bootstrap(); // locked
+        await cubit.retryRestore(); // no-op
+        expect(cubit.state.status, VaultLockStatus.locked);
+        await cubit.close();
+      },
+    );
   });
 
   group('Patch 2 — backfill (upload guard)', () {
     test('unlock başarı + sunucuda YOK → insert (backfill)', () async {
       await store.write(_fakeAttrs());
       final repo = FakeKeyAttributesRepository()..exists = false;
-      final cubit = _build(FakeKeyManager(), store, remoteRepo: repo, uid: 'uid-A');
+      final cubit = _build(
+        FakeKeyManager(),
+        store,
+        remoteRepo: repo,
+        uid: 'uid-A',
+      );
       await cubit.bootstrap(); // locked (lokal var)
       await cubit.unlock('parola123');
       await Future<void>.delayed(Duration.zero); // unawaited backfill
@@ -1427,29 +1732,44 @@ void main() {
       await cubit.close();
     });
 
-    test('unlock başarı + sunucuda VAR → upload ÇAĞRILMAZ (server-wins guard)',
-        () async {
-      await store.write(_fakeAttrs());
-      final repo = FakeKeyAttributesRepository()..exists = true;
-      final cubit = _build(FakeKeyManager(), store, remoteRepo: repo, uid: 'uid-A');
-      await cubit.bootstrap();
-      await cubit.unlock('parola123');
-      await Future<void>.delayed(Duration.zero);
-      expect(repo.uploadCount, 0);
-      await cubit.close();
-    });
+    test(
+      'unlock başarı + sunucuda VAR → upload ÇAĞRILMAZ (server-wins guard)',
+      () async {
+        await store.write(_fakeAttrs());
+        final repo = FakeKeyAttributesRepository()..exists = true;
+        final cubit = _build(
+          FakeKeyManager(),
+          store,
+          remoteRepo: repo,
+          uid: 'uid-A',
+        );
+        await cubit.bootstrap();
+        await cubit.unlock('parola123');
+        await Future<void>.delayed(Duration.zero);
+        expect(repo.uploadCount, 0);
+        await cubit.close();
+      },
+    );
 
-    test('backfill ağ hatası unlocked\'ı BOZMAZ (best-effort sessiz)', () async {
-      await store.write(_fakeAttrs());
-      final repo = FakeKeyAttributesRepository()
-        ..fetchError = const SyncNetworkError(); // existsRemote throw
-      final cubit = _build(FakeKeyManager(), store, remoteRepo: repo, uid: 'uid-A');
-      await cubit.bootstrap();
-      await cubit.unlock('parola123');
-      await Future<void>.delayed(Duration.zero);
-      expect(cubit.state.status, VaultLockStatus.unlocked); // hata yutuldu
-      await cubit.close();
-    });
+    test(
+      'backfill ağ hatası unlocked\'ı BOZMAZ (best-effort sessiz)',
+      () async {
+        await store.write(_fakeAttrs());
+        final repo = FakeKeyAttributesRepository()
+          ..fetchError = const SyncNetworkError(); // existsRemote throw
+        final cubit = _build(
+          FakeKeyManager(),
+          store,
+          remoteRepo: repo,
+          uid: 'uid-A',
+        );
+        await cubit.bootstrap();
+        await cubit.unlock('parola123');
+        await Future<void>.delayed(Duration.zero);
+        expect(cubit.state.status, VaultLockStatus.unlocked); // hata yutuldu
+        await cubit.close();
+      },
+    );
 
     test('remoteRepo=null → backfill no-op (regresyon)', () async {
       await store.write(_fakeAttrs());
@@ -1463,82 +1783,131 @@ void main() {
   });
 
   group('Patch 3 (Adım K) — key_attributes UPDATE senkronu + dirty retry', () {
-    test('recoverWithNewPassword + sunucuda VAR → update çağrılır (insert DEĞİL)',
-        () async {
-      await store.write(_fakeAttrs());
-      final repo = FakeKeyAttributesRepository()..exists = true;
-      final dirty = AttrsDirtyStore(storage: storage);
-      final cubit = _build(FakeKeyManager(), store,
-          remoteRepo: repo, uid: 'uA', attrsDirtyStore: dirty);
-      await cubit.bootstrap();
-      await cubit.recoverWithNewPassword(
-          List.generate(24, (i) => 'word$i'), 'yeniParola1');
-      await Future<void>.delayed(Duration.zero);
-      expect(cubit.state.status, VaultLockStatus.unlocked);
-      expect(repo.updateCount, 1, reason: 'var olan satır UPDATE edildi');
-      expect(repo.uploadCount, 0, reason: 'insert DEĞİL');
-      expect(await dirty.isDirty(), isFalse, reason: 'başarı → marker temizlendi');
-      await cubit.close();
-    });
+    test(
+      'recoverWithNewPassword + sunucuda VAR → update çağrılır (insert DEĞİL)',
+      () async {
+        await store.write(_fakeAttrs());
+        final repo = FakeKeyAttributesRepository()..exists = true;
+        final dirty = AttrsDirtyStore(storage: storage);
+        final cubit = _build(
+          FakeKeyManager(),
+          store,
+          remoteRepo: repo,
+          uid: 'uA',
+          attrsDirtyStore: dirty,
+        );
+        await cubit.bootstrap();
+        await cubit.recoverWithNewPassword(
+          List.generate(24, (i) => 'word$i'),
+          'yeniParola1',
+        );
+        await Future<void>.delayed(Duration.zero);
+        expect(cubit.state.status, VaultLockStatus.unlocked);
+        expect(repo.updateCount, 1, reason: 'var olan satır UPDATE edildi');
+        expect(repo.uploadCount, 0, reason: 'insert DEĞİL');
+        expect(
+          await dirty.isDirty(),
+          isFalse,
+          reason: 'başarı → marker temizlendi',
+        );
+        await cubit.close();
+      },
+    );
 
-    test('recoverWithNewPassword + sunucuda YOK → upload (ilk insert)', () async {
-      await store.write(_fakeAttrs());
-      final repo = FakeKeyAttributesRepository()..exists = false;
-      final dirty = AttrsDirtyStore(storage: storage);
-      final cubit = _build(FakeKeyManager(), store,
-          remoteRepo: repo, uid: 'uA', attrsDirtyStore: dirty);
-      await cubit.bootstrap();
-      await cubit.recoverWithNewPassword(
-          List.generate(24, (i) => 'word$i'), 'yeniParola1');
-      await Future<void>.delayed(Duration.zero);
-      expect(repo.uploadCount, 1);
-      expect(repo.updateCount, 0);
-      expect(await dirty.isDirty(), isFalse);
-      await cubit.close();
-    });
+    test(
+      'recoverWithNewPassword + sunucuda YOK → upload (ilk insert)',
+      () async {
+        await store.write(_fakeAttrs());
+        final repo = FakeKeyAttributesRepository()..exists = false;
+        final dirty = AttrsDirtyStore(storage: storage);
+        final cubit = _build(
+          FakeKeyManager(),
+          store,
+          remoteRepo: repo,
+          uid: 'uA',
+          attrsDirtyStore: dirty,
+        );
+        await cubit.bootstrap();
+        await cubit.recoverWithNewPassword(
+          List.generate(24, (i) => 'word$i'),
+          'yeniParola1',
+        );
+        await Future<void>.delayed(Duration.zero);
+        expect(repo.uploadCount, 1);
+        expect(repo.updateCount, 0);
+        expect(await dirty.isDirty(), isFalse);
+        await cubit.close();
+      },
+    );
 
-    test('update ağ hatası → dirty marker SET kalır (unlocked\'ı bozmaz)', () async {
-      await store.write(_fakeAttrs());
-      final repo = FakeKeyAttributesRepository()
-        ..exists = true
-        ..writeError = const SyncNetworkError();
-      final dirty = AttrsDirtyStore(storage: storage);
-      final cubit = _build(FakeKeyManager(), store,
-          remoteRepo: repo, uid: 'uA', attrsDirtyStore: dirty);
-      await cubit.bootstrap();
-      await cubit.recoverWithNewPassword(
-          List.generate(24, (i) => 'word$i'), 'yeniParola1');
-      await Future<void>.delayed(Duration.zero);
-      expect(cubit.state.status, VaultLockStatus.unlocked,
-          reason: 'best-effort: ağ hatası unlocked\'ı bozmaz');
-      expect(await dirty.isDirty(), isTrue, reason: 'retry için SET kalır');
-      await cubit.close();
-    });
+    test(
+      'update ağ hatası → dirty marker SET kalır (unlocked\'ı bozmaz)',
+      () async {
+        await store.write(_fakeAttrs());
+        final repo = FakeKeyAttributesRepository()
+          ..exists = true
+          ..writeError = const SyncNetworkError();
+        final dirty = AttrsDirtyStore(storage: storage);
+        final cubit = _build(
+          FakeKeyManager(),
+          store,
+          remoteRepo: repo,
+          uid: 'uA',
+          attrsDirtyStore: dirty,
+        );
+        await cubit.bootstrap();
+        await cubit.recoverWithNewPassword(
+          List.generate(24, (i) => 'word$i'),
+          'yeniParola1',
+        );
+        await Future<void>.delayed(Duration.zero);
+        expect(
+          cubit.state.status,
+          VaultLockStatus.unlocked,
+          reason: 'best-effort: ağ hatası unlocked\'ı bozmaz',
+        );
+        expect(await dirty.isDirty(), isTrue, reason: 'retry için SET kalır');
+        await cubit.close();
+      },
+    );
 
-    test('dirty-replay: sonraki unlock + ağ var → update + marker CLEAR', () async {
-      await store.write(_fakeAttrs());
-      // Marker'ı önceden SET et (önceki turda changePassword ağ hatasına düşmüş gibi).
-      final dirty = AttrsDirtyStore(storage: storage);
-      await dirty.setDirty();
-      final repo = FakeKeyAttributesRepository()..exists = true;
-      final cubit = _build(FakeKeyManager(), store,
-          remoteRepo: repo, uid: 'uA', attrsDirtyStore: dirty);
-      await cubit.bootstrap();
-      await cubit.unlock('parola123');
-      await Future<void>.delayed(Duration.zero);
-      expect(repo.updateCount, 1, reason: 'unlock dirty-replay → update');
-      expect(await dirty.isDirty(), isFalse, reason: 'başarı → temizlendi');
-      await cubit.close();
-    });
+    test(
+      'dirty-replay: sonraki unlock + ağ var → update + marker CLEAR',
+      () async {
+        await store.write(_fakeAttrs());
+        // Marker'ı önceden SET et (önceki turda changePassword ağ hatasına düşmüş gibi).
+        final dirty = AttrsDirtyStore(storage: storage);
+        await dirty.setDirty();
+        final repo = FakeKeyAttributesRepository()..exists = true;
+        final cubit = _build(
+          FakeKeyManager(),
+          store,
+          remoteRepo: repo,
+          uid: 'uA',
+          attrsDirtyStore: dirty,
+        );
+        await cubit.bootstrap();
+        await cubit.unlock('parola123');
+        await Future<void>.delayed(Duration.zero);
+        expect(repo.updateCount, 1, reason: 'unlock dirty-replay → update');
+        expect(await dirty.isDirty(), isFalse, reason: 'başarı → temizlendi');
+        await cubit.close();
+      },
+    );
 
     test('uid=null → changePassword sync no-op (legacy regresyon)', () async {
       await store.write(_fakeAttrs());
       final dirty = AttrsDirtyStore(storage: storage);
-      final cubit = _build(FakeKeyManager(), store,
-          attrsDirtyStore: dirty); // remoteRepo/uid yok
+      final cubit = _build(
+        FakeKeyManager(),
+        store,
+        attrsDirtyStore: dirty,
+      ); // remoteRepo/uid yok
       await cubit.bootstrap();
       await cubit.recoverWithNewPassword(
-          List.generate(24, (i) => 'word$i'), 'yeniParola1');
+        List.generate(24, (i) => 'word$i'),
+        'yeniParola1',
+      );
       await Future<void>.delayed(Duration.zero);
       expect(cubit.state.status, VaultLockStatus.unlocked);
       // marker setDirty edildi ama replay no-op (repo yok) → SET kalır, zararsız.

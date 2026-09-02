@@ -54,8 +54,9 @@ Future<void> main() async {
   await Supabase.initialize(
     url: SupabaseConfig.url,
     publishableKey: SupabaseConfig.publishableKey,
-    authOptions:
-        const FlutterAuthClientOptions(authFlowType: AuthFlowType.pkce),
+    authOptions: const FlutterAuthClientOptions(
+      authFlowType: AuthFlowType.pkce,
+    ),
   );
   await configureDependencies();
   // Read the persisted active uid BEFORE the first frame so the initial vault
@@ -69,7 +70,9 @@ Future<void> main() async {
     if (uid != null && uid.isNotEmpty) {
       initialPrefix = AccountVaultManager.prefixFor(uid);
     }
-  } catch (_) {/* fall back to legacy ''; _onSession re-derives on signedIn */}
+  } catch (_) {
+    /* fall back to legacy ''; _onSession re-derives on signedIn */
+  }
   runApp(AuthenticatorApp(initialPrefix: initialPrefix));
 }
 
@@ -101,8 +104,7 @@ class ConfigErrorApp extends StatelessWidget {
                   const SizedBox(height: 16),
                   const Text(
                     'Yapılandırma hatası',
-                    style: TextStyle(
-                        fontSize: 22, fontWeight: FontWeight.bold),
+                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 12),
                   Text(details, style: const TextStyle(fontSize: 13)),
@@ -166,7 +168,9 @@ class _AuthenticatorAppState extends State<AuthenticatorApp>
     // kendi try/catch'i (setActive secure-storage yazımı fail edebilir — reviewer [P3]).
     _sessionSub = _session.stream.listen(
       (s) => unawaited(_onSession(s)),
-      onError: (Object _) {/* SessionCubit error'u state'e yansıtır; burada yut */},
+      onError: (Object _) {
+        /* SessionCubit error'u state'e yansıtır; burada yut */
+      },
     );
 
     _session.bootstrap();
@@ -208,7 +212,9 @@ class _AuthenticatorAppState extends State<AuthenticatorApp>
     //    edilemezse sonraki app açılışında (_activePrefix='' başlar) bootstrap yeniden dener.
     try {
       await locator<AccountVaultManager>().setActive(uid);
-    } catch (_) {/* izolasyon etkilenmez; sonraki açılışta yeniden denenir */}
+    } catch (_) {
+      /* izolasyon etkilenmez; sonraki açılışta yeniden denenir */
+    }
   }
 
   /// VaultLockCubit + router'ı verilen namespace prefix'iyle kurar.
@@ -240,9 +246,7 @@ class _AuthenticatorAppState extends State<AuthenticatorApp>
       migrate: (masterKey) => migration.migrateIfNeeded(masterKey: masterKey),
       deleteKeys: (keys) async {
         // Namespace'li reset: forUser(prefix) anahtarlarını sil (prefix boşsa Faz2 all).
-        final target = prefix.isEmpty
-            ? keys
-            : VaultStorageKeys.forUser(prefix);
+        final target = prefix.isEmpty ? keys : VaultStorageKeys.forUser(prefix);
         for (final k in target) {
           await storage.delete(key: k);
         }
@@ -250,12 +254,16 @@ class _AuthenticatorAppState extends State<AuthenticatorApp>
     )..bootstrap();
 
     // Faz 3 Patch 3 — per-uid token sync store'ları (canlı tercih Settings'e de gider).
-    final liveSyncStore = LiveSyncPrefStore(storage: storage, keyPrefix: prefix);
+    final liveSyncStore = LiveSyncPrefStore(
+      storage: storage,
+      keyPrefix: prefix,
+    );
 
     _bundle = createAppRouter(
       _lock,
       session: _session,
-      vaultCubitBuilder: () => _buildVaultCubit(prefix, uid, storage, liveSyncStore),
+      vaultCubitBuilder: () =>
+          _buildVaultCubit(prefix, uid, storage, liveSyncStore),
       // Aktif uid namespace'li ViewModeStore (reviewer [P3] — per-uid tercih).
       viewModeStoreBuilder: () =>
           ViewModeStore(storage: storage, keyPrefix: prefix),
@@ -264,12 +272,15 @@ class _AuthenticatorAppState extends State<AuthenticatorApp>
       shellWrapper: (child) => MultiRepositoryProvider(
         providers: [
           RepositoryProvider<AnnouncementsRepository>.value(
-              value: locator<AnnouncementsRepository>()),
+            value: locator<AnnouncementsRepository>(),
+          ),
           RepositoryProvider<AnnouncementsCacheStore>.value(
-              value: locator<AnnouncementsCacheStore>()),
+            value: locator<AnnouncementsCacheStore>(),
+          ),
           // token_sync_enabled değişince Settings toggle'ı reaktif gizlensin/görünsün.
           RepositoryProvider<FeatureFlagsService>.value(
-              value: locator<FeatureFlagsService>()),
+            value: locator<FeatureFlagsService>(),
+          ),
         ],
         child: child,
       ),
@@ -298,8 +309,10 @@ class _AuthenticatorAppState extends State<AuthenticatorApp>
     final catalogHolder = locator<IssuerCatalogHolder>();
     if (uid == null) {
       // legacy/uid-siz → sync yok; ama issuer kanonikleştirme yine çalışabilir (katalog public).
-      return VaultCubit(repo,
-          issuerCatalogResolver: () => catalogHolder.current);
+      return VaultCubit(
+        repo,
+        issuerCatalogResolver: () => catalogHolder.current,
+      );
     }
     late VaultCubit cubit;
     final sync = TokenSyncService(
@@ -322,7 +335,8 @@ class _AuthenticatorAppState extends State<AuthenticatorApp>
       sync: sync,
       rawStore: repo,
       // Adım F — start öncesi flag bounded çözülür (cache-ready garantisi); flag false → start yok.
-      tokenSyncEnabled: () => flags.isEnabled('token_sync_enabled', fallback: true),
+      tokenSyncEnabled: () =>
+          flags.isEnabled('token_sync_enabled', fallback: true),
       ensureTokenSyncReady: flags.ensureLoaded,
       // Adım E — add-token issuer kanonikleştirme (güncel katalog; boş → no-op).
       issuerCatalogResolver: () => catalogHolder.current,
@@ -377,7 +391,8 @@ class _AuthenticatorAppState extends State<AuthenticatorApp>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _sessionSub?.cancel(); // root lifecycle sahipliği (reviewer [P3])
-    _bundle.dispose(); // go_router refreshListenable'ı dispose etmez (her notifier)
+    _bundle
+        .dispose(); // go_router refreshListenable'ı dispose etmez (her notifier)
     _lock.close();
     _session.close();
     super.dispose();

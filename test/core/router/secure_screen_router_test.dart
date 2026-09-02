@@ -30,8 +30,12 @@ import 'package:project_auth/features/vault/presentation/bloc/vault_cubit.dart';
 /// Sahte kilit cubit'i — vault AÇIK (guard vault/scan/settings'e izin verir).
 class _FakeLock extends Cubit<VaultLockState> implements VaultLockCubit {
   _FakeLock()
-      : super(VaultLockState.unlocked(
-            biometricEnrolled: false, deviceBiometricAvailable: false));
+    : super(
+        VaultLockState.unlocked(
+          biometricEnrolled: false,
+          deviceBiometricAvailable: false,
+        ),
+      );
   @override
   noSuchMethod(Invocation i) {}
 }
@@ -56,25 +60,26 @@ class _EmptyRepo implements VaultRepository {
 class _MemStorage implements FlutterSecureStorage {
   final Map<String, String> _d = {};
   @override
-  Future<String?> read(
-          {required String key,
-          dynamic iOptions,
-          dynamic aOptions,
-          dynamic lOptions,
-          dynamic webOptions,
-          dynamic mOptions,
-          dynamic wOptions}) async =>
-      _d[key];
+  Future<String?> read({
+    required String key,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async => _d[key];
   @override
-  Future<void> write(
-      {required String key,
-      required String? value,
-      dynamic iOptions,
-      dynamic aOptions,
-      dynamic lOptions,
-      dynamic webOptions,
-      dynamic mOptions,
-      dynamic wOptions}) async {
+  Future<void> write({
+    required String key,
+    required String? value,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async {
     if (value == null) {
       _d.remove(key);
     } else {
@@ -95,9 +100,9 @@ void main() {
     SecureScreen.debugReset();
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
-      calls.add(call.method);
-      return null;
-    });
+          calls.add(call.method);
+          return null;
+        });
   });
 
   tearDown(() {
@@ -106,8 +111,9 @@ void main() {
     SecureScreen.debugReset();
   });
 
-  testWidgets('vault → /settings PUSH: koruma açık kalır (disable GELMEZ)',
-      (tester) async {
+  testWidgets('vault → /settings PUSH: koruma açık kalır (disable GELMEZ)', (
+    tester,
+  ) async {
     final lock = _FakeLock();
     final session = _FakeSession();
     addTearDown(lock.close);
@@ -122,13 +128,15 @@ void main() {
     );
     addTearDown(bundle.dispose);
 
-    await tester.pumpWidget(MultiBlocProvider(
-      providers: [
-        BlocProvider<VaultLockCubit>.value(value: lock),
-        BlocProvider<SessionCubit>.value(value: session),
-      ],
-      child: MaterialApp.router(routerConfig: bundle.router),
-    ));
+    await tester.pumpWidget(
+      MultiBlocProvider(
+        providers: [
+          BlocProvider<VaultLockCubit>.value(value: lock),
+          BlocProvider<SessionCubit>.value(value: session),
+        ],
+        child: MaterialApp.router(routerConfig: bundle.router),
+      ),
+    );
     await tester.pumpAndSettle();
 
     // signedIn + unlocked → guard /splash'ten vault'a alır → SecureScreenScope mount.
@@ -138,7 +146,9 @@ void main() {
     // Üstüne /settings PUSH: VaultPage dispose OLMAZ → disable gitmemeli.
     bundle.router.push(Routes.settings);
     await tester.pumpAndSettle();
-    expect(calls, ['enable'], reason: '/settings push → disable ERKEN gelmemeli');
+    expect(calls, [
+      'enable',
+    ], reason: '/settings push → disable ERKEN gelmemeli');
 
     // Geri dönüşte de değişmez (vault hâlâ tek tutucu).
     bundle.router.pop();

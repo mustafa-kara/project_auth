@@ -49,16 +49,16 @@ class RawTokenRecord {
     bool? deleted,
     String? serverUpdatedAtIso,
     bool clearServerUpdatedAt = false,
-  }) =>
-      RawTokenRecord(
-        id: id,
-        version: version ?? this.version,
-        blob: blob ?? this.blob,
-        updatedAtMs: updatedAtMs ?? this.updatedAtMs,
-        deleted: deleted ?? this.deleted,
-        serverUpdatedAtIso:
-            clearServerUpdatedAt ? null : (serverUpdatedAtIso ?? this.serverUpdatedAtIso),
-      );
+  }) => RawTokenRecord(
+    id: id,
+    version: version ?? this.version,
+    blob: blob ?? this.blob,
+    updatedAtMs: updatedAtMs ?? this.updatedAtMs,
+    deleted: deleted ?? this.deleted,
+    serverUpdatedAtIso: clearServerUpdatedAt
+        ? null
+        : (serverUpdatedAtIso ?? this.serverUpdatedAtIso),
+  );
 }
 
 /// `importRemote` sonucu — cursor bilgisi TAŞIMAZ (cursor `RemotePullResult.

@@ -18,12 +18,12 @@ void main() {
   final ciphertext = Uint8List.fromList(List<int>.generate(32, (i) => i * 3));
 
   BackupEnvelope envelope() => BackupEnvelope(
-        createdAt: DateTime.utc(2026, 9, 2, 10, 11, 12),
-        opsLimit: 3,
-        memLimit: 268435456,
-        salt: salt,
-        blob: EncryptedBlob(nonce: nonce, ciphertext: ciphertext),
-      );
+    createdAt: DateTime.utc(2026, 9, 2, 10, 11, 12),
+    opsLimit: 3,
+    memLimit: 268435456,
+    salt: salt,
+    blob: EncryptedBlob(nonce: nonce, ciphertext: ciphertext),
+  );
 
   /// A valid envelope map that individual tests corrupt one field at a time.
   Map<String, dynamic> validJson() =>
@@ -145,34 +145,57 @@ void main() {
     rejects('missing createdAt', (j) => j.remove('createdAt'));
     rejects('unparseable createdAt', (j) => j['createdAt'] = 'yesterday');
     rejects('kdf not an object', (j) => j['kdf'] = 'argon2id');
-    rejects('foreign kdf.alg',
-        (j) => (j['kdf'] as Map)['alg'] = 'scrypt');
-    rejects('missing kdf.opslimit',
-        (j) => (j['kdf'] as Map).remove('opslimit'));
-    rejects('fractional kdf.opslimit',
-        (j) => (j['kdf'] as Map)['opslimit'] = 2.5);
-    rejects('opslimit below the floor',
-        (j) => (j['kdf'] as Map)['opslimit'] = 0);
-    rejects('opslimit above the ceiling',
-        (j) => (j['kdf'] as Map)['opslimit'] = 11);
-    rejects('memlimit below 8 MiB',
-        (j) => (j['kdf'] as Map)['memlimit'] = 8 * 1024 * 1024 - 1);
-    rejects('memlimit above 512 MiB',
-        (j) => (j['kdf'] as Map)['memlimit'] = 512 * 1024 * 1024 + 1);
-    rejects('salt shorter than 16 bytes',
-        (j) => (j['kdf'] as Map)['salt'] = base64Encode(Uint8List(15)));
-    rejects('salt longer than 16 bytes',
-        (j) => (j['kdf'] as Map)['salt'] = base64Encode(Uint8List(17)));
-    rejects('salt is not base64',
-        (j) => (j['kdf'] as Map)['salt'] = 'not base64!!');
+    rejects('foreign kdf.alg', (j) => (j['kdf'] as Map)['alg'] = 'scrypt');
+    rejects(
+      'missing kdf.opslimit',
+      (j) => (j['kdf'] as Map).remove('opslimit'),
+    );
+    rejects(
+      'fractional kdf.opslimit',
+      (j) => (j['kdf'] as Map)['opslimit'] = 2.5,
+    );
+    rejects(
+      'opslimit below the floor',
+      (j) => (j['kdf'] as Map)['opslimit'] = 0,
+    );
+    rejects(
+      'opslimit above the ceiling',
+      (j) => (j['kdf'] as Map)['opslimit'] = 11,
+    );
+    rejects(
+      'memlimit below 8 MiB',
+      (j) => (j['kdf'] as Map)['memlimit'] = 8 * 1024 * 1024 - 1,
+    );
+    rejects(
+      'memlimit above 512 MiB',
+      (j) => (j['kdf'] as Map)['memlimit'] = 512 * 1024 * 1024 + 1,
+    );
+    rejects(
+      'salt shorter than 16 bytes',
+      (j) => (j['kdf'] as Map)['salt'] = base64Encode(Uint8List(15)),
+    );
+    rejects(
+      'salt longer than 16 bytes',
+      (j) => (j['kdf'] as Map)['salt'] = base64Encode(Uint8List(17)),
+    );
+    rejects(
+      'salt is not base64',
+      (j) => (j['kdf'] as Map)['salt'] = 'not base64!!',
+    );
     rejects('missing salt', (j) => (j['kdf'] as Map).remove('salt'));
-    rejects('foreign cipher.alg',
-        (j) => (j['cipher'] as Map)['alg'] = 'aes-gcm');
-    rejects('nonce is not 24 bytes',
-        (j) => (j['cipher'] as Map)['nonce'] = base64Encode(Uint8List(23)));
+    rejects(
+      'foreign cipher.alg',
+      (j) => (j['cipher'] as Map)['alg'] = 'aes-gcm',
+    );
+    rejects(
+      'nonce is not 24 bytes',
+      (j) => (j['cipher'] as Map)['nonce'] = base64Encode(Uint8List(23)),
+    );
     rejects('missing nonce', (j) => (j['cipher'] as Map).remove('nonce'));
-    rejects('ciphertext shorter than the Poly1305 tag',
-        (j) => j['ciphertext'] = base64Encode(Uint8List(15)));
+    rejects(
+      'ciphertext shorter than the Poly1305 tag',
+      (j) => j['ciphertext'] = base64Encode(Uint8List(15)),
+    );
     rejects('missing ciphertext', (j) => j.remove('ciphertext'));
 
     test('boundary values are accepted', () {
@@ -185,8 +208,11 @@ void main() {
       (high['kdf'] as Map)['opslimit'] = 10;
       (high['kdf'] as Map)['memlimit'] = 512 * 1024 * 1024;
       expect(BackupEnvelope.fromJson(high).memLimit, 512 * 1024 * 1024);
-      expect(BackupEnvelope.maxMemLimit, 512 * 1024 * 1024,
-          reason: 'mobil OOM sigortası — docs/CRYPTO.md §16 tablosu');
+      expect(
+        BackupEnvelope.maxMemLimit,
+        512 * 1024 * 1024,
+        reason: 'mobil OOM sigortası — docs/CRYPTO.md §16 tablosu',
+      );
     });
 
     test('integer-valued doubles are accepted (JSON has no int type)', () {
@@ -195,16 +221,20 @@ void main() {
       expect(BackupEnvelope.fromJson(json).opsLimit, 3);
     });
 
-    test('a newer version calls onUnsupportedVersion instead of FormatException',
-        () {
-      final json = validJson();
-      json['version'] = 2;
-      expect(
-        () => BackupEnvelope.fromJson(json,
-            onUnsupportedVersion: (v) => throw StateError('too new: $v')),
-        throwsA(isA<StateError>()),
-      );
-    });
+    test(
+      'a newer version calls onUnsupportedVersion instead of FormatException',
+      () {
+        final json = validJson();
+        json['version'] = 2;
+        expect(
+          () => BackupEnvelope.fromJson(
+            json,
+            onUnsupportedVersion: (v) => throw StateError('too new: $v'),
+          ),
+          throwsA(isA<StateError>()),
+        );
+      },
+    );
 
     test('a newer version without a callback is still a FormatException', () {
       final json = validJson();

@@ -34,14 +34,17 @@ abstract final class ByteaCodec {
       hex = hex.substring(2);
     }
     if (hex.length.isOdd) {
-      throw FormatException('ByteaCodec.decode: hex uzunluğu çift olmalı (${hex.length})');
+      throw FormatException(
+        'ByteaCodec.decode: hex uzunluğu çift olmalı (${hex.length})',
+      );
     }
     final out = Uint8List(hex.length ~/ 2);
     for (var i = 0; i < out.length; i++) {
       final byte = int.tryParse(hex.substring(i * 2, i * 2 + 2), radix: 16);
       if (byte == null) {
         throw FormatException(
-            'ByteaCodec.decode: geçersiz hex çifti "${hex.substring(i * 2, i * 2 + 2)}"');
+          'ByteaCodec.decode: geçersiz hex çifti "${hex.substring(i * 2, i * 2 + 2)}"',
+        );
       }
       out[i] = byte;
     }

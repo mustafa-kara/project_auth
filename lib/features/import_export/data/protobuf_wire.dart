@@ -61,11 +61,12 @@ class ProtobufReader {
   /// Reads [bytes] from offset 0 up to [end] (defaults to `bytes.length`).
   /// [end] lets a caller scope a reader to a nested message without copying.
   ProtobufReader(Uint8List bytes, {int? end})
-      : _bytes = bytes,
-        _end = end ?? bytes.length {
+    : _bytes = bytes,
+      _end = end ?? bytes.length {
     if (_end < 0 || _end > _bytes.length) {
       throw FormatException(
-          'protobuf: end $_end outside buffer of ${_bytes.length} bytes');
+        'protobuf: end $_end outside buffer of ${_bytes.length} bytes',
+      );
     }
   }
 
@@ -85,7 +86,8 @@ class ProtobufReader {
     final field = tag >> 3;
     if (field == 0) {
       throw FormatException(
-          'protobuf: field number 0 is illegal before offset $_pos');
+        'protobuf: field number 0 is illegal before offset $_pos',
+      );
     }
     return (field: field, wireType: tag & 0x07);
   }
@@ -109,15 +111,17 @@ class ProtobufReader {
       // Golden vector B's `…ff01` ends in 0x01 and is unaffected.
       if (i == ProtobufLimits.maxVarintBytes - 1 && (byte & 0x7F) > 0x01) {
         throw FormatException(
-            'protobuf: non-canonical 10-byte varint at offset ${_pos - 1}');
+          'protobuf: non-canonical 10-byte varint at offset ${_pos - 1}',
+        );
       }
       result |= (byte & 0x7F) << shift;
       if ((byte & 0x80) == 0) return result;
       shift += 7;
     }
     throw FormatException(
-        'protobuf: varint longer than ${ProtobufLimits.maxVarintBytes} bytes '
-        'at offset $_pos');
+      'protobuf: varint longer than ${ProtobufLimits.maxVarintBytes} bytes '
+      'at offset $_pos',
+    );
   }
 
   /// Reads a length-delimited field and returns a **view** onto the backing
@@ -127,12 +131,14 @@ class ProtobufReader {
     final length = readVarint();
     if (length < 0) {
       throw FormatException(
-          'protobuf: negative length-delimited size at offset $_pos');
+        'protobuf: negative length-delimited size at offset $_pos',
+      );
     }
     if (length > _end - _pos) {
       throw FormatException(
-          'protobuf: length $length runs past the end of the message '
-          '(${_end - _pos} bytes left at offset $_pos)');
+        'protobuf: length $length runs past the end of the message '
+        '(${_end - _pos} bytes left at offset $_pos)',
+      );
     }
     final view = Uint8List.sublistView(_bytes, _pos, _pos + length);
     _pos += length;
@@ -156,11 +162,13 @@ class ProtobufReader {
       case 3:
       case 4:
         throw FormatException(
-            'protobuf: group wire type $wireType is not supported '
-            '(offset $_pos)');
+          'protobuf: group wire type $wireType is not supported '
+          '(offset $_pos)',
+        );
       default:
         throw FormatException(
-            'protobuf: unknown wire type $wireType at offset $_pos');
+          'protobuf: unknown wire type $wireType at offset $_pos',
+        );
     }
   }
 
@@ -168,7 +176,8 @@ class ProtobufReader {
   void _skip(int count) {
     if (count > _end - _pos) {
       throw FormatException(
-          'protobuf: truncated $count-byte field at offset $_pos');
+        'protobuf: truncated $count-byte field at offset $_pos',
+      );
     }
     _pos += count;
   }

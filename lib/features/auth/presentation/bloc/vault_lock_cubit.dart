@@ -76,15 +76,15 @@ class VaultStorageKeys {
   /// EDİLMEZ — başka namespace'leri etkilemesin). `biometricKey` ayrı OS-keystore'da
   /// → asıl temizlik `biometric.disable()` (burada savunma katmanı).
   static List<String> forUser(String prefix) => [
-        '$prefix$encryptedVault',
-        '$prefix$keyAttributes',
-        '$prefix$migrationMarker',
-        '$prefix$viewMode',
-        '$prefix$tokenSyncCursor',
-        '$prefix$liveSyncEnabled',
-        '$prefix$attrsDirty',
-        biometricKey,
-      ];
+    '$prefix$encryptedVault',
+    '$prefix$keyAttributes',
+    '$prefix$migrationMarker',
+    '$prefix$viewMode',
+    '$prefix$tokenSyncCursor',
+    '$prefix$liveSyncEnabled',
+    '$prefix$attrsDirty',
+    biometricKey,
+  ];
 }
 
 /// Migration'ı `VaultCubit.load()`'tan ÖNCE çalıştırmak için soyut kanca. unlock /
@@ -180,31 +180,31 @@ class VaultLockCubit extends Cubit<VaultLockState> {
     AttrsDirtyStore? attrsDirtyStore,
     ResetPendingStore? resetPendingStore,
     DateTime Function()? now,
-  })  : _keyManager = keyManager,
-        _now = now ?? DateTime.now,
-        _attrsStore = attrsStore,
-        _migrate = migrate,
-        _biometric = biometric,
-        _deleteKeys = deleteKeys,
-        _remoteRepo = remoteRepo,
-        _remoteTokenRepo = remoteTokenRepo,
-        _uid = uid,
-        _attrsDirtyStore = attrsDirtyStore,
-        _resetPendingStore = resetPendingStore,
-        super(const VaultLockState.uninitialized());
+  }) : _keyManager = keyManager,
+       _now = now ?? DateTime.now,
+       _attrsStore = attrsStore,
+       _migrate = migrate,
+       _biometric = biometric,
+       _deleteKeys = deleteKeys,
+       _remoteRepo = remoteRepo,
+       _remoteTokenRepo = remoteTokenRepo,
+       _uid = uid,
+       _attrsDirtyStore = attrsDirtyStore,
+       _resetPendingStore = resetPendingStore,
+       super(const VaultLockState.uninitialized());
 
   /// `locked` emit'i biyometri field'larını taşıyarak yapar (tek nokta — reviewer 4.tur [P1]).
   VaultLockState _locked({VaultLockError? error}) => VaultLockState.locked(
-        error: error,
-        biometricEnrolled: _biometricEnrolled,
-        deviceBiometricAvailable: _deviceBiometricAvailable,
-      );
+    error: error,
+    biometricEnrolled: _biometricEnrolled,
+    deviceBiometricAvailable: _deviceBiometricAvailable,
+  );
 
   /// `unlocked` emit'i biyometri field'larını taşıyarak yapar (tek nokta — reviewer 4.tur [P1]).
   VaultLockState _unlocked() => VaultLockState.unlocked(
-        biometricEnrolled: _biometricEnrolled,
-        deviceBiometricAvailable: _deviceBiometricAvailable,
-      );
+    biometricEnrolled: _biometricEnrolled,
+    deviceBiometricAvailable: _deviceBiometricAvailable,
+  );
 
   /// Biyometri field'larını mevcut attrs + cihaz yeteneğinden günceller. unlock/
   /// commitSetup/recover/bootstrap sonrası çağrılır → her emit doğru değeri taşır.
@@ -278,7 +278,9 @@ class VaultLockCubit extends Cubit<VaultLockState> {
         emit(const VaultLockState.uninitialized()); // gerçek 0-row → setup
         return;
       }
-      await _attrsStore.write(remote); // server-wins: lokale yaz (IO hatası fırlatabilir)
+      await _attrsStore.write(
+        remote,
+      ); // server-wins: lokale yaz (IO hatası fırlatabilir)
       await _refreshBiometricState(remote);
       emit(_locked()); // master parola sorulur (mevcut unlock)
     } on SyncError {
@@ -361,7 +363,8 @@ class VaultLockCubit extends Cubit<VaultLockState> {
     // Setup restart (review P2): önceki pending masterKey varsa dispose et —
     // doğrudan üzerine yazmak eski handle'ı sızdırırdı.
     _disposeKey();
-    _abortToBackground = false; // hassas işlem başı (review P1 — KeyManager.setup async)
+    _abortToBackground =
+        false; // hassas işlem başı (review P1 — KeyManager.setup async)
     final result = await _keyManager.setup(masterPassword);
     // Arka-plan yarışı (review P1): Argon2id/KEK türetimi sürerken app background
     // olduysa masterKey + mnemonic'i BELLEKTE TUTMA → üretileni hemen dispose et,
@@ -400,7 +403,9 @@ class VaultLockCubit extends Cubit<VaultLockState> {
       } catch (_) {
         _disposeKey();
         _pendingAttrs = null;
-        emit(const VaultLockState.uninitialized()); // diske yazılmadı → kurulmadı
+        emit(
+          const VaultLockState.uninitialized(),
+        ); // diske yazılmadı → kurulmadı
         rethrow;
       }
       // Setup attrs'ında bmk yok → enrolled=false; cihaz yeteneğini hesapla ki
@@ -462,7 +467,9 @@ class VaultLockCubit extends Cubit<VaultLockState> {
   Future<void> unlock(String password) async {
     _abortToBackground = false; // hassas işlem başı (review P1)
     final attrs = await _readAttrsOrThrow();
-    await _refreshBiometricState(attrs); // biyometri state'i (her emit'e taşınır)
+    await _refreshBiometricState(
+      attrs,
+    ); // biyometri state'i (her emit'e taşınır)
     final KeyHandle key;
     try {
       key = await _keyManager.unlock(attrs, password);
@@ -472,7 +479,9 @@ class VaultLockCubit extends Cubit<VaultLockState> {
     }
     var owned = false;
     try {
-      await _migrate(key); // crash sonrası yarım migration unlock yolunda tamamlanır
+      await _migrate(
+        key,
+      ); // crash sonrası yarım migration unlock yolunda tamamlanır
       // Arka-plan yarışı (review P1): Argon2/migration sürerken app background
       // olduysa key'i sahiplenme + unlocked emit ETME → arka planda kilitli kal.
       if (_abortToBackground) {
@@ -489,27 +498,37 @@ class VaultLockCubit extends Cubit<VaultLockState> {
       // Finding 1 (round 2): retry an offline reset's owed remote tombstone.
       unawaited(_replayResetTombstoneIfNeeded());
     } finally {
-      if (!owned) key.dispose(); // migration fail / background-abort → key sızmaz
+      if (!owned) {
+        key.dispose(); // migration fail / background-abort → key sızmaz
+      }
     }
   }
 
   /// Recovery mnemonic + YENİ parola TEK atomik çağrı: recoverUnlock → changePassword
   /// → persist → migration → unlocked. Arada bekleyen masterKey state'i OLUŞMAZ.
   Future<void> recoverWithNewPassword(
-      List<String> mnemonic, String newPassword) async {
+    List<String> mnemonic,
+    String newPassword,
+  ) async {
     _abortToBackground = false; // hassas işlem başı (review P1)
     final attrs = await _readAttrsOrThrow();
     KeyHandle? key;
-    var owned = false; // sahiplik _masterKey'e geçti mi (geçtiyse finally dispose etmez)
+    var owned =
+        false; // sahiplik _masterKey'e geçti mi (geçtiyse finally dispose etmez)
     try {
       key = await _keyManager.recoverUnlock(attrs, mnemonic);
-      final newAttrs =
-          await _keyManager.changePassword(attrs, key, newPassword);
+      final newAttrs = await _keyManager.changePassword(
+        attrs,
+        key,
+        newPassword,
+      );
       await _attrsStore.write(newAttrs);
       // Faz 3 Patch 3 (Adım K): parola değişti → sunucu sarmalı GÜNCELLENMELİ. Marker
       // SET (ağ hatasında unlock'ta dirty-replay yeniden dener); başarıda _sync... clear eder.
       await _attrsDirtyStore?.setDirty();
-      await _refreshBiometricState(newAttrs); // bmk korunmuşsa enrolled true kalır
+      await _refreshBiometricState(
+        newAttrs,
+      ); // bmk korunmuşsa enrolled true kalır
       // Migration BAŞARIYLA bitmeden sahiplenme (review P1): _migrate fırlatırsa
       // key finally'de dispose edilir, _masterKey null kalır (locked invariant'ı korunur).
       await _migrate(key);
@@ -531,7 +550,9 @@ class VaultLockCubit extends Cubit<VaultLockState> {
     } on WeakPasswordException {
       emit(_locked(error: VaultLockError.weakPassword));
     } finally {
-      if (!owned) key?.dispose(); // hata/iptal/migration-fail yolunda ara key sızmaz
+      if (!owned) {
+        key?.dispose(); // hata/iptal/migration-fail yolunda ara key sızmaz
+      }
     }
   }
 
@@ -781,7 +802,9 @@ class VaultLockCubit extends Cubit<VaultLockState> {
         // Couldn't reach the server → owe a retry from the reset instant.
         try {
           await _resetPendingStore?.setPending(resetAt);
-        } catch (_) {/* marker write best-effort; local reset still proceeds */}
+        } catch (_) {
+          /* marker write best-effort; local reset still proceeds */
+        }
       }
     }
 
@@ -790,7 +813,9 @@ class VaultLockCubit extends Cubit<VaultLockState> {
     // disable() idempotent; hata yutulur (reset her durumda tamamlanmalı).
     try {
       await _biometric.disable();
-    } catch (_) {/* reset best-effort: biyometri silinemese de devam */}
+    } catch (_) {
+      /* reset best-effort: biyometri silinemese de devam */
+    }
     _biometricEnrolled = false;
     await _deleteKeys(VaultStorageKeys.all);
     emit(const VaultLockState.uninitialized());
@@ -811,7 +836,9 @@ class VaultLockCubit extends Cubit<VaultLockState> {
       if (since == null) return;
       await repo.tombstoneAllRemoteBefore(uid, since);
       await store.clear();
-    } catch (_) {/* stays pending → retried on a later unlock */}
+    } catch (_) {
+      /* stays pending → retried on a later unlock */
+    }
   }
 
   // --- Biyometri (Patch 5) ---
@@ -838,12 +865,17 @@ class VaultLockCubit extends Cubit<VaultLockState> {
         // attrs yazılamadı → orphan OS key'i temizle, state değişmeden rethrow.
         try {
           await _biometric.disable();
-        } catch (_) {/* temizlik best-effort */}
+        } catch (_) {
+          /* temizlik best-effort */
+        }
         rethrow;
       }
     } finally {
-      enroll.biometricKeyBytes
-          .fillRange(0, enroll.biometricKeyBytes.length, 0); // zero-fill
+      enroll.biometricKeyBytes.fillRange(
+        0,
+        enroll.biometricKeyBytes.length,
+        0,
+      ); // zero-fill
     }
     _biometricEnrolled = true;
     _deviceBiometricAvailable = true;

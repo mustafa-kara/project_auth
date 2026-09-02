@@ -23,8 +23,9 @@ abstract final class SupabaseConfig {
 
   /// Publishable (public) key. Low-privilege; protected by RLS.
   /// The legacy `anonKey` is `@Deprecated` in 2.14.1 → use `publishableKey`.
-  static const String publishableKey =
-      String.fromEnvironment('SUPABASE_PUBLISHABLE_KEY');
+  static const String publishableKey = String.fromEnvironment(
+    'SUPABASE_PUBLISHABLE_KEY',
+  );
 
   /// Email confirmation (PKCE) deep-link callback. Matches the native
   /// intent-filter / URL scheme; registered in Supabase Dashboard → Auth →
@@ -58,10 +59,7 @@ abstract final class SupabaseConfig {
   /// key — accepting it would let a service_role secret be shipped inside a
   /// client build. This project is publishable-key based (see
   /// `supabase/PROJECT_INFO.md`).
-  static void validate({
-    required String url,
-    required String publishableKey,
-  }) {
+  static void validate({required String url, required String publishableKey}) {
     if (url.isEmpty) {
       throw StateError(_message('SUPABASE_URL is missing'));
     }

@@ -23,7 +23,9 @@ class ImportFileTooLargeException implements Exception {
 /// Not valid UTF-8, not valid JSON, or the root is not a JSON object.
 class MalformedImportFileException implements Exception {
   final String message;
-  const MalformedImportFileException([this.message = 'not a readable JSON backup']);
+  const MalformedImportFileException([
+    this.message = 'not a readable JSON backup',
+  ]);
   @override
   String toString() => 'MalformedImportFileException: $message';
 }
@@ -32,7 +34,8 @@ class MalformedImportFileException implements Exception {
 class UnsupportedImportFormatException implements Exception {
   const UnsupportedImportFormatException();
   @override
-  String toString() => 'UnsupportedImportFormatException: unrecognized backup format';
+  String toString() =>
+      'UnsupportedImportFormatException: unrecognized backup format';
 }
 
 /// The source file is password-protected in its own app (Aegis `header.slots`,
@@ -42,7 +45,8 @@ class EncryptedSourceException implements Exception {
   final ImportSource source;
   const EncryptedSourceException(this.source);
   @override
-  String toString() => 'EncryptedSourceException: ${source.name} export is encrypted';
+  String toString() =>
+      'EncryptedSourceException: ${source.name} export is encrypted';
 }
 
 /// The file carries more entries — accounts plus skipped ones — than
@@ -73,7 +77,8 @@ class EmptyImportException implements Exception {
 class WrongBackupPasswordException implements Exception {
   const WrongBackupPasswordException();
   @override
-  String toString() => 'WrongBackupPasswordException: wrong password or corrupted backup';
+  String toString() =>
+      'WrongBackupPasswordException: wrong password or corrupted backup';
 }
 
 /// Backup envelope version is newer than `BackupService.supportedVersion`.
@@ -94,8 +99,9 @@ class UnsupportedBackupVersionException implements Exception {
 /// secrets, and this message reaches logs and (mapped to Turkish) the UI.
 class MalformedMigrationUriException implements Exception {
   final String message;
-  const MalformedMigrationUriException(
-      [this.message = 'not a Google Authenticator export QR']);
+  const MalformedMigrationUriException([
+    this.message = 'not a Google Authenticator export QR',
+  ]);
   @override
   String toString() => 'MalformedMigrationUriException: $message';
 }

@@ -28,10 +28,33 @@ class IssuerAvatar extends StatelessWidget {
 
   /// Gömülü simple-icons slug'ları (assets/icons/*.svg ile birebir).
   static const _availableSlugs = {
-    'auth0', 'binance', 'bitbucket', 'bitwarden', 'cloudflare', 'coinbase',
-    'digitalocean', 'discord', 'docker', 'dropbox', 'facebook', 'github',
-    'gitlab', 'google', 'instagram', 'netlify', 'notion', 'npm', 'okta',
-    'paypal', 'proton', 'reddit', 'steam', 'stripe', 'twitch', 'vercel', 'x',
+    'auth0',
+    'binance',
+    'bitbucket',
+    'bitwarden',
+    'cloudflare',
+    'coinbase',
+    'digitalocean',
+    'discord',
+    'docker',
+    'dropbox',
+    'facebook',
+    'github',
+    'gitlab',
+    'google',
+    'instagram',
+    'netlify',
+    'notion',
+    'npm',
+    'okta',
+    'paypal',
+    'proton',
+    'reddit',
+    'steam',
+    'stripe',
+    'twitch',
+    'vercel',
+    'x',
   };
 
   /// Issuer adını simple-icons slug'ına normalize eder (lowercase, alfanümerik dışı temizle).

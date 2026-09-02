@@ -35,7 +35,10 @@ abstract final class Bip39 {
   static List<String> encode(Uint8List entropy) {
     if (entropy.length != entropyBytes) {
       throw ArgumentError.value(
-          entropy.length, 'entropy', 'BIP39 entropy 32 byte olmalı (256-bit)');
+        entropy.length,
+        'entropy',
+        'BIP39 entropy 32 byte olmalı (256-bit)',
+      );
     }
 
     // entropy bit'leri + checksum bit'leri tek bir bit-dizisinde toplanır.
@@ -80,7 +83,8 @@ abstract final class Bip39 {
 
     if (normalized.length != wordCount) {
       throw FormatException(
-          'BIP39: $wordCount kelime bekleniyor, ${normalized.length} verildi');
+        'BIP39: $wordCount kelime bekleniyor, ${normalized.length} verildi',
+      );
     }
 
     // Kelime → indeks → 11-bit. Tüm bit dizisini topla.
@@ -109,14 +113,16 @@ abstract final class Bip39 {
     // Son 8 bit: verilen checksum.
     int providedChecksum = 0;
     for (int i = 0; i < _checksumBits; i++) {
-      providedChecksum = (providedChecksum << 1) | (bits[entropyBits + i] ? 1 : 0);
+      providedChecksum =
+          (providedChecksum << 1) | (bits[entropyBits + i] ? 1 : 0);
     }
 
     final expectedChecksum = _checksum(entropy);
     // _checksumBits=8 → tüm checksum byte'ı karşılaştırılır.
     if (providedChecksum != expectedChecksum) {
       throw const FormatException(
-          'BIP39: checksum uyuşmuyor (yazım hatası veya bozuk mnemonic)');
+        'BIP39: checksum uyuşmuyor (yazım hatası veya bozuk mnemonic)',
+      );
     }
 
     return entropy;

@@ -58,7 +58,8 @@ Future<void> configureDependencies() async {
 
   // Tüm vault/auth depoları aynı secure_storage instance'ını paylaşır.
   locator.registerLazySingleton<FlutterSecureStorage>(
-      () => const FlutterSecureStorage());
+    () => const FlutterSecureStorage(),
+  );
 
   // E2E kripto servisi (libsodium/sumo). init() native binary'yi yükler — app
   // başlangıcında bir kez await edilir. Cihaz/simülatörde çalışır.
@@ -68,17 +69,22 @@ Future<void> configureDependencies() async {
 
   // Anahtar hiyerarşisi + metadata kalıcılığı.
   locator.registerLazySingleton<KeyManager>(
-      () => KeyManager(locator<CryptoService>()));
+    () => KeyManager(locator<CryptoService>()),
+  );
   locator.registerLazySingleton<KeyAttributesStore>(
-      () => KeyAttributesStore(storage: locator<FlutterSecureStorage>()));
-  locator.registerLazySingleton<VaultMigration>(() => VaultMigration(
-        crypto: locator<CryptoService>(),
-        storage: locator<FlutterSecureStorage>(),
-      ));
+    () => KeyAttributesStore(storage: locator<FlutterSecureStorage>()),
+  );
+  locator.registerLazySingleton<VaultMigration>(
+    () => VaultMigration(
+      crypto: locator<CryptoService>(),
+      storage: locator<FlutterSecureStorage>(),
+    ),
+  );
 
   // Görünüm tercihi (kart/liste) — secure_storage'da kalıcı.
   locator.registerLazySingleton<ViewModeStore>(
-      () => ViewModeStore(storage: locator<FlutterSecureStorage>()));
+    () => ViewModeStore(storage: locator<FlutterSecureStorage>()),
+  );
 
   // Biyometrik kilit açma (Patch 5). KENDİ options'lı/namespace'li storage'ı var
   // (BiometricServiceImpl içinde) — paylaşılan no-options singleton DEĞİL, çünkü
@@ -89,74 +95,98 @@ Future<void> configureDependencies() async {
   // main.dart'ta DI'dan ÖNCE çağrılmış olmalı (singleton hazır).
   locator.registerLazySingleton<SupabaseClient>(() => Supabase.instance.client);
   locator.registerLazySingleton<AuthRepository>(
-      () => SupabaseAuthRepository(locator<SupabaseClient>()));
+    () => SupabaseAuthRepository(locator<SupabaseClient>()),
+  );
 
   // Faz 3 Patch 2: kripto metadatası (key_attributes) sunucu deposu (upload/restore).
   locator.registerLazySingleton<KeyAttributesRepository>(
-      () => SupabaseKeyAttributesRepository(locator<SupabaseClient>()));
+    () => SupabaseKeyAttributesRepository(locator<SupabaseClient>()),
+  );
 
   // Faz 3 Patch 3: şifreli token sunucu deposu (push/pull + Realtime tetikleyici).
   locator.registerLazySingleton<RemoteTokenRepository>(
-      () => SupabaseTokenRepository(locator<SupabaseClient>()));
+    () => SupabaseTokenRepository(locator<SupabaseClient>()),
+  );
 
   // Multi-vault (kullanıcı kararı 7): aktif uid + per-uid legacy karar + onay store.
   locator.registerLazySingleton<ActiveAccountStore>(
-      () => ActiveAccountStore(storage: locator<FlutterSecureStorage>()));
+    () => ActiveAccountStore(storage: locator<FlutterSecureStorage>()),
+  );
   locator.registerLazySingleton<LegacyLinkStore>(
-      () => LegacyLinkStore(storage: locator<FlutterSecureStorage>()));
+    () => LegacyLinkStore(storage: locator<FlutterSecureStorage>()),
+  );
   locator.registerLazySingleton<PendingConfirmationStore>(
-      () => PendingConfirmationStore(storage: locator<FlutterSecureStorage>()));
-  locator.registerLazySingleton<AccountVaultManager>(() => AccountVaultManager(
-        storage: locator<FlutterSecureStorage>(),
-        activeStore: locator<ActiveAccountStore>(),
-        legacyStore: locator<LegacyLinkStore>(),
-        biometric: locator<BiometricService>(),
-      ));
+    () => PendingConfirmationStore(storage: locator<FlutterSecureStorage>()),
+  );
+  locator.registerLazySingleton<AccountVaultManager>(
+    () => AccountVaultManager(
+      storage: locator<FlutterSecureStorage>(),
+      activeStore: locator<ActiveAccountStore>(),
+      legacyStore: locator<LegacyLinkStore>(),
+      biometric: locator<BiometricService>(),
+    ),
+  );
 
   // Faz 3 Patch 4: devices kaydı (owner-only). device_id GLOBAL (uid-bağımsız).
   locator.registerLazySingleton<DeviceRepository>(
-      () => SupabaseDeviceRepository(locator<SupabaseClient>()));
+    () => SupabaseDeviceRepository(locator<SupabaseClient>()),
+  );
   locator.registerLazySingleton<StableDeviceIdStore>(
-      () => StableDeviceIdStore(storage: locator<FlutterSecureStorage>()));
-  locator.registerLazySingleton<DeviceRegistrar>(() => DeviceRegistrar(
-        repo: locator<DeviceRepository>(),
-        idStore: locator<StableDeviceIdStore>(),
-      ));
+    () => StableDeviceIdStore(storage: locator<FlutterSecureStorage>()),
+  );
+  locator.registerLazySingleton<DeviceRegistrar>(
+    () => DeviceRegistrar(
+      repo: locator<DeviceRepository>(),
+      idStore: locator<StableDeviceIdStore>(),
+    ),
+  );
 
   // Faz 3 Patch 4: public read tablolar (catalog/feature_flags/announcements) — salt-okur.
   locator.registerLazySingleton<CatalogRepository>(
-      () => SupabaseCatalogRepository(locator<SupabaseClient>()));
+    () => SupabaseCatalogRepository(locator<SupabaseClient>()),
+  );
   locator.registerLazySingleton<CatalogCacheStore>(
-      () => CatalogCacheStore(storage: locator<FlutterSecureStorage>()));
-  locator.registerLazySingleton<IssuerCatalogHolder>(() => IssuerCatalogHolder(
-        repo: locator<CatalogRepository>(),
-        cache: locator<CatalogCacheStore>(),
-      ));
+    () => CatalogCacheStore(storage: locator<FlutterSecureStorage>()),
+  );
+  locator.registerLazySingleton<IssuerCatalogHolder>(
+    () => IssuerCatalogHolder(
+      repo: locator<CatalogRepository>(),
+      cache: locator<CatalogCacheStore>(),
+    ),
+  );
 
   locator.registerLazySingleton<FeatureFlagsRepository>(
-      () => SupabaseFeatureFlagsRepository(locator<SupabaseClient>()));
+    () => SupabaseFeatureFlagsRepository(locator<SupabaseClient>()),
+  );
   locator.registerLazySingleton<FeatureFlagsCacheStore>(
-      () => FeatureFlagsCacheStore(storage: locator<FlutterSecureStorage>()));
-  locator.registerLazySingleton<FeatureFlagsService>(() => FeatureFlagsService(
-        repo: locator<FeatureFlagsRepository>(),
-        cache: locator<FeatureFlagsCacheStore>(),
-      ));
+    () => FeatureFlagsCacheStore(storage: locator<FlutterSecureStorage>()),
+  );
+  locator.registerLazySingleton<FeatureFlagsService>(
+    () => FeatureFlagsService(
+      repo: locator<FeatureFlagsRepository>(),
+      cache: locator<FeatureFlagsCacheStore>(),
+    ),
+  );
 
   locator.registerLazySingleton<AnnouncementsRepository>(
-      () => SupabaseAnnouncementsRepository(locator<SupabaseClient>()));
+    () => SupabaseAnnouncementsRepository(locator<SupabaseClient>()),
+  );
   locator.registerLazySingleton<AnnouncementsCacheStore>(
-      () => AnnouncementsCacheStore(storage: locator<FlutterSecureStorage>()));
+    () => AnnouncementsCacheStore(storage: locator<FlutterSecureStorage>()),
+  );
 
   // Faz 5 Patch 1 — import / şifreli export. YENİ kripto primitifi YOK:
   // BackupService aynı `CryptoService` (Argon2id + XChaCha20-Poly1305) üstünde
   // çalışır, KDF maliyetleri `defaultKdfParams()` tek kaynağından gelir.
   locator.registerLazySingleton<BackupService>(
-      () => BackupService(locator<CryptoService>()));
+    () => BackupService(locator<CryptoService>()),
+  );
 
   // Sistem dosya seçici portu (file_picker). Picker app'i arka plana attığı için
   // ÇAĞIRAN, VaultLockCubit.beginSystemFileFlow/endSystemFileFlow ile sarmalar.
   locator.registerLazySingleton<DocumentPort>(
-      () => const FilePickerDocumentPort());
+    () => const FilePickerDocumentPort(),
+  );
 
   // Kaynak parser'lar burada bağlanır; `detector`/`keyOf` GEÇİLMEZ, böylece
   // üretimde her zaman gerçek `detectSource` / `dedupeKey` kullanılır.
@@ -168,10 +198,12 @@ Future<void> configureDependencies() async {
   // ÇİFTLENİRDİ. Resolver (düz fonksiyon değil) çünkü her import'ta TAZE katalog
   // anlık görüntüsü alınmalı ve worker isolate'a giden closure yalnız o
   // (değişmez) anlık görüntüyü yakalamalı — holder/repository'yi ASLA.
-  locator.registerLazySingleton<ImportService>(() => ImportService(
-        backup: locator<BackupService>(),
-        parsers: const [AegisParser(), TwoFasParser()],
-        canonicalizeResolver: () =>
-            canonicalizerFor(locator<IssuerCatalogHolder>().current),
-      ));
+  locator.registerLazySingleton<ImportService>(
+    () => ImportService(
+      backup: locator<BackupService>(),
+      parsers: const [AegisParser(), TwoFasParser()],
+      canonicalizeResolver: () =>
+          canonicalizerFor(locator<IssuerCatalogHolder>().current),
+    ),
+  );
 }

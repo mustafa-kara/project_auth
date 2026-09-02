@@ -42,7 +42,10 @@ class SupabaseAnnouncementsRepository implements AnnouncementsRepository {
     if (e is AuthRetryableFetchException) return const SyncNetworkError();
     if (e is PostgrestException) {
       final code = e.code ?? '';
-      if (code == '42501' || code == 'PGRST301' || code == '401' || code == '403') {
+      if (code == '42501' ||
+          code == 'PGRST301' ||
+          code == '401' ||
+          code == '403') {
         return const SyncPermissionDenied();
       }
       return SyncUnknownError('PostgREST ${e.code ?? ''}: ${e.message}');

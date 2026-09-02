@@ -43,7 +43,8 @@ class _FakeRepo implements VaultRepository {
   Future<VaultLoadResult> load() async =>
       VaultLoadResult(accounts: List.of(stored));
   @override
-  Future<void> save(List<OtpAccount> accounts) async => stored = List.of(accounts);
+  Future<void> save(List<OtpAccount> accounts) async =>
+      stored = List.of(accounts);
   @override
   Future<void> purgeCorrupted() async {}
 }
@@ -92,7 +93,10 @@ class _FakeDocuments implements DocumentPort {
     final path = imagePath;
     if (path == null) return null;
     return PickedImage(
-        path: path, name: 'qr.png', sizeBytes: File(path).lengthSync());
+      path: path,
+      name: 'qr.png',
+      sizeBytes: File(path).lengthSync(),
+    );
   }
 
   /// Sıra kanıtı: genel temizlik çağrıldığında seçicinin bıraktığı nüsha ARTIK
@@ -146,11 +150,14 @@ class _FakeMigration implements MigrationScanController {
 
 /// Kamera yerine geçen yer tutucu — bu dosyada hiç karesi okunmaz.
 Widget _fakeScanner(
-        BuildContext context, void Function(BarcodeCapture capture) onDetect) =>
-    const SizedBox.shrink();
+  BuildContext context,
+  void Function(BarcodeCapture capture) onDetect,
+) => const SizedBox.shrink();
 
-final Finder _imageAction =
-    find.widgetWithIcon(IconButton, Icons.image_outlined);
+final Finder _imageAction = find.widgetWithIcon(
+  IconButton,
+  Icons.image_outlined,
+);
 
 void main() {
   late Directory cacheDir;
@@ -193,41 +200,44 @@ void main() {
     final page = ScanPage(
       debugMigration: migration,
       debugScannerBuilder: _fakeScanner,
-      debugCamera: (
-        stop: () async => stops++,
-        start: () async => starts++,
-      ),
+      debugCamera: (stop: () async => stops++, start: () async => starts++),
       debugQrDecoder: decoder,
       debugDocuments: documents,
     );
 
-    await tester.pumpWidget(MultiBlocProvider(
-      providers: [
-        BlocProvider<VaultCubit>.value(value: vault),
-        BlocProvider<VaultLockCubit>.value(value: lock),
-      ],
-      child: MaterialApp(
-        home: Scaffold(
-          body: Builder(
-            builder: (c) => TextButton(
-              onPressed: () => Navigator.of(c)
-                  .push(MaterialPageRoute<void>(builder: (_) => page)),
-              child: const Text('tarayıcıyı aç'),
+    await tester.pumpWidget(
+      MultiBlocProvider(
+        providers: [
+          BlocProvider<VaultCubit>.value(value: vault),
+          BlocProvider<VaultLockCubit>.value(value: lock),
+        ],
+        child: MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (c) => TextButton(
+                onPressed: () => Navigator.of(
+                  c,
+                ).push(MaterialPageRoute<void>(builder: (_) => page)),
+                child: const Text('tarayıcıyı aç'),
+              ),
             ),
           ),
         ),
       ),
-    ));
+    );
     await tester.tap(find.text('tarayıcıyı aç'));
     await tester.pumpAndSettle();
     return vault;
   }
 
-  QrImageDecoder decoderOf(List<String> raws) => (_) async => raws;
-  QrImageDecoder throwingDecoder(Object error) => (_) async => throw error;
+  QrImageDecoder decoderOf(List<String> raws) =>
+      (_) async => raws;
+  QrImageDecoder throwingDecoder(Object error) =>
+      (_) async => throw error;
 
-  testWidgets('aksiyon AppBar\'da ve kamera durumundan bağımsız',
-      (tester) async {
+  testWidgets('aksiyon AppBar\'da ve kamera durumundan bağımsız', (
+    tester,
+  ) async {
     await pumpScan(tester, decoder: decoderOf(const []));
     expect(_imageAction, findsOneWidget);
     expect(
@@ -237,8 +247,9 @@ void main() {
     );
   });
 
-  testWidgets('iptal: muafiyet açılıp kapanır, kamera geri gelir',
-      (tester) async {
+  testWidgets('iptal: muafiyet açılıp kapanır, kamera geri gelir', (
+    tester,
+  ) async {
     documents.imagePath = null; // iptal
     await pumpScan(tester, decoder: decoderOf(const []));
 
@@ -262,18 +273,25 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Bu görüntüde QR kod bulunamadı.'), findsOneWidget);
-    expect(cached.existsSync(), isFalse,
-        reason: 'nüsha canlı secret\'ın düz resmi — diskte kalmamalı');
+    expect(
+      cached.existsSync(),
+      isFalse,
+      reason: 'nüsha canlı secret\'ın düz resmi — diskte kalmamalı',
+    );
     expect(documents.clears, 1);
     expect(lock.ends, 1);
   });
 
-  testWidgets('tek otpauth QR → token eklenir ve ekran kapanır',
-      (tester) async {
+  testWidgets('tek otpauth QR → token eklenir ve ekran kapanır', (
+    tester,
+  ) async {
     seedCachedImage();
     final repo = _FakeRepo();
-    final vault = await pumpScan(tester,
-        decoder: decoderOf(const [_singleToken]), repo: repo);
+    final vault = await pumpScan(
+      tester,
+      decoder: decoderOf(const [_singleToken]),
+      repo: repo,
+    );
 
     await tester.tap(_imageAction);
     await tester.pumpAndSettle();
@@ -285,15 +303,21 @@ void main() {
     expect(lock.ends, 1);
   });
 
-  testWidgets('tek görüntüdeki iki aktarım QR\'ı sırayla işlenir',
-      (tester) async {
+  testWidgets('tek görüntüdeki iki aktarım QR\'ı sırayla işlenir', (
+    tester,
+  ) async {
     seedCachedImage();
-    final migration = _FakeMigration(script: const {
-      _qrA: MigrationBatchAdded(1, 2),
-      _qrB: MigrationScanComplete(2, 2),
-    });
-    await pumpScan(tester,
-        decoder: decoderOf(const [_qrA, _qrB]), migration: migration);
+    final migration = _FakeMigration(
+      script: const {
+        _qrA: MigrationBatchAdded(1, 2),
+        _qrB: MigrationScanComplete(2, 2),
+      },
+    );
+    await pumpScan(
+      tester,
+      decoder: decoderOf(const [_qrA, _qrB]),
+      migration: migration,
+    );
 
     await tester.tap(_imageAction);
     await tester.pumpAndSettle();
@@ -306,23 +330,30 @@ void main() {
 
   testWidgets('desteklenmeyen platform → cihaza özgü mesaj', (tester) async {
     seedCachedImage();
-    await pumpScan(tester,
-        decoder: throwingDecoder(const QrImageUnsupportedException()));
+    await pumpScan(
+      tester,
+      decoder: throwingDecoder(const QrImageUnsupportedException()),
+    );
 
     await tester.tap(_imageAction);
     await tester.pumpAndSettle();
 
     expect(
-        find.text('Bu cihazda görüntüden okuma desteklenmiyor.'), findsOneWidget);
+      find.text('Bu cihazda görüntüden okuma desteklenmiyor.'),
+      findsOneWidget,
+    );
     expect(documents.clears, 1, reason: 'temizlik her yolda');
     expect(lock.ends, 1);
   });
 
-  testWidgets('çözülemeyen görüntü → "okunamadı", neden açıklanmaz',
-      (tester) async {
+  testWidgets('çözülemeyen görüntü → "okunamadı", neden açıklanmaz', (
+    tester,
+  ) async {
     final cached = seedCachedImage();
-    await pumpScan(tester,
-        decoder: throwingDecoder(const QrImageUnreadableException()));
+    await pumpScan(
+      tester,
+      decoder: throwingDecoder(const QrImageUnreadableException()),
+    );
 
     await tester.tap(_imageAction);
     await tester.pumpAndSettle();
@@ -332,14 +363,18 @@ void main() {
     expect(documents.clears, 1);
   });
 
-  testWidgets('boyut tavanı seçicide uygulanır → çözücü HİÇ çağrılmaz',
-      (tester) async {
+  testWidgets('boyut tavanı seçicide uygulanır → çözücü HİÇ çağrılmaz', (
+    tester,
+  ) async {
     documents.pickError = const ImportFileTooLargeException(1 << 30, 1 << 24);
     var decoded = 0;
-    await pumpScan(tester, decoder: (_) async {
-      decoded++;
-      return const [];
-    });
+    await pumpScan(
+      tester,
+      decoder: (_) async {
+        decoded++;
+        return const [];
+      },
+    );
 
     await tester.tap(_imageAction);
     await tester.pumpAndSettle();
@@ -352,8 +387,9 @@ void main() {
     expect(starts, 1);
   });
 
-  testWidgets('seçici patlarsa muafiyet ve temizlik yine kapanır',
-      (tester) async {
+  testWidgets('seçici patlarsa muafiyet ve temizlik yine kapanır', (
+    tester,
+  ) async {
     documents.pickError = StateError('picker crashed');
     await pumpScan(tester, decoder: decoderOf(const []));
 
@@ -366,8 +402,9 @@ void main() {
     expect(documents.clears, 1);
   });
 
-  testWidgets('seçici açıkken sayfa sökülürse muafiyet kapatılır',
-      (tester) async {
+  testWidgets('seçici açıkken sayfa sökülürse muafiyet kapatılır', (
+    tester,
+  ) async {
     final gate = Completer<PickedImage?>();
     documents = _StuckDocuments(gate.future);
     await pumpScan(tester, decoder: decoderOf(const []));

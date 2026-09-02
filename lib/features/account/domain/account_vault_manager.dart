@@ -30,10 +30,10 @@ class AccountVaultManager {
     required ActiveAccountStore activeStore,
     required LegacyLinkStore legacyStore,
     required BiometricService biometric,
-  })  : _storage = storage,
-        _active = activeStore,
-        _legacy = legacyStore,
-        _biometric = biometric;
+  }) : _storage = storage,
+       _active = activeStore,
+       _legacy = legacyStore,
+       _biometric = biometric;
 
   final FlutterSecureStorage _storage;
   final ActiveAccountStore _active;
@@ -66,39 +66,50 @@ class AccountVaultManager {
 
     // 1) key_attributes: uid-siz oku → `bmk` TEMİZLE → uid namespace'e yaz.
     final legacyAttrsStore = KeyAttributesStore(storage: _storage);
-    final attrs = await legacyAttrsStore.read(); // FormatException → çağıran ele alır
+    final attrs = await legacyAttrsStore
+        .read(); // FormatException → çağıran ele alır
     if (attrs != null) {
       final cleared = attrs.copyWith(clearBiometric: true); // bmk taşınmaz
-      await KeyAttributesStore(storage: _storage, keyPrefix: prefix)
-          .write(cleared);
+      await KeyAttributesStore(
+        storage: _storage,
+        keyPrefix: prefix,
+      ).write(cleared);
     }
 
     // 2) encrypted vault: uid-siz JSON'u uid namespace'e kopyala (ciphertext aynen).
-    final legacyVault =
-        await _storage.read(key: EncryptedVaultRepository.vaultKey);
+    final legacyVault = await _storage.read(
+      key: EncryptedVaultRepository.vaultKey,
+    );
     if (legacyVault != null && legacyVault.isNotEmpty) {
       await _storage.write(
-          key: '$prefix${EncryptedVaultRepository.vaultKey}',
-          value: legacyVault);
+        key: '$prefix${EncryptedVaultRepository.vaultKey}',
+        value: legacyVault,
+      );
     }
 
     // 3) view mode + migration marker.
     final legacyView = await _storage.read(key: ViewModeStore.storageKey);
     if (legacyView != null) {
       await _storage.write(
-          key: '$prefix${ViewModeStore.storageKey}', value: legacyView);
+        key: '$prefix${ViewModeStore.storageKey}',
+        value: legacyView,
+      );
     }
     final legacyMarker = await _storage.read(key: VaultMigration.markerKey);
     if (legacyMarker != null) {
       await _storage.write(
-          key: '$prefix${VaultMigration.markerKey}', value: legacyMarker);
+        key: '$prefix${VaultMigration.markerKey}',
+        value: legacyMarker,
+      );
     }
 
     // 4) Biyometri OS anahtarını temizle (sabit namespace'te kaldığı için taşınamaz;
     //    bmk zaten attrs'tan düşürüldü → tutarlı). best-effort.
     try {
       await _biometric.disable();
-    } catch (_) {/* yeniden enroll gerekir; engel değil */}
+    } catch (_) {
+      /* yeniden enroll gerekir; engel değil */
+    }
 
     // 5) Eski uid-siz anahtarları sil (taşındı). plaintext Faz1 zaten yok/taşınmış.
     await _storage.delete(key: KeyAttributesStore.storageKey);

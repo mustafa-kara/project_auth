@@ -43,7 +43,9 @@ class WrongRecoveryKeyException implements Exception {
 /// toptan bozulma). "Boş vault" gibi davranılmaz — kullanıcıya açıkça bildirilir.
 class VaultIntegrityException implements Exception {
   final String message;
-  const VaultIntegrityException([this.message = 'Vault bütünlüğü doğrulanamadı']);
+  const VaultIntegrityException([
+    this.message = 'Vault bütünlüğü doğrulanamadı',
+  ]);
   @override
   String toString() => 'VaultIntegrityException: $message';
 }

@@ -24,11 +24,36 @@ import 'package:project_auth/features/auth/presentation/bloc/vault_lock_state.da
 class _FakeStorage implements FlutterSecureStorage {
   final Map<String, String> data = {};
   @override
-  Future<String?> read({required String key, dynamic iOptions, dynamic aOptions, dynamic lOptions, dynamic webOptions, dynamic mOptions, dynamic wOptions}) async => data[key];
+  Future<String?> read({
+    required String key,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async => data[key];
   @override
-  Future<void> write({required String key, required String? value, dynamic iOptions, dynamic aOptions, dynamic lOptions, dynamic webOptions, dynamic mOptions, dynamic wOptions}) async => data[key] = value ?? '';
+  Future<void> write({
+    required String key,
+    required String? value,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async => data[key] = value ?? '';
   @override
-  Future<void> delete({required String key, dynamic iOptions, dynamic aOptions, dynamic lOptions, dynamic webOptions, dynamic mOptions, dynamic wOptions}) async => data.remove(key);
+  Future<void> delete({
+    required String key,
+    dynamic iOptions,
+    dynamic aOptions,
+    dynamic lOptions,
+    dynamic webOptions,
+    dynamic mOptions,
+    dynamic wOptions,
+  }) async => data.remove(key);
   @override
   noSuchMethod(Invocation i) => throw UnimplementedError('$i');
 }
@@ -48,10 +73,10 @@ class _FakeAuth implements AuthRepository {
 /// signOut'u sayan SessionCubit (gerçek AuthRepository çağrısı yapmaz).
 class _FakeSessionCubit extends SessionCubit {
   _FakeSessionCubit(FlutterSecureStorage storage)
-      : super(
-          auth: _FakeAuth(),
-          pendingStore: PendingConfirmationStore(storage: storage),
-        );
+    : super(
+        auth: _FakeAuth(),
+        pendingStore: PendingConfirmationStore(storage: storage),
+      );
   int signOutCount = 0;
   @override
   Future<void> signOut() async => signOutCount++;
@@ -67,13 +92,15 @@ class _FakeBiometric implements BiometricService {
 /// retryRestore'u sayan VaultLockCubit; başlangıçta restoreFailed.
 class _FakeLockCubit extends VaultLockCubit {
   _FakeLockCubit(FlutterSecureStorage storage)
-      : super(
-          keyManager: _NoKeyManager(),
-          attrsStore: KeyAttributesStore(storage: storage), // dokunulmaz (retry override)
-          biometric: _FakeBiometric(),
-          migrate: (_) async {},
-          deleteKeys: (_) async {},
-        ) {
+    : super(
+        keyManager: _NoKeyManager(),
+        attrsStore: KeyAttributesStore(
+          storage: storage,
+        ), // dokunulmaz (retry override)
+        biometric: _FakeBiometric(),
+        migrate: (_) async {},
+        deleteKeys: (_) async {},
+      ) {
     emit(const VaultLockState.restoreFailed());
   }
   int retryCount = 0;
@@ -88,31 +115,33 @@ class _NoKeyManager implements KeyManager {
 
 void main() {
   Widget pump(_FakeLockCubit lock, _FakeSessionCubit session) => MaterialApp(
-        home: MultiBlocProvider(
-          providers: [
-            BlocProvider<VaultLockCubit>.value(value: lock),
-            BlocProvider<SessionCubit>.value(value: session),
-          ],
-          child: const RestoreFailedPage(),
-        ),
-      );
+    home: MultiBlocProvider(
+      providers: [
+        BlocProvider<VaultLockCubit>.value(value: lock),
+        BlocProvider<SessionCubit>.value(value: session),
+      ],
+      child: const RestoreFailedPage(),
+    ),
+  );
 
-  testWidgets('parola/recovery/biyometri aksiyonu YOK; yalnız retry + signOut',
-      (tester) async {
-    final storage = _FakeStorage();
-    final lock = _FakeLockCubit(storage);
-    final session = _FakeSessionCubit(storage);
-    await tester.pumpWidget(pump(lock, session));
+  testWidgets(
+    'parola/recovery/biyometri aksiyonu YOK; yalnız retry + signOut',
+    (tester) async {
+      final storage = _FakeStorage();
+      final lock = _FakeLockCubit(storage);
+      final session = _FakeSessionCubit(storage);
+      await tester.pumpWidget(pump(lock, session));
 
-    // Parola alanı (TextField) bu ekranda OLMAMALI.
-    expect(find.byType(TextField), findsNothing);
-    // İki güvenli aksiyon var.
-    expect(find.text('Tekrar dene'), findsOneWidget);
-    expect(find.text('Çıkış yap / hesap değiştir'), findsOneWidget);
+      // Parola alanı (TextField) bu ekranda OLMAMALI.
+      expect(find.byType(TextField), findsNothing);
+      // İki güvenli aksiyon var.
+      expect(find.text('Tekrar dene'), findsOneWidget);
+      expect(find.text('Çıkış yap / hesap değiştir'), findsOneWidget);
 
-    await lock.close();
-    await session.close();
-  });
+      await lock.close();
+      await session.close();
+    },
+  );
 
   testWidgets('"Tekrar dene" → retryRestore çağrılır', (tester) async {
     final storage = _FakeStorage();

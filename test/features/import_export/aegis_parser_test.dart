@@ -14,10 +14,10 @@ Map<String, dynamic> _fixture(String name) =>
 
 /// Minimal Aegis envelope around [entries], for cases no fixture should carry.
 Map<String, dynamic> _vault(List<Object?> entries) => {
-      'version': 1,
-      'header': <String, dynamic>{'slots': null, 'params': null},
-      'db': <String, dynamic>{'version': 3, 'entries': entries},
-    };
+  'version': 1,
+  'header': <String, dynamic>{'slots': null, 'params': null},
+  'db': <String, dynamic>{'version': 3, 'entries': entries},
+};
 
 Map<String, dynamic> _entry({
   String type = 'totp',
@@ -29,8 +29,7 @@ Map<String, dynamic> _entry({
     'digits': 6,
     'period': 30,
   },
-}) =>
-    {'type': type, 'issuer': issuer, 'name': name, 'info': info};
+}) => {'type': type, 'issuer': issuer, 'name': name, 'info': info};
 
 void main() {
   const parser = AegisParser();
@@ -105,8 +104,11 @@ void main() {
     test('an unknown group uuid yields no tag and NO skipped entry', () {
       expect(result.accounts[3].tags, isEmpty);
       expect(result.skipped, isEmpty);
-      expect(result.accounts, hasLength(5),
-          reason: 'a stale group reference must never drop a token');
+      expect(
+        result.accounts,
+        hasLength(5),
+        reason: 'a stale group reference must never drop a token',
+      );
     });
 
     test('an empty "groups" list yields no tags', () {
@@ -118,19 +120,22 @@ void main() {
   group('groups → tags', () {
     /// An Aegis envelope with an explicit `db.groups` index.
     Map<String, dynamic> vaultWithGroups(
-            List<Object?> groups, List<Object?> entries) =>
-        {
-          'version': 1,
-          'header': <String, dynamic>{'slots': null, 'params': null},
-          'db': <String, dynamic>{
-            'version': 3,
-            'entries': entries,
-            'groups': groups,
-          },
-        };
+      List<Object?> groups,
+      List<Object?> entries,
+    ) => {
+      'version': 1,
+      'header': <String, dynamic>{'slots': null, 'params': null},
+      'db': <String, dynamic>{
+        'version': 3,
+        'entries': entries,
+        'groups': groups,
+      },
+    };
 
-    Map<String, dynamic> group(String uuid, String name) =>
-        {'uuid': uuid, 'name': name};
+    Map<String, dynamic> group(String uuid, String name) => {
+      'uuid': uuid,
+      'name': name,
+    };
 
     List<String> tagsOf(Map<String, dynamic> vault) =>
         parser.parse(vault).accounts.single.tags;
@@ -144,20 +149,29 @@ void main() {
     });
 
     test('uuid references and the legacy field can coexist', () {
-      final vault = vaultWithGroups([
-        group('g1', 'Work'),
-      ], [
-        {..._entry(), 'groups': ['g1'], 'group': 'Eski'},
-      ]);
+      final vault = vaultWithGroups(
+        [group('g1', 'Work')],
+        [
+          {
+            ..._entry(),
+            'groups': ['g1'],
+            'group': 'Eski',
+          },
+        ],
+      );
       expect(tagsOf(vault), ['Work', 'Eski']);
     });
 
     test('a 40-character group name is clipped to 32 runes', () {
-      final vault = vaultWithGroups([
-        group('g1', 'g' * 40),
-      ], [
-        {..._entry(), 'groups': ['g1']},
-      ]);
+      final vault = vaultWithGroups(
+        [group('g1', 'g' * 40)],
+        [
+          {
+            ..._entry(),
+            'groups': ['g1'],
+          },
+        ],
+      );
       expect(tagsOf(vault).single, 'g' * OtpAccount.maxTagRunes);
     });
 
@@ -173,12 +187,15 @@ void main() {
     });
 
     test('duplicate references collapse into one tag', () {
-      final vault = vaultWithGroups([
-        group('g1', 'Work'),
-        group('g2', 'Work'),
-      ], [
-        {..._entry(), 'groups': ['g1', 'g2', 'g1']},
-      ]);
+      final vault = vaultWithGroups(
+        [group('g1', 'Work'), group('g2', 'Work')],
+        [
+          {
+            ..._entry(),
+            'groups': ['g1', 'g2', 'g1'],
+          },
+        ],
+      );
       expect(tagsOf(vault), ['Work']);
     });
 
@@ -187,7 +204,10 @@ void main() {
       // with zero tags and zero skipped entries.
       final broken = <Map<String, dynamic>>[
         vaultWithGroups(const [], [
-          {..._entry(), 'groups': ['nobody']},
+          {
+            ..._entry(),
+            'groups': ['nobody'],
+          },
         ]),
         // groups index is not a list
         {
@@ -197,32 +217,50 @@ void main() {
             'version': 3,
             'groups': 'Work',
             'entries': [
-              {..._entry(), 'groups': ['g1']},
+              {
+                ..._entry(),
+                'groups': ['g1'],
+              },
             ],
           },
         },
         // entry.groups is not a list
-        vaultWithGroups([
-          group('g1', 'Work'),
-        ], [
-          {..._entry(), 'groups': 'g1'},
-        ]),
+        vaultWithGroups(
+          [group('g1', 'Work')],
+          [
+            {..._entry(), 'groups': 'g1'},
+          ],
+        ),
         // references are not strings
-        vaultWithGroups([
-          group('g1', 'Work'),
-        ], [
-          {..._entry(), 'groups': [1, null, {'uuid': 'g1'}]},
-        ]),
+        vaultWithGroups(
+          [group('g1', 'Work')],
+          [
+            {
+              ..._entry(),
+              'groups': [
+                1,
+                null,
+                {'uuid': 'g1'},
+              ],
+            },
+          ],
+        ),
         // group rows are missing halves / wrongly typed
-        vaultWithGroups([
-          {'uuid': 'g1'},
-          {'name': 'Work'},
-          {'uuid': 'g2', 'name': '   '},
-          {'uuid': 3, 'name': 'Work'},
-          'not a map',
-        ], [
-          {..._entry(), 'groups': ['g1', 'g2']},
-        ]),
+        vaultWithGroups(
+          [
+            {'uuid': 'g1'},
+            {'name': 'Work'},
+            {'uuid': 'g2', 'name': '   '},
+            {'uuid': 3, 'name': 'Work'},
+            'not a map',
+          ],
+          [
+            {
+              ..._entry(),
+              'groups': ['g1', 'g2'],
+            },
+          ],
+        ),
         // legacy field is not a string
         _vault([
           {..._entry(), 'group': 42},
@@ -233,30 +271,37 @@ void main() {
         final result = parser.parse(vault);
         expect(result.accounts, hasLength(1));
         expect(result.accounts.single.tags, isEmpty);
-        expect(result.skipped, isEmpty,
-            reason: 'a group problem must never produce a SkippedEntry');
+        expect(
+          result.skipped,
+          isEmpty,
+          reason: 'a group problem must never produce a SkippedEntry',
+        );
       }
     });
 
     test('the first row wins a duplicated group uuid', () {
-      final vault = vaultWithGroups([
-        group('g1', 'Once'),
-        group('g1', 'Twice'),
-      ], [
-        {..._entry(), 'groups': ['g1']},
-      ]);
+      final vault = vaultWithGroups(
+        [group('g1', 'Once'), group('g1', 'Twice')],
+        [
+          {
+            ..._entry(),
+            'groups': ['g1'],
+          },
+        ],
+      );
       expect(tagsOf(vault), ['Once']);
     });
 
     test('a skipped entry stays skipped regardless of its group', () {
-      final vault = vaultWithGroups([
-        group('g1', 'Work'),
-      ], [
-        {
-          ..._entry(type: 'yandex'),
-          'groups': ['g1'],
-        },
-      ]);
+      final vault = vaultWithGroups(
+        [group('g1', 'Work')],
+        [
+          {
+            ..._entry(type: 'yandex'),
+            'groups': ['g1'],
+          },
+        ],
+      );
       final result = parser.parse(vault);
       expect(result.accounts, isEmpty);
       expect(result.skipped.single.reason, SkipReason.unsupportedType);
@@ -369,8 +414,13 @@ void main() {
     test('non-empty header.slots → EncryptedSourceException(aegis)', () {
       expect(
         () => parser.parse(_fixture('aegis_encrypted_slots.json')),
-        throwsA(isA<EncryptedSourceException>()
-            .having((e) => e.source, 'source', ImportSource.aegis)),
+        throwsA(
+          isA<EncryptedSourceException>().having(
+            (e) => e.source,
+            'source',
+            ImportSource.aegis,
+          ),
+        ),
       );
     });
 
@@ -397,8 +447,10 @@ void main() {
 
   group('malformed root structures', () {
     test('entries is an object instead of a list', () {
-      expect(() => parser.parse(_fixture('malformed.json')),
-          throwsA(isA<MalformedImportFileException>()));
+      expect(
+        () => parser.parse(_fixture('malformed.json')),
+        throwsA(isA<MalformedImportFileException>()),
+      );
     });
 
     test('db is not an object', () {
@@ -431,51 +483,63 @@ void main() {
     });
 
     test('missing info object is skipped', () {
-      final result = parser.parse(_vault([
-        {'type': 'totp', 'issuer': 'Acme', 'name': 'user'},
-      ]));
+      final result = parser.parse(
+        _vault([
+          {'type': 'totp', 'issuer': 'Acme', 'name': 'user'},
+        ]),
+      );
       expect(result.accounts, isEmpty);
       expect(result.skipped.single.reason, SkipReason.invalidFields);
     });
 
     test('missing type is skipped as invalidFields', () {
-      final result = parser.parse(_vault([
-        {
-          'issuer': 'Acme',
-          'name': 'user',
-          'info': const {'secret': 'JBSWY3DPEHPK3PXP'},
-        },
-      ]));
+      final result = parser.parse(
+        _vault([
+          {
+            'issuer': 'Acme',
+            'name': 'user',
+            'info': const {'secret': 'JBSWY3DPEHPK3PXP'},
+          },
+        ]),
+      );
       expect(result.skipped.single.reason, SkipReason.invalidFields);
     });
 
     test('empty secret is invalidSecret', () {
-      final result = parser.parse(_vault([
-        _entry(info: const {'secret': '', 'algo': 'SHA1'}),
-      ]));
+      final result = parser.parse(
+        _vault([
+          _entry(info: const {'secret': '', 'algo': 'SHA1'}),
+        ]),
+      );
       expect(result.skipped.single.reason, SkipReason.invalidSecret);
     });
 
     test('secret that decodes to zero bytes is invalidSecret', () {
-      final result = parser.parse(_vault([
-        _entry(info: const {'secret': '====', 'algo': 'SHA1'}),
-      ]));
+      final result = parser.parse(
+        _vault([
+          _entry(info: const {'secret': '====', 'algo': 'SHA1'}),
+        ]),
+      );
       expect(result.skipped.single.reason, SkipReason.invalidSecret);
     });
 
     test('digits below the contract is invalidFields', () {
-      final result = parser.parse(_vault([
-        _entry(info: const {'secret': 'JBSWY3DPEHPK3PXP', 'digits': 5}),
-      ]));
+      final result = parser.parse(
+        _vault([
+          _entry(info: const {'secret': 'JBSWY3DPEHPK3PXP', 'digits': 5}),
+        ]),
+      );
       expect(result.skipped.single.reason, SkipReason.invalidFields);
       expect(result.skipped.single.detail, contains('digits=5'));
     });
 
     test('period 0 and period 601 are both rejected', () {
       for (final period in const [0, 601]) {
-        final result = parser.parse(_vault([
-          _entry(info: {'secret': 'JBSWY3DPEHPK3PXP', 'period': period}),
-        ]));
+        final result = parser.parse(
+          _vault([
+            _entry(info: {'secret': 'JBSWY3DPEHPK3PXP', 'period': period}),
+          ]),
+        );
         expect(result.accounts, isEmpty);
         expect(result.skipped.single.reason, SkipReason.invalidFields);
       }
@@ -483,108 +547,132 @@ void main() {
 
     test('period 1 and period 600 are both accepted', () {
       for (final period in const [1, 600]) {
-        final result = parser.parse(_vault([
-          _entry(info: {'secret': 'JBSWY3DPEHPK3PXP', 'period': period}),
-        ]));
+        final result = parser.parse(
+          _vault([
+            _entry(info: {'secret': 'JBSWY3DPEHPK3PXP', 'period': period}),
+          ]),
+        );
         expect(result.accounts.single.period, period);
       }
     });
 
     test('digits 6 and 8 are accepted', () {
       for (final digits in const [6, 8]) {
-        final result = parser.parse(_vault([
-          _entry(info: {'secret': 'JBSWY3DPEHPK3PXP', 'digits': digits}),
-        ]));
+        final result = parser.parse(
+          _vault([
+            _entry(info: {'secret': 'JBSWY3DPEHPK3PXP', 'digits': digits}),
+          ]),
+        );
         expect(result.accounts.single.digits, digits);
       }
     });
 
     test('numeric strings and integer-valued doubles are accepted', () {
-      final result = parser.parse(_vault([
-        _entry(info: const {
-          'secret': 'JBSWY3DPEHPK3PXP',
-          'digits': '8',
-          'period': 60.0,
-        }),
-      ]));
+      final result = parser.parse(
+        _vault([
+          _entry(
+            info: const {
+              'secret': 'JBSWY3DPEHPK3PXP',
+              'digits': '8',
+              'period': 60.0,
+            },
+          ),
+        ]),
+      );
       expect(result.accounts.single.digits, 8);
       expect(result.accounts.single.period, 60);
     });
 
     test('fractional numbers are rejected, never truncated', () {
-      final result = parser.parse(_vault([
-        _entry(info: const {'secret': 'JBSWY3DPEHPK3PXP', 'digits': 6.5}),
-      ]));
+      final result = parser.parse(
+        _vault([
+          _entry(info: const {'secret': 'JBSWY3DPEHPK3PXP', 'digits': 6.5}),
+        ]),
+      );
       expect(result.accounts, isEmpty);
       expect(result.skipped.single.reason, SkipReason.invalidFields);
       expect(result.skipped.single.detail, contains('digits'));
     });
 
     test('missing algo defaults to sha1', () {
-      final result = parser.parse(_vault([
-        _entry(info: const {'secret': 'JBSWY3DPEHPK3PXP'}),
-      ]));
+      final result = parser.parse(
+        _vault([
+          _entry(info: const {'secret': 'JBSWY3DPEHPK3PXP'}),
+        ]),
+      );
       expect(result.accounts.single.algorithm, OtpAlgorithm.sha1);
     });
 
     test('sha512 and dashed spellings are accepted', () {
-      final result = parser.parse(_vault([
-        _entry(info: const {'secret': 'JBSWY3DPEHPK3PXP', 'algo': 'SHA-512'}),
-      ]));
+      final result = parser.parse(
+        _vault([
+          _entry(info: const {'secret': 'JBSWY3DPEHPK3PXP', 'algo': 'SHA-512'}),
+        ]),
+      );
       expect(result.accounts.single.algorithm, OtpAlgorithm.sha512);
     });
 
     test('HOTP accepts the alternative "initialCounter" field name', () {
-      final result = parser.parse(_vault([
-        _entry(
-          type: 'hotp',
-          info: const {'secret': 'JBSWY3DPEHPK3PXP', 'initialCounter': 12},
-        ),
-      ]));
+      final result = parser.parse(
+        _vault([
+          _entry(
+            type: 'hotp',
+            info: const {'secret': 'JBSWY3DPEHPK3PXP', 'initialCounter': 12},
+          ),
+        ]),
+      );
       expect(result.accounts.single.type, OtpType.hotp);
       expect(result.accounts.single.counter, 12);
     });
 
     test('negative HOTP counter is rejected', () {
-      final result = parser.parse(_vault([
-        _entry(
-          type: 'hotp',
-          info: const {'secret': 'JBSWY3DPEHPK3PXP', 'counter': -1},
-        ),
-      ]));
+      final result = parser.parse(
+        _vault([
+          _entry(
+            type: 'hotp',
+            info: const {'secret': 'JBSWY3DPEHPK3PXP', 'counter': -1},
+          ),
+        ]),
+      );
       expect(result.accounts, isEmpty);
       expect(result.skipped.single.reason, SkipReason.invalidFields);
     });
 
     test('steam keeps an in-range period but ignores an out-of-range one', () {
-      final kept = parser.parse(_vault([
-        _entry(
-          type: 'steam',
-          issuer: 'Steam',
-          info: const {'secret': 'JBSWY3DPEHPK3PXP', 'period': 45},
-        ),
-      ]));
+      final kept = parser.parse(
+        _vault([
+          _entry(
+            type: 'steam',
+            issuer: 'Steam',
+            info: const {'secret': 'JBSWY3DPEHPK3PXP', 'period': 45},
+          ),
+        ]),
+      );
       expect(kept.accounts.single.period, 45);
 
-      final fallback = parser.parse(_vault([
-        _entry(
-          type: 'steam',
-          issuer: 'Steam',
-          info: const {'secret': 'JBSWY3DPEHPK3PXP', 'period': 5000},
-        ),
-      ]));
+      final fallback = parser.parse(
+        _vault([
+          _entry(
+            type: 'steam',
+            issuer: 'Steam',
+            info: const {'secret': 'JBSWY3DPEHPK3PXP', 'period': 5000},
+          ),
+        ]),
+      );
       expect(fallback.accounts.single.period, 30);
       expect(fallback.accounts.single.digits, 5);
     });
 
     test('steam ignores a foreign algo instead of dropping the entry', () {
-      final result = parser.parse(_vault([
-        _entry(
-          type: 'steam',
-          issuer: 'Steam',
-          info: const {'secret': 'JBSWY3DPEHPK3PXP', 'algo': 'MD5'},
-        ),
-      ]));
+      final result = parser.parse(
+        _vault([
+          _entry(
+            type: 'steam',
+            issuer: 'Steam',
+            info: const {'secret': 'JBSWY3DPEHPK3PXP', 'algo': 'MD5'},
+          ),
+        ]),
+      );
       expect(result.accounts.single.algorithm, OtpAlgorithm.sha1);
     });
 
@@ -594,28 +682,32 @@ void main() {
       // is a capability gap, not a broken file, so the taxonomy differs from a
       // name nobody writes.
       for (final algo in const ['SHA224', 'sha-384', 'MD5']) {
-        final result = parser.parse(_vault([
-          _entry(info: {'secret': 'JBSWY3DPEHPK3PXP', 'algo': algo}),
-        ]));
+        final result = parser.parse(
+          _vault([
+            _entry(info: {'secret': 'JBSWY3DPEHPK3PXP', 'algo': algo}),
+          ]),
+        );
         expect(result.accounts, isEmpty);
         expect(result.skipped.single.reason, SkipReason.unsupportedType);
-        expect(result.skipped.single.detail,
-            'algorithm=${algo.toUpperCase().replaceAll('-', '')}');
+        expect(
+          result.skipped.single.detail,
+          'algorithm=${algo.toUpperCase().replaceAll('-', '')}',
+        );
       }
     });
 
     test('B3 — an algorithm no authenticator writes stays invalidFields', () {
-      final result = parser.parse(_vault([
-        _entry(info: const {'secret': 'JBSWY3DPEHPK3PXP', 'algo': 'BLAKE2B'}),
-      ]));
+      final result = parser.parse(
+        _vault([
+          _entry(info: const {'secret': 'JBSWY3DPEHPK3PXP', 'algo': 'BLAKE2B'}),
+        ]),
+      );
       expect(result.skipped.single.reason, SkipReason.invalidFields);
       expect(result.skipped.single.detail, contains('BLAKE2B'));
     });
 
     test('B4 — issuer over 512 UTF-8 bytes is rejected', () {
-      final result = parser.parse(_vault([
-        _entry(issuer: 'A' * 513),
-      ]));
+      final result = parser.parse(_vault([_entry(issuer: 'A' * 513)]));
       expect(result.accounts, isEmpty);
       expect(result.skipped.single.reason, SkipReason.invalidFields);
       expect(result.skipped.single.detail, contains('issuer'));
@@ -623,9 +715,7 @@ void main() {
     });
 
     test('B4 — name over 512 UTF-8 bytes is rejected', () {
-      final result = parser.parse(_vault([
-        _entry(name: 'b' * 513),
-      ]));
+      final result = parser.parse(_vault([_entry(name: 'b' * 513)]));
       expect(result.accounts, isEmpty);
       expect(result.skipped.single.reason, SkipReason.invalidFields);
       expect(result.skipped.single.detail, contains('name'));
@@ -642,23 +732,27 @@ void main() {
       expect(ok.accounts.single.issuer, 'ş' * 256);
     });
 
-    test('B4 — an oversized label is clamped before it reaches the preview',
-        () {
-      final result = parser.parse(_vault([_entry(issuer: 'C' * 5000)]));
-      final label = result.skipped.single.label!;
-      expect(label.length, lessThan(200));
-      expect(label, contains('…'));
-    });
+    test(
+      'B4 — an oversized label is clamped before it reaches the preview',
+      () {
+        final result = parser.parse(_vault([_entry(issuer: 'C' * 5000)]));
+        final label = result.skipped.single.label!;
+        expect(label.length, lessThan(200));
+        expect(label, contains('…'));
+      },
+    );
 
     test('wrongly typed issuer/name do not crash label building', () {
-      final result = parser.parse(_vault([
-        {
-          'type': 'totp',
-          'issuer': 42,
-          'name': <String, dynamic>{},
-          'info': const {'secret': 'not-base32!!'},
-        },
-      ]));
+      final result = parser.parse(
+        _vault([
+          {
+            'type': 'totp',
+            'issuer': 42,
+            'name': <String, dynamic>{},
+            'info': const {'secret': 'not-base32!!'},
+          },
+        ]),
+      );
       expect(result.skipped.single.reason, SkipReason.invalidSecret);
       expect(result.skipped.single.label, isNull);
     });

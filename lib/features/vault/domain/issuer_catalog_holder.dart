@@ -10,9 +10,11 @@ import 'catalog_repository.dart';
 import 'issuer_catalog.dart';
 
 class IssuerCatalogHolder {
-  IssuerCatalogHolder({required CatalogRepository repo, required CatalogCacheStore cache})
-      : _repo = repo,
-        _cache = cache;
+  IssuerCatalogHolder({
+    required CatalogRepository repo,
+    required CatalogCacheStore cache,
+  }) : _repo = repo,
+       _cache = cache;
 
   final CatalogRepository _repo;
   final CatalogCacheStore _cache;

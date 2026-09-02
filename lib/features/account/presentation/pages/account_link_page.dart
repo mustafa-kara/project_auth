@@ -27,7 +27,9 @@ class _AccountLinkPageState extends State<AccountLinkPage> {
   bool _busy = false;
   String? _error;
 
-  Future<void> _run(Future<void> Function(AccountVaultManager m, String uid) op) async {
+  Future<void> _run(
+    Future<void> Function(AccountVaultManager m, String uid) op,
+  ) async {
     final cubit = context.read<SessionCubit>();
     final uid = cubit.currentUid;
     if (uid == null) return;
@@ -64,7 +66,8 @@ class _AccountLinkPageState extends State<AccountLinkPage> {
           'Yeni boş vault başlatırsan mevcut vault korunur (başka bir hesapla açılabilir). '
           'Biyometri her durumda yeniden kurulmalıdır.',
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: Theme.of(context).colorScheme.onSurfaceVariant),
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
         ),
         if (_error != null) ...[
           const SizedBox(height: Gap.md),
@@ -73,14 +76,18 @@ class _AccountLinkPageState extends State<AccountLinkPage> {
       ],
       actions: [
         FilledButton(
-          onPressed: _busy ? null : () => _run((m, uid) => m.linkLegacyToUser(uid)),
+          onPressed: _busy
+              ? null
+              : () => _run((m, uid) => m.linkLegacyToUser(uid)),
           child: _busy
               ? const BtnSpinner()
               : const Text('Bu hesapla ilişkilendir'),
         ),
         const SizedBox(height: Gap.sm),
         OutlinedButton(
-          onPressed: _busy ? null : () => _run((m, uid) => m.startFreshVault(uid)),
+          onPressed: _busy
+              ? null
+              : () => _run((m, uid) => m.startFreshVault(uid)),
           child: const Text('Yeni boş vault başlat'),
         ),
       ],

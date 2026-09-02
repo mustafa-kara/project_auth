@@ -53,14 +53,13 @@ class SessionState extends Equatable {
     bool clearError = false,
     bool? linkRequired,
     bool? busy,
-  }) =>
-      SessionState(
-        status: status ?? this.status,
-        email: email ?? this.email,
-        error: clearError ? null : (error ?? this.error),
-        linkRequired: linkRequired ?? this.linkRequired,
-        busy: busy ?? this.busy,
-      );
+  }) => SessionState(
+    status: status ?? this.status,
+    email: email ?? this.email,
+    error: clearError ? null : (error ?? this.error),
+    linkRequired: linkRequired ?? this.linkRequired,
+    busy: busy ?? this.busy,
+  );
 
   @override
   List<Object?> get props => [status, email, error, linkRequired, busy];

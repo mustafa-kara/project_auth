@@ -79,10 +79,14 @@ class BackupService {
     final salt = _crypto.randomBytes(params.saltBytes);
     final createdAt = (now ?? DateTime.now()).toUtc();
 
-    final plaintext = Uint8List.fromList(utf8.encode(jsonEncode({
-      'exportedAt': createdAt.toIso8601String(),
-      'accounts': accounts.map((a) => a.toJson()).toList(growable: false),
-    })));
+    final plaintext = Uint8List.fromList(
+      utf8.encode(
+        jsonEncode({
+          'exportedAt': createdAt.toIso8601String(),
+          'accounts': accounts.map((a) => a.toJson()).toList(growable: false),
+        }),
+      ),
+    );
 
     KeyHandle? kek;
     try {
@@ -129,8 +133,7 @@ class BackupService {
   Future<List<OtpAccount>> import({
     required String json,
     required String password,
-  }) async =>
-      (await importDetailed(json: json, password: password)).accounts;
+  }) async => (await importDetailed(json: json, password: password)).accounts;
 
   /// [import] plus the skipped-record audit trail. Separate method rather than a
   /// changed [import] signature: restore callers want the simple list, while the
@@ -203,10 +206,14 @@ class BackupService {
     try {
       decoded = jsonDecode(utf8.decode(plaintext));
     } on FormatException {
-      throw const FormatException('BackupService: backup payload is not valid JSON');
+      throw const FormatException(
+        'BackupService: backup payload is not valid JSON',
+      );
     }
     if (decoded is! Map<String, dynamic>) {
-      throw const FormatException('BackupService: backup payload must be an object');
+      throw const FormatException(
+        'BackupService: backup payload must be an object',
+      );
     }
     final rawAccounts = decoded['accounts'];
     if (rawAccounts is! List) {
@@ -228,13 +235,16 @@ class BackupService {
         accounts.add(OtpAccount.fromJson(map));
       } on FormatException {
         // Best-effort label only; the secret is never read into the audit trail.
-        skipped.add(SkippedEntry(reason: SkipReason.invalidFields, label: _label(map)));
+        skipped.add(
+          SkippedEntry(reason: SkipReason.invalidFields, label: _label(map)),
+        );
       }
     }
 
     return BackupPayload(
-      exportedAt:
-          exportedAtText is String ? DateTime.tryParse(exportedAtText) : null,
+      exportedAt: exportedAtText is String
+          ? DateTime.tryParse(exportedAtText)
+          : null,
       accounts: accounts,
       skipped: skipped,
     );

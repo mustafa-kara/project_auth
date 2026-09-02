@@ -25,12 +25,12 @@ class Announcement {
   });
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'title': title,
-        'body': body,
-        'audience': audience,
-        'created_at': createdAt.toUtc().toIso8601String(),
-      };
+    'id': id,
+    'title': title,
+    'body': body,
+    'audience': audience,
+    'created_at': createdAt.toUtc().toIso8601String(),
+  };
 
   /// Sunucu/cache satırı → model. Throws [FormatException] on bad data.
   static Announcement fromJson(Map<String, dynamic> json) {
@@ -39,20 +39,30 @@ class Announcement {
     final body = json['body'];
     final createdRaw = json['created_at'];
     if (id is! String) {
-      throw FormatException('announcements.id String bekleniyordu (${id.runtimeType})');
+      throw FormatException(
+        'announcements.id String bekleniyordu (${id.runtimeType})',
+      );
     }
     if (title is! String) {
-      throw FormatException('announcements.title String bekleniyordu (${title.runtimeType})');
+      throw FormatException(
+        'announcements.title String bekleniyordu (${title.runtimeType})',
+      );
     }
     if (body is! String) {
-      throw FormatException('announcements.body String bekleniyordu (${body.runtimeType})');
+      throw FormatException(
+        'announcements.body String bekleniyordu (${body.runtimeType})',
+      );
     }
     if (createdRaw is! String) {
-      throw FormatException('announcements.created_at String bekleniyordu (${createdRaw.runtimeType})');
+      throw FormatException(
+        'announcements.created_at String bekleniyordu (${createdRaw.runtimeType})',
+      );
     }
     final created = DateTime.tryParse(createdRaw);
     if (created == null) {
-      throw FormatException('announcements.created_at parse edilemedi: $createdRaw');
+      throw FormatException(
+        'announcements.created_at parse edilemedi: $createdRaw',
+      );
     }
     final audience = json['audience'];
     return Announcement(
@@ -77,10 +87,12 @@ List<Announcement> visibleAnnouncements(
   String? platformOverride,
 }) {
   final platform = platformOverride ?? _currentPlatform();
-  return all.where((a) {
-    final aud = a.audience.toLowerCase();
-    return aud == 'all' || aud == 'flutter' || aud == platform;
-  }).toList(growable: false);
+  return all
+      .where((a) {
+        final aud = a.audience.toLowerCase();
+        return aud == 'all' || aud == 'flutter' || aud == platform;
+      })
+      .toList(growable: false);
 }
 
 String _currentPlatform() {

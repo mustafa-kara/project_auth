@@ -22,10 +22,9 @@ class AuthErrorText extends StatelessWidget {
         Expanded(
           child: Text(
             message,
-            style: Theme.of(context)
-                .textTheme
-                .bodySmall
-                ?.copyWith(color: scheme.error),
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: scheme.error),
           ),
         ),
       ],
@@ -39,8 +38,8 @@ class BtnSpinner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => const SizedBox(
-        height: 20,
-        width: 20,
-        child: CircularProgressIndicator(strokeWidth: 2),
-      );
+    height: 20,
+    width: 20,
+    child: CircularProgressIndicator(strokeWidth: 2),
+  );
 }

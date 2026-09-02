@@ -39,11 +39,7 @@ import '../bloc/vault_cubit.dart';
 
 /// Manuel `otpauth://` / `otpauth-migration://` yapıştırma formu.
 class AddTokenSheet extends StatefulWidget {
-  const AddTokenSheet({
-    super.key,
-    required this.cubit,
-    this.debugMigration,
-  });
+  const AddTokenSheet({super.key, required this.cubit, this.debugMigration});
 
   final VaultCubit cubit;
 
@@ -151,8 +147,11 @@ class _AddTokenSheetState extends State<AddTokenSheet> {
         await _askRestart();
       case MigrationInvalidBatch() || MigrationMalformedQr():
         // Neden ayrımı KASITLI olarak gösterilmez (secret'tan türer).
-        setState(() => _error = 'Bu bağlantı bir Google Authenticator aktarım '
-            'bağlantısı değil ya da bozuk.');
+        setState(
+          () => _error =
+              'Bu bağlantı bir Google Authenticator aktarım '
+              'bağlantısı değil ya da bozuk.',
+        );
       case MigrationScanFull():
         setState(() => _error = 'Bu aktarımda çok fazla hesap var.');
     }
@@ -168,7 +167,8 @@ class _AddTokenSheetState extends State<AddTokenSheet> {
         context: context,
         builder: (ctx) => AlertDialog(
           content: const Text(
-              'Bu bağlantı farklı bir dışa aktarmaya ait. Baştan başlansın mı?'),
+            'Bu bağlantı farklı bir dışa aktarmaya ait. Baştan başlansın mı?',
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(false),
@@ -213,7 +213,8 @@ class _AddTokenSheetState extends State<AddTokenSheet> {
       preview = _migrationController.preview(existing: existing);
     } on EmptyImportException {
       setState(
-          () => _error = 'Bu bağlantılarda içe aktarılacak token bulunamadı.');
+        () => _error = 'Bu bağlantılarda içe aktarılacak token bulunamadı.',
+      );
       return;
     }
     if (!mounted) return;
@@ -250,12 +251,14 @@ class _AddTokenSheetState extends State<AddTokenSheet> {
     }
   }
 
-  Future<void> _addDemo() => _addAndClose(OtpAccount(
-        secret: 'JBSWY3DPEHPK3PXP',
-        type: OtpType.totp,
-        issuer: 'Demo',
-        accountName: 'demo@example.com',
-      ));
+  Future<void> _addDemo() => _addAndClose(
+    OtpAccount(
+      secret: 'JBSWY3DPEHPK3PXP',
+      type: OtpType.totp,
+      issuer: 'Demo',
+      accountName: 'demo@example.com',
+    ),
+  );
 
   /// Token'ı ekler ve KALICILIĞI bekler; yazma başarılıysa kapatır, hata olursa
   /// formu açık bırakıp hatayı gösterir (kullanıcı "eklendi" sanıp kaybetmesin).
@@ -341,14 +344,14 @@ class _AddTokenSheetState extends State<AddTokenSheet> {
   /// %85'i: liste için bol yer bırakır, altındaki sayfanın görünen şeridi de
   /// kullanıcıya hâlâ bir sheet'te olduğunu söyler.
   Widget _buildPreview(BuildContext context, ImportPreview preview) => SizedBox(
-        height: MediaQuery.sizeOf(context).height * 0.85,
-        child: ImportPreviewView(
-          preview: preview,
-          headerLabel: 'Google Authenticator',
-          headerDetail: '$_scanned/$_total bağlantı',
-          error: _importError,
-          busy: _saving,
-          onConfirm: _confirmImport,
-        ),
-      );
+    height: MediaQuery.sizeOf(context).height * 0.85,
+    child: ImportPreviewView(
+      preview: preview,
+      headerLabel: 'Google Authenticator',
+      headerDetail: '$_scanned/$_total bağlantı',
+      error: _importError,
+      busy: _saving,
+      onConfirm: _confirmImport,
+    ),
+  );
 }

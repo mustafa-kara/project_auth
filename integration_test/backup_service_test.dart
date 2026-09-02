@@ -74,9 +74,13 @@ void main() {
   Map<String, dynamic> envelopeJson() =>
       jsonDecode(backupJson) as Map<String, dynamic>;
 
-  testWidgets('export → import round-trip preserves every field, id included',
-      (_) async {
-    final restored = await service.import(json: backupJson, password: _password);
+  testWidgets('export → import round-trip preserves every field, id included', (
+    _,
+  ) async {
+    final restored = await service.import(
+      json: backupJson,
+      password: _password,
+    );
 
     expect(restored, hasLength(accounts.length));
     for (var i = 0; i < accounts.length; i++) {
@@ -85,27 +89,37 @@ void main() {
     }
   });
 
-  testWidgets('the envelope carries production KDF parameters and no plaintext',
-      (_) async {
-    final json = envelopeJson();
-    final params = crypto.defaultKdfParams();
+  testWidgets(
+    'the envelope carries production KDF parameters and no plaintext',
+    (_) async {
+      final json = envelopeJson();
+      final params = crypto.defaultKdfParams();
 
-    expect(json['format'], BackupService.formatId);
-    expect(json['version'], BackupService.supportedVersion);
-    expect((json['kdf'] as Map)['alg'], BackupEnvelope.kdfAlgArgon2id);
-    expect((json['kdf'] as Map)['opslimit'], params.opsLimit);
-    expect((json['kdf'] as Map)['memlimit'], params.memLimit);
-    expect(base64Decode((json['kdf'] as Map)['salt'] as String).length,
-        BackupEnvelope.saltBytes);
-    expect((json['cipher'] as Map)['alg'], BackupEnvelope.cipherAlgXChaCha20);
-    expect(base64Decode((json['cipher'] as Map)['nonce'] as String).length, 24);
-    expect(json.containsKey('aad'), isFalse,
-        reason: 'the AAD is derived, never stored');
+      expect(json['format'], BackupService.formatId);
+      expect(json['version'], BackupService.supportedVersion);
+      expect((json['kdf'] as Map)['alg'], BackupEnvelope.kdfAlgArgon2id);
+      expect((json['kdf'] as Map)['opslimit'], params.opsLimit);
+      expect((json['kdf'] as Map)['memlimit'], params.memLimit);
+      expect(
+        base64Decode((json['kdf'] as Map)['salt'] as String).length,
+        BackupEnvelope.saltBytes,
+      );
+      expect((json['cipher'] as Map)['alg'], BackupEnvelope.cipherAlgXChaCha20);
+      expect(
+        base64Decode((json['cipher'] as Map)['nonce'] as String).length,
+        24,
+      );
+      expect(
+        json.containsKey('aad'),
+        isFalse,
+        reason: 'the AAD is derived, never stored',
+      );
 
-    expect(backupJson.contains(_secret), isFalse);
-    expect(backupJson.contains('user@example.com'), isFalse);
-    expect(backupJson.contains(_password), isFalse);
-  });
+      expect(backupJson.contains(_secret), isFalse);
+      expect(backupJson.contains('user@example.com'), isFalse);
+      expect(backupJson.contains(_password), isFalse);
+    },
+  );
 
   testWidgets('wrong password → WrongBackupPasswordException', (_) async {
     await expectLater(
@@ -138,9 +152,9 @@ void main() {
     );
   });
 
-  testWidgets(
-      'opslimit downgrade → decrypt fails: the AAD binds the KDF cost',
-      (_) async {
+  testWidgets('opslimit downgrade → decrypt fails: the AAD binds the KDF cost', (
+    _,
+  ) async {
     final json = envelopeJson();
     final original = (json['kdf'] as Map)['opslimit'] as int;
     final weakened = original - 1;
@@ -155,8 +169,9 @@ void main() {
     );
   });
 
-  testWidgets('memlimit downgrade → decrypt fails for the same reason',
-      (_) async {
+  testWidgets('memlimit downgrade → decrypt fails for the same reason', (
+    _,
+  ) async {
     final json = envelopeJson();
     (json['kdf'] as Map)['memlimit'] = BackupEnvelope.minMemLimit;
 
@@ -166,11 +181,13 @@ void main() {
     );
   });
 
-  testWidgets('a swapped salt → decrypt fails (salt is authenticated)',
-      (_) async {
+  testWidgets('a swapped salt → decrypt fails (salt is authenticated)', (
+    _,
+  ) async {
     final json = envelopeJson();
     (json['kdf'] as Map)['salt'] = base64Encode(
-        crypto.randomBytes(BackupEnvelope.saltBytes));
+      crypto.randomBytes(BackupEnvelope.saltBytes),
+    );
 
     await expectLater(
       service.import(json: jsonEncode(json), password: _password),
@@ -178,8 +195,9 @@ void main() {
     );
   });
 
-  testWidgets('out-of-range parameters are rejected before the KDF runs',
-      (_) async {
+  testWidgets('out-of-range parameters are rejected before the KDF runs', (
+    _,
+  ) async {
     final json = envelopeJson();
     (json['kdf'] as Map)['opslimit'] = BackupEnvelope.maxOpsLimit + 1;
 
@@ -188,12 +206,16 @@ void main() {
       service.import(json: jsonEncode(json), password: _password),
       throwsA(isA<FormatException>()),
     );
-    expect(DateTime.now().difference(started).inSeconds, lessThan(2),
-        reason: 'no Argon2id work should have been done');
+    expect(
+      DateTime.now().difference(started).inSeconds,
+      lessThan(2),
+      reason: 'no Argon2id work should have been done',
+    );
   });
 
-  testWidgets('a newer envelope version → UnsupportedBackupVersionException',
-      (_) async {
+  testWidgets('a newer envelope version → UnsupportedBackupVersionException', (
+    _,
+  ) async {
     final json = envelopeJson();
     json['version'] = BackupService.supportedVersion + 1;
 
@@ -210,9 +232,13 @@ void main() {
     );
   });
 
-  testWidgets('two exports of the same vault differ (fresh salt + nonce)',
-      (_) async {
-    final second = await service.export(accounts: accounts, password: _password);
+  testWidgets('two exports of the same vault differ (fresh salt + nonce)', (
+    _,
+  ) async {
+    final second = await service.export(
+      accounts: accounts,
+      password: _password,
+    );
     expect(second, isNot(backupJson));
 
     final a = envelopeJson();
@@ -221,7 +247,9 @@ void main() {
     expect((a['cipher'] as Map)['nonce'], isNot((b['cipher'] as Map)['nonce']));
 
     // Both still open with the same password.
-    expect(await service.import(json: second, password: _password),
-        hasLength(accounts.length));
+    expect(
+      await service.import(json: second, password: _password),
+      hasLength(accounts.length),
+    );
   });
 }

@@ -59,7 +59,9 @@ class _RegisterPageState extends State<RegisterPage> {
   @override
   Widget build(BuildContext context) {
     final busy = context.select<SessionCubit, bool>((c) => c.state.busy);
-    final error = context.select<SessionCubit, AuthError?>((c) => c.state.error);
+    final error = context.select<SessionCubit, AuthError?>(
+      (c) => c.state.error,
+    );
     final errorMsg = _localError ?? error?.message;
 
     // Parola alanı içerir → screenshot/recents koruması (SecureScreenScope).
