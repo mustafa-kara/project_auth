@@ -7,6 +7,13 @@
 /// lives next to `ImportPreviewView` in the import/export widgets folder rather
 /// than inside the scan page.
 ///
+/// The two callers collect the same export by different means — one SCANS codes
+/// with the camera, the other has links PASTED into it — so the two sentences
+/// that name the thing being collected are parameters ([progressLabel],
+/// [remainingHint]). Everything else, the counts included, is identical and
+/// stays here: a band that says "2/3 kod tarandı" on one screen must not drift
+/// into a different shape on the other.
+///
 /// SECURITY: shows COUNTS only — never an issuer, an account name or a secret.
 library;
 
@@ -24,6 +31,8 @@ class MigrationProgressBand extends StatelessWidget {
     required this.onContinue,
     required this.onStopEarly,
     required this.onRestart,
+    this.progressLabel = 'kod tarandı',
+    this.remainingHint = 'Kalan kodları sırayla okut',
   });
 
   final int scanned;
@@ -32,6 +41,15 @@ class MigrationProgressBand extends StatelessWidget {
   final VoidCallback onContinue;
   final VoidCallback onStopEarly;
   final VoidCallback onRestart;
+
+  /// İlerleme satırının sayaçtan SONRAKİ kısmı: '2/3 [progressLabel]'.
+  /// Varsayılan kamera taraması içindir; yapıştırma akışı 'bağlantı eklendi'
+  /// geçer.
+  final String progressLabel;
+
+  /// Tamamlanmamışken gösterilen yönerge. Kamerada "okut", yapıştırmada
+  /// "yapıştır" denir.
+  final String remainingHint;
 
   @override
   Widget build(BuildContext context) {
@@ -48,12 +66,12 @@ class MigrationProgressBand extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text('$scanned/$total kod tarandı',
+              Text('$scanned/$total $progressLabel',
                   style: theme.textTheme.titleMedium),
               if (!complete) ...[
                 const SizedBox(height: Gap.xs),
                 Text(
-                  'Kalan kodları sırayla okut',
+                  remainingHint,
                   style: theme.textTheme.bodyMedium
                       ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                 ),

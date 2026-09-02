@@ -131,6 +131,92 @@ void main() {
     expect(calls(), ['pickFile', 'clear']);
   });
 
+  group('pickImage — nüshanın sahibi ÇAĞIRAN', () {
+    test('cache TEMİZLENMEZ: yol çözücü için okunur kalmalı', () async {
+      platform.pickResponse = onePick('qr.png', List<int>.filled(32, 0x89));
+
+      final image = await port.pickImage(maxBytes: 1024);
+
+      expect(image, isNotNull);
+      expect(image!.name, 'qr.png');
+      expect(image.path, '/cache/file_picker/qr.png');
+      expect(image.sizeBytes, 32);
+      expect(calls(), ['pickFile'],
+          reason: 'pickJson\'dan farklı: temizliği çağıran yapar, yoksa '
+              'analyzeImage silinmiş bir yolu okurdu');
+    });
+
+    test('görüntü filtresi uygulanır (iOS PHPicker yolu)', () async {
+      platform.pickResponse = onePick('qr.png', const [1, 2, 3]);
+
+      await port.pickImage(maxBytes: 1024);
+
+      expect(platform.pickedType, FileType.image);
+    });
+
+    test('iptalde null döner, temizlik yine çağıranın işi', () async {
+      platform.pickResponse = null;
+
+      expect(await port.pickImage(maxBytes: 1024), isNull);
+      expect(calls(), ['pickFile']);
+    });
+
+    test('boyut kapısı bildirilen boyuttan, çözümden ÖNCE', () async {
+      final file = onePick('kocaman.png', List<int>.filled(4, 0x89))
+        ..reportedSize = 32 << 20;
+      platform.pickResponse = file;
+
+      await expectLater(
+        port.pickImage(maxBytes: 16 << 20),
+        throwsA(isA<ImportFileTooLargeException>()),
+      );
+      expect(file.readCount, 0, reason: 'devasa görüntü belleğe alınmamalı');
+    });
+
+    test('yerel yolu olmayan seçim (blob:/content:) reddedilir', () async {
+      platform.pickResponse = onePick('qr.png', const [1, 2, 3])
+        ..uriOverride = Uri.parse('blob:https://example.com/abc');
+
+      await expectLater(
+        port.pickImage(maxBytes: 1024),
+        throwsA(isA<MalformedImportFileException>()),
+      );
+    });
+  });
+
+  group('shredCachedCopy', () {
+    late Directory cache;
+
+    setUp(() => cache = Directory.systemTemp.createTempSync('pa_cache_'));
+    tearDown(() {
+      if (cache.existsSync()) cache.deleteSync(recursive: true);
+    });
+
+    test('seçilen nüsha silinir', () {
+      final file = File('${cache.path}${Platform.pathSeparator}qr.png')
+        ..writeAsBytesSync(List<int>.filled(200 * 1024, 0x89));
+
+      FilePickerDocumentPort.shredCachedCopy(file.path);
+
+      expect(file.existsSync(), isFalse,
+          reason: 'QR görüntüsü canlı bir secret\'ın düz resmi');
+    });
+
+    test('olmayan yol hata vermez (best-effort)', () {
+      expect(
+        () => FilePickerDocumentPort
+            .shredCachedCopy('${cache.path}/yok/olmayan.png'),
+        returnsNormally,
+      );
+    });
+
+    test('dosya olmayan yol hata vermez', () {
+      expect(() => FilePickerDocumentPort.shredCachedCopy(cache.path),
+          returnsNormally);
+      expect(cache.existsSync(), isTrue, reason: 'dizin silinmemeli');
+    });
+  });
+
   group('saveJson — iOS artık dosyası', () {
     /// Eklentinin iOS'ta yazdığı nüshanın yerini taklit eden geçici dizin.
     late Directory docs;
@@ -366,8 +452,11 @@ final class _FakePlatformFile extends PlatformFile {
   /// [readAsBytes] kaç kez çağrıldı (boyut kapısının erken durduğunu kanıtlar).
   int readCount = 0;
 
+  /// Yerel olmayan seçimleri (web blob'u, SAF content'i) taklit etmek için.
+  Uri? uriOverride;
+
   @override
-  Uri get uri => Uri.file('/cache/file_picker/$name');
+  Uri get uri => uriOverride ?? Uri.file('/cache/file_picker/$name');
 
   // `Never` is a subtype of `XFile`, so the override is legal without importing
   // `cross_file` (a transitive dependency the app does not depend on directly).
