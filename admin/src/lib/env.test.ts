@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
-import { publicEnvSchema, serverEnvSchema } from '@/lib/env'
+import { publicEnvSchema } from '@/lib/env'
+import { normaliseCaCert, serverEnvSchema } from '@/lib/env.server'
+
+const PEM = '-----BEGIN CERTIFICATE-----\nMIIDdummy\n-----END CERTIFICATE-----'
 
 const LEGACY_JWT =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlhdCI6MTcwMDAwMDAwMH0.signature'
@@ -84,5 +87,50 @@ describe('serverEnvSchema', () => {
       DATABASE_URL: 'https://vfyqokvgtdxxurroqbtj.supabase.co',
     })
     expect(result.success).toBe(false)
+  })
+
+  it('leaves SUPABASE_CA_CERT undefined when it is absent', () => {
+    const result = serverEnvSchema.safeParse({
+      SUPABASE_SECRET_KEY: 'sb_secret_abc123',
+      DATABASE_URL: validDbUrl,
+    })
+    expect(result.success).toBe(true)
+    expect(result.data?.SUPABASE_CA_CERT).toBeUndefined()
+  })
+
+  it('accepts a PEM certificate and converts literal \\n to real newlines', () => {
+    const result = serverEnvSchema.safeParse({
+      SUPABASE_SECRET_KEY: 'sb_secret_abc123',
+      DATABASE_URL: validDbUrl,
+      SUPABASE_CA_CERT: '-----BEGIN CERTIFICATE-----\\nMIIDdummy\\n-----END CERTIFICATE-----\\n',
+    })
+    expect(result.success).toBe(true)
+    expect(result.data?.SUPABASE_CA_CERT).toBe(PEM)
+  })
+
+  it('rejects a SUPABASE_CA_CERT that is not a PEM certificate', () => {
+    const result = serverEnvSchema.safeParse({
+      SUPABASE_SECRET_KEY: 'sb_secret_abc123',
+      DATABASE_URL: validDbUrl,
+      SUPABASE_CA_CERT: '/etc/ssl/prod-ca-2021.crt',
+    })
+    expect(result.success).toBe(false)
+  })
+})
+
+describe('normaliseCaCert', () => {
+  it('treats missing / empty / whitespace-only as not set', () => {
+    expect(normaliseCaCert(undefined)).toBeUndefined()
+    expect(normaliseCaCert(null)).toBeUndefined()
+    expect(normaliseCaCert('')).toBeUndefined()
+    expect(normaliseCaCert('   \n  ')).toBeUndefined()
+  })
+
+  it('passes a real multi-line PEM through unchanged apart from trimming', () => {
+    expect(normaliseCaCert(`\n${PEM}\n`)).toBe(PEM)
+  })
+
+  it('rewrites every literal backslash-n, not just the first', () => {
+    expect(normaliseCaCert('a\\nb\\nc')).toBe('a\nb\nc')
   })
 })

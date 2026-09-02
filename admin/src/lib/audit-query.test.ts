@@ -3,10 +3,12 @@ import { describe, expect, it } from 'vitest'
 import { AUDIT_ACTIONS } from '@/lib/audit'
 import {
   AUDIT_ACTION_LABELS,
+  AUDIT_MAX_PAGE,
   AUDIT_PAGE_SIZE,
   AUDIT_SEARCH_MAX_LENGTH,
   auditActionLabel,
   auditActionVariant,
+  auditHasNextPage,
   auditPageCount,
   auditRange,
   buildAuditHref,
@@ -45,6 +47,36 @@ describe('parseAuditPage', () => {
 
   it('takes the first value of a repeated param', () => {
     expect(parseAuditPage(['4', '99'])).toBe(4)
+  })
+
+  it('clamps an absurd page to AUDIT_MAX_PAGE instead of producing a huge offset', () => {
+    // `?page=1e21` used to become offset=5e22 in the PostgREST query string, which
+    // the database answers with a 5xx rather than an empty page.
+    expect(parseAuditPage('1e21')).toBe(AUDIT_MAX_PAGE)
+    expect(parseAuditPage('999999999')).toBe(AUDIT_MAX_PAGE)
+    expect(parseAuditPage(String(AUDIT_MAX_PAGE))).toBe(AUDIT_MAX_PAGE)
+    expect(parseAuditPage(String(AUDIT_MAX_PAGE - 1))).toBe(AUDIT_MAX_PAGE - 1)
+  })
+})
+
+describe('auditHasNextPage', () => {
+  it('uses the page count when the exact total is known', () => {
+    expect(auditHasNextPage(1, 120, AUDIT_PAGE_SIZE)).toBe(true)
+    expect(auditHasNextPage(3, 120, 20)).toBe(false)
+  })
+
+  it('falls back to a full page when the count header was absent', () => {
+    // PostgREST can omit the total from content-range; `pageCount` then collapses
+    // to 1 and "Sonraki" would be disabled with a full page of rows on screen.
+    expect(auditHasNextPage(1, null, AUDIT_PAGE_SIZE)).toBe(true)
+    expect(auditHasNextPage(7, null, AUDIT_PAGE_SIZE)).toBe(true)
+    expect(auditHasNextPage(1, null, AUDIT_PAGE_SIZE - 1)).toBe(false)
+    expect(auditHasNextPage(1, null, 0)).toBe(false)
+  })
+
+  it('never offers a page past the clamp', () => {
+    expect(auditHasNextPage(AUDIT_MAX_PAGE, null, AUDIT_PAGE_SIZE)).toBe(false)
+    expect(auditHasNextPage(AUDIT_MAX_PAGE, 10_000_000, AUDIT_PAGE_SIZE)).toBe(false)
   })
 })
 

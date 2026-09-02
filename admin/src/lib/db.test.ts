@@ -1,6 +1,26 @@
 import { describe, expect, it } from 'vitest'
 
-import { parseGlobalStats } from '@/lib/db'
+import { buildSslOptions, parseGlobalStats } from '@/lib/db'
+
+describe('buildSslOptions', () => {
+  it('always verifies the server certificate', () => {
+    // `ssl: 'require'` is NOT this: in postgres@3.4.9 the string forms set
+    // `rejectUnauthorized = false`, i.e. encrypted but unauthenticated.
+    expect(buildSslOptions(undefined).rejectUnauthorized).toBe(true)
+    expect(buildSslOptions('-----BEGIN CERTIFICATE-----').rejectUnauthorized).toBe(true)
+  })
+
+  it('omits `ca` entirely when no certificate is configured', () => {
+    expect(buildSslOptions(undefined)).toEqual({ rejectUnauthorized: true })
+    expect('ca' in buildSslOptions(undefined)).toBe(false)
+    expect(buildSslOptions('')).toEqual({ rejectUnauthorized: true })
+  })
+
+  it('pins the configured CA when one is given', () => {
+    const pem = '-----BEGIN CERTIFICATE-----\nMIIDdummy\n-----END CERTIFICATE-----'
+    expect(buildSslOptions(pem)).toEqual({ rejectUnauthorized: true, ca: pem })
+  })
+})
 
 describe('parseGlobalStats', () => {
   it('parses the jsonb payload of private.admin_global_stats()', () => {

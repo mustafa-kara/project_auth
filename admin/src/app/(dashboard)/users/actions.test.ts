@@ -50,6 +50,25 @@ beforeEach(() => {
   writeAudit.mockResolvedValue(undefined)
 })
 
+describe('userAction — requireAdmin is the first gate', () => {
+  it('calls requireAdmin()', async () => {
+    await userAction(initialUserActionState, form(TARGET, 'ban'))
+    expect(requireAdmin).toHaveBeenCalled()
+  })
+
+  it('touches nothing privileged when requireAdmin rejects', async () => {
+    requireAdmin.mockRejectedValue(new Error('ForbiddenError'))
+
+    await expect(userAction(initialUserActionState, form(TARGET, 'ban'))).rejects.toThrow()
+
+    expect(fetchAdminUserIds).not.toHaveBeenCalled()
+    expect(updateUserById).not.toHaveBeenCalled()
+    expect(deleteUser).not.toHaveBeenCalled()
+    expect(writeAudit).not.toHaveBeenCalled()
+    expect(revalidatePath).not.toHaveBeenCalled()
+  })
+})
+
 describe('userAction', () => {
   it('bans with the ~100 year duration and audits it', async () => {
     const state = await userAction(initialUserActionState, form(TARGET, 'ban'))
