@@ -329,10 +329,22 @@ this feature as "screenshot blocking" without that caveat.
 | `RecoveryVerifyPage` | recovery words re-entered |
 | `LoginPage` | Supabase account password typed |
 | `RegisterPage` | Supabase account password typed (twice) |
+| `ScanPage` | a QR **is** the secret; migration mode additionally renders an imported-token preview |
+| `ImportPage` | the backup password is typed and the parsed issuer/account list is previewed |
+| `ExportPage` | the backup password is typed (twice) |
 
-**Deliberately NOT protected:** `/auth-integrity` (shows no secret); scan/settings (reached from a
-mounted `VaultPage`, whose scope is still held — see the router regression test in
-`test/core/router/secure_screen_router_test.dart`).
+Eleven screens — the authoritative list is `grep -rn "SecureScreenScope(" lib/`; keep this table in
+step with it.
+
+**Deliberately NOT protected:** `/auth-integrity` and the account screens that display nothing
+secret (`/splash`, `/auth/confirm`, `/auth/link`, `/auth/restore-failed`); `/settings`, which shows
+no secret of its own and is pushed **above a mounted `VaultPage`**, whose scope is still held — see
+the router regression test in `test/core/router/secure_screen_router_test.dart`.
+
+`/scan` was in that second list until Phase 5 Patch 2 for the same "pushed above the vault" reason.
+It now carries its own scope: migration mode lists the tokens decoded out of a transfer QR, so the
+screen must be protected on its own merits and not on its parent's — the parent is the wrong thing
+to depend on the moment the screen can be reached any other way.
 
 ### Why the ref count lives in Dart
 
@@ -343,10 +355,22 @@ screen's `dispose` cleared FLAG_SECURE while the vault below was still visible a
 codes, and the vault never re-enabled it because it was never disposed.
 
 So the counter is kept in Dart: native `enable` fires **only on 0→1**, native `disable` **only on
-1→0**. One exception guards against a *failed* native call: a `PlatformException` from `enable` is
-swallowed (the screen must still work) but marks the protection as off, and the **next `acquire()`
-retries `enable` even without a 0→1 edge** — otherwise a single native failure would leave the
-protection silently off for the rest of the session, because that edge never comes back. `enable`/`disable` are not public — `acquire()`/`release()` are the only way in. An unmatched
+1→0**.
+
+Two exceptions guard against a *failed* native call:
+
+- **`enable` rejected.** The `PlatformException` is swallowed (the screen must still work) but the
+  protection is marked off, so the **next `acquire()` retries `enable` even without a 0→1 edge** —
+  otherwise a single native failure would leave the protection silently off for the rest of the
+  session, because that edge never comes back. That alone is not enough when only ONE sensitive
+  screen is open, because then no further `acquire()` ever arrives, so a failed `enable` also
+  schedules a **single delayed retry (500 ms)**, taken only while a holder is still around and the
+  protection is still off. The retry itself does not re-arm one: the attempt is one-shot, never a
+  loop.
+- **`disable` rejected.** Native protection is then still ON, while `release()` had optimistically
+  recorded it as off. The bookkeeping is rolled back to "on" so it does not drift away from the
+  native state — otherwise the next `acquire()` would try to enable an already-enabled flag, and a
+  protection that is actually up would be reported as down. `enable`/`disable` are not public — `acquire()`/`release()` are the only way in. An unmatched
 extra `release()` is ignored so the counter can never go negative (a negative counter would swallow
 the next `acquire()`'s 0→1 transition and leave protection off entirely). The native code
 (`MainActivity.kt` / `AppDelegate.swift`) is unchanged by this design.
@@ -414,6 +438,16 @@ too and would defeat the whole construction. It is recomputed from the envelope 
 The salt is re-encoded from its decoded bytes (`base64Encode`), so a non-canonical encoding in the
 file cannot produce a different AAD for identical salt bytes.
 
+**Why `createdAt` is deliberately NOT in the AAD.** The AAD binds exactly the fields that change how
+the ciphertext is opened — KDF algorithm, cost, salt, cipher algorithm. `createdAt` changes none of
+them: rewriting it cannot downgrade the KDF, redirect decryption or reveal anything, so binding it
+would buy no security. It would cost something, though: an ISO-8601 timestamp has several equally
+valid spellings (`….000Z` vs `…+00:00`, with or without fractional seconds), so any tool that
+re-serialised the envelope would produce a different AAD for the same instant and turn a perfectly
+good backup into "wrong password or corrupted file". Accepted consequence: an attacker holding the
+file can relabel its creation date undetected. `createdAt` is a human-readable label, and it is
+documented here as one — nothing in the import path trusts it.
+
 ### 16.3 Strict validation before sodium
 
 Same doctrine as §8 — the envelope is fully validated before a key is derived, so a malformed file
@@ -452,6 +486,30 @@ directly. A weak backup password is refused **before** any Argon2id work.
 - **Limit (accepted):** the intermediate `String` produced by `jsonEncode`/`utf8.decode` cannot be
   wiped — Dart offers no way to pin or clear a `String`. The window is short and the buffer we can
   reach is cleared; a heap dump of a live process remains outside this threat model.
+- **Limit (accepted): the isolate copy.** `ImportService.preview` runs parse+dedupe inside
+  `Isolate.run` so a large file cannot jank the UI. Isolates do not share memory, so the file text
+  goes in as a **copy** and the parsed `OtpAccount`s (secrets included) come back as another one.
+  Both copies live on a heap this code cannot reach at all — the worker isolate's heap is gone when
+  `Isolate.run` returns, but only when the GC gets round to it. Same class of exposure as the
+  `String` above, accepted for the same reason; nothing about it is made worse by the isolate, which
+  is why the responsiveness win is taken.
+- **iOS `saveFile` leaves a copy behind.** file_picker 11.0.3 implements the iOS save by writing the
+  bytes into the app's `NSDocumentDirectory/<fileName>` and exporting *that* through
+  `UIDocumentPickerViewController`; neither the pick callback nor the cancel callback removes it,
+  and `clearTemporaryFiles()` only walks `NSTemporaryDirectory()`, so it never sees this file. The
+  app's Documents directory is part of the iCloud/iTunes device backup, so an encrypted vault backup
+  the user thought they had put on a USB stick would also silently ride along to iCloud.
+  `FilePickerDocumentPort.saveJson` therefore shreds it in a `finally`: zero-fill in place (opened
+  `writeOnlyAppend` so the bytes are overwritten rather than truncated away), then unlink. It is
+  best effort and every failure is swallowed — housekeeping must not turn a finished export into a
+  user-facing error, and the file is encrypted regardless. No-op off iOS: Android writes through the
+  SAF stream and desktop writes straight to the chosen path.
+  **Info.plist constraint that comes with this:** `UIFileSharingEnabled` and
+  `LSSupportsOpeningDocumentsInPlace` must stay OUT of `ios/Runner/Info.plist`. Either one makes the
+  app's own Documents directory visible in Files, at which point the user can pick it as the export
+  destination — and the shredder would then be deleting the file the user just saved. The code does
+  guard against that (it compares the chosen path against the leftover path and backs off), but the
+  guard is a second line: do not add those keys without revisiting `_shredIosSaveLeftover`.
 - A malformed record inside a decrypted payload is **skipped, not fatal** — one bad row must never
   cost the user the rest of their tokens. `import()` returns the usable accounts; `importDetailed()`
   additionally returns a `SkippedEntry` per dropped record so the preview can report the count. Skip
@@ -487,7 +545,15 @@ The import and export flows are consequently wrapped in a
 
 - the exemption skips the background lock **including `paused`**, not only `inactive` (which is all
   the pre-existing biometric-prompt exemption covers);
-- it is bounded by a **fixed 2-minute budget** — a picker left open longer is no longer protected;
+- it is bounded by a **2-minute budget**, which a further `beginSystemFileFlow()` **renews** — the
+  import flow legitimately opens the picker more than once (pick a file, then pick another), and a
+  user browsing a cloud provider's folders can honestly spend more than one budget in there;
+- renewal is capped in absolute time: the first `begin` of a run starts a clock, and once
+  `VaultLockCubit.systemFileFlowMaxTotal` (**10 minutes**) has elapsed since it, further renewals are
+  **refused** — the running deadline is left alone, so the flow still expires on its own schedule and
+  `endSystemFileFlow()`/`main.dart` still lock. Without the cap, a chain of renewals would quietly
+  turn a 2-minute concession into an unbounded one. `endSystemFileFlow()` clears the clock, so the
+  next flow starts fresh;
 - every call site closes it in a **`finally`**, and the import/export screens additionally close it
   from `State.dispose` (a screen torn down while the picker is up — router redirect, back gesture —
   would otherwise leave it open), so cancel, throw and screen dispose all end it;
@@ -500,10 +566,12 @@ The import and export flows are consequently wrapped in a
 **What the exemption does NOT cover:** `onAuthSignedOut` (the identity gate closing) and an
 interactive `lock()` still take effect during a flow.
 
-**What is actually given up:** during a window of at most 2 minutes, an attacker with physical access
+**What is actually given up:** during a window of at most 2 minutes — or, across a renewed chain, at
+most 10 — an attacker with physical access
 to an unlocked-but-backgrounded device can return to a still-unlocked vault, where the ordinary rule
 would have locked it on the first `paused`. The master key stays resident in memory for that window.
 The budget, the `finally` discipline and the resume check bound the exposure; they do not remove it.
 
-Covered by `test/features/auth/vault_lock_cubit_test.dart` (exemption honoured, budget expiry, the
-`finally` pairing) and by the import/export widget tests, which assert the begin/end call counts.
+Covered by `test/features/auth/vault_lock_cubit_test.dart` (exemption honoured, budget expiry,
+renewal, the absolute cap and its reset by `endSystemFileFlow`, the `finally` pairing) and by the
+import/export widget tests, which assert the begin/end call counts.

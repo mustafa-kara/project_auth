@@ -1,9 +1,9 @@
 /// Faz 5 Patch 1 — ImportPage widget testleri (plan §5.3).
 ///
-/// Gerçek servisler (W1/W2) henüz `UnimplementedError` fırlattığı için sözleşme
-/// SINIFLARI `implements` ile sahtelenir (Dart'ta concrete sınıf da implements
-/// edilebilir) — böylece sayfa, sözleşmeye karşı bugün doğrulanır. libsodium,
-/// file_picker ve DI gerekmez.
+/// Servis sözleşmeleri `implements` ile sahtelenir (Dart'ta concrete sınıf da
+/// implements edilebilir): sayfa gerçek `ImportService`/`BackupService`
+/// gövdelerine değil SÖZLEŞMEYE karşı doğrulanır, böylece libsodium, file_picker
+/// ve DI olmadan koşar ve parser değişiklikleri bu dosyayı kırmaz.
 library;
 
 import 'dart:async';
@@ -556,6 +556,23 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Dosya okunamadı — geçerli bir JSON yedeği değil.'),
+        findsOneWidget);
+  });
+
+  testWidgets('A3: giriş tavanı aşılırsa Türkçe "çok fazla kayıt" hatası',
+      (tester) async {
+    await _pumpPage(
+      tester,
+      service: _FakeImportService(
+          previewError: const ImportTooManyEntriesException(5000, 1024)),
+      documents: _FakeDocuments(document: _doc()),
+      lock: lock,
+    );
+
+    await tester.tap(find.text('Dosya seç'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Dosyada çok fazla kayıt var (en fazla 1024).'),
         findsOneWidget);
   });
 

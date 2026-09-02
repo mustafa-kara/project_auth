@@ -142,6 +142,8 @@ Key transitions: `bootstrap`, `beginSetup`, `commitSetup`, `cancelSetup`, `unloc
 | `/` | `vault` | vault/vault | **inside** | Main screen (token list/grid + sync) |
 | `/scan` | `scan` | scan/scan | **inside** | QR scan (push; returns via pop) |
 | `/settings` | `settings` | settings/settings | **inside** | Biometrics / live-sync / announcements (push) |
+| `/import` | `importData` | import_export/import | **inside** | Aegis / 2FAS / own-backup file import (push) |
+| `/export` | `exportData` | import_export/export | **inside** | Password-encrypted backup export (push) |
 
 **Guard matrix (summary):**
 1. `unknown` → `/splash`
@@ -154,7 +156,14 @@ Key transitions: `bootstrap`, `beginSetup`, `commitSetup`, `cancelSetup`, `unloc
 
 - **Local (offline core):** `EncryptedVaultRepository` (per-token encrypted record, `masterKey` + XChaCha20-Poly1305, AAD `token|1|<id>`), `VaultMigration` (Phase 1 plaintext → encrypted, idempotent via commit-marker), `KeyAttributesStore`. See [CRYPTO.md §9].
 - **Remote (Phase 3, opaque):** `SupabaseTokenRepository` (push/pull of encrypted blobs — the server never sees plaintext), the `RemoteTokenRepository` interface, `key_attributes` upload/restore, and the `catalog`/`feature_flags`/`announcements` repos. All best-effort + offline fallback (offline-first is never broken).
-- **Kill-switch:** `token_sync_enabled=false` → sync is skipped entirely; the vault works fully offline.
+- **Kill-switch:** `token_sync_enabled=false` → sync is skipped entirely; the vault works fully offline. Turning it
+  back on (false→true) runs a catch-up `syncOnce`: everything that happened during the closed window is invisible to
+  Realtime, which only announces later changes.
+- **`postgrest 2.9` retries reads by itself.** Since 2.9.0 the transitive `postgrest` client ships automatic retries
+  enabled by default: **GET/HEAD only**, 3 attempts, on a network error or HTTP 503/520. Writes are never retried, so
+  `pushUpsert` cannot be duplicated behind our back — but a `pullSince` that looks like one slow call may in fact be
+  four, which matters when reading timings or logs. `TokenSyncService`'s own best-effort/`SyncError` handling still
+  sees only the final outcome.
 
 ## 8. Dependencies
 
@@ -169,8 +178,9 @@ Key transitions: `bootstrap`, `beginSetup`, `commitSetup`, `cancelSetup`, `unloc
 `main.dart` before `Supabase.initialize` and throws in debug and release alike. Run with
 `--dart-define-from-file=env/dev.json` (see the README).
 
-**Screen-capture protection:** sensitive pages wrap their `build` in `SecureScreenScope`
-(vault, unlock, setup_password, recovery_unlock, recovery_show, recovery_verify, scan). The ref count lives in Dart because
+**Screen-capture protection:** sensitive pages wrap their `build` in `SecureScreenScope` — 11 of them today:
+vault, unlock, setup_password, recovery_unlock, recovery_show, recovery_verify, login, register, scan, import, export
+(`grep -rn "SecureScreenScope(" lib/` is the authoritative list). The ref count lives in Dart because
 the native flag is last-caller-wins — see [CRYPTO.md §15](CRYPTO.md).
 
 ## 8.1 Import / Export (Faz 5 Patch 1–2)
@@ -184,6 +194,11 @@ the native flag is last-caller-wins — see [CRYPTO.md §15](CRYPTO.md).
 - **`file_picker ^11.0.3`** — held on the 11.x line deliberately: `file_picker >=12.1.3` pulls `windows_file_picker` →
   `win32 ^6.3.0`, while `device_info_plus ^12.1.0` (already a dependency, for the Android SDK gate) requires
   `win32 ^5.11.0` — the 12.x line does not resolve. 11.0.3 offers the same `withData` / `saveFile(bytes:)` API.
+  Two costs come with the pin, both tracked in PLAN.md Phase 7: (a) moving to `file_picker 12` is not a standalone
+  job, it drags `device_info_plus 13` along, so plan them as ONE upgrade; (b) the 11.0.3 iOS podspec pulls
+  `DKImagePickerController/PhotoGallery` (→ `SDWebImage`, `SwiftyGif`) unless `PICKER_MEDIA=false` is set in
+  `ios/Podfile`, which links photo-library APIs into a build that only ever picks documents and makes
+  `NSPhotoLibraryUsageDescription` a release-review question.
 - **`VaultCubit.addAll(List<OtpAccount>)`** — bulk insert with exactly one persist and one push, instead of N
   round trips through `add()`. Callers de-duplicate beforehand.
 - **Routes** `/import` and `/export` are children of the unlocked ShellRoute and are on the guard's unlocked

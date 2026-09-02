@@ -12,10 +12,11 @@
 /// - Scheme and host are compared case-insensitively; everything else about the
 ///   URI (userinfo, path, fragment, extra query keys) is ignored.
 /// - Steam is never inferred: Google Authenticator cannot hold a Steam token, so
-///   "promoting" one would produce codes that do not work. The `issuer == Steam`
-///   heuristic used for Aegis/2FAS (which really can store Steam entries) is
-///   therefore deliberately absent here — a Google entry named "Steam" is an
-///   ordinary 6-digit TOTP and must stay one.
+///   "promoting" one would produce codes that do not work. There is no issuer
+///   heuristic on any import path — `aegis_parser.dart` and `twofas_parser.dart`
+///   likewise treat the declared type (`type` / `otp.tokenType`) as the only
+///   authority — and the migration schema has no type field at all, so a Google
+///   entry named "Steam" is an ordinary 6-digit TOTP and must stay one.
 /// - A HOTP entry whose `counter` field is *absent* is skipped
 ///   (`SkipReason.invalidFields`) rather than defaulted to 0 — a guessed counter
 ///   desynchronizes the token permanently. An entry that explicitly carries

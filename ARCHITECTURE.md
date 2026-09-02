@@ -42,10 +42,12 @@
 - **Party we do NOT trust:** the Supabase server / DB administrator / an attacker — even if they read the DB, they must not be able to decrypt the TOTP secrets.
 - **Party we trust:** the user's device (secure enclave/keystore) and the master password held in the user's mind.
 - **Conclusion:** every secret sent to the server must be **encrypted on the client side**. The server only sees opaque blobs.
-- **Partially mitigated (2026-09-01):** an on-device **observer** — shoulder-surfing, screenshot malware, or a screen
-  recorder — is a different threat from the server. Sensitive screens (vault, unlock, setup, the three recovery screens)
-  are marked with `SecureScreenScope` → Android `FLAG_SECURE`. **iOS has no equivalent**, so only the recents/background
-  snapshot is hidden there. See [docs/CRYPTO.md §15](docs/CRYPTO.md).
+- **Partially mitigated (2026-09-01, extended 2026-09-02):** an on-device **observer** — shoulder-surfing, screenshot
+  malware, or a screen recorder — is a different threat from the server. Eleven screens are marked with
+  `SecureScreenScope` → Android `FLAG_SECURE`: vault, unlock, setup_password, the three recovery screens
+  (recovery_show / recovery_verify / recovery_unlock), login, register, scan, import and export. The authoritative
+  list is `grep -rn "SecureScreenScope(" lib/`. **iOS has no equivalent**, so only the recents/background snapshot is
+  hidden there. See [docs/CRYPTO.md §15](docs/CRYPTO.md).
 
 ### 2.2 Key hierarchy (Ente model)
 
@@ -175,7 +177,14 @@ The concrete adapters live in `data/`.
 
 - **`file_picker ^11.0.3`**, held on the 11.x line on purpose: `file_picker >=12.1.3` pulls `windows_file_picker` →
   `win32 ^6.3.0`, while the existing `device_info_plus ^12.1.0` needs `win32 ^5.11.0`, so the 12.x line does not
-  resolve. 11.0.3 exposes the same `withData` / `saveFile(bytes:)` API.
+  resolve. 11.0.3 exposes the same `withData` / `saveFile(bytes:)` API. The pin is not free: `file_picker 12` and
+  `device_info_plus 13` must move together (one upgrade, not two), and 11.0.3's iOS podspec links
+  `DKImagePickerController/PhotoGallery` + `SDWebImage` + `SwiftyGif` into the app unless `PICKER_MEDIA=false` is
+  set in `ios/Podfile` — photo-library code in a document-only app, and an `NSPhotoLibraryUsageDescription`
+  question at release review. Both are Phase 7 items in PLAN.md.
+- **`path_provider ^2.1.5` is a DIRECT dependency**, not just a transitive one: `FilePickerDocumentPort` calls
+  `getApplicationDocumentsDirectory()` itself to shred the copy iOS `saveFile` leaves behind
+  ([docs/CRYPTO.md §16.5](docs/CRYPTO.md)).
 - **`VaultCubit.addAll(List<OtpAccount>)`** applies a whole import with a single persist and a single push instead
   of N calls to `add()`. Callers de-duplicate first.
 - **Routes `/import` and `/export`** are children of the unlocked ShellRoute and are listed in the router guard's
@@ -183,6 +192,19 @@ The concrete adapters live in `data/`.
 - **Lock exemption:** the system file picker backgrounds the app, so both flows are wrapped in
   `VaultLockCubit.beginSystemFileFlow()` / `endSystemFileFlow()` — a budgeted, deliberate threat-model concession
   documented in [docs/CRYPTO.md §17](docs/CRYPTO.md).
+- **Dedupe canonicalization is catalog-driven and shared.** `domain/dedupe.dart` builds the dedupe key from the
+  Base32-canonicalized secret plus the issuer reduced to its `IssuerAvatar.slugFor` slug (lower-case, non
+  alphanumerics dropped), so `GitHub` and `github.com` collapse onto one key. The slug alone cannot resolve an
+  *alias* — `AWS` vs `Amazon Web Services` are different strings by any spelling rule — so `canonicalizerFor(
+  IssuerCatalog)` in the same file is the single source both `VaultCubit` (on write) and `ImportService` (before
+  dedupe) use, and the locator hands both the same catalog. Applying it on only one side is what produced
+  duplicate tokens on re-import. **Known limit:** no Unicode NFC/NFD normalization — a precomposed `é` and its
+  decomposed form still key differently; fixing it needs a package the project does not carry.
+- **Entry ceiling on the file path:** `ImportService.maxEntries = 1024` (accounts + skipped), matching the
+  Google path's `maxAccounts`. Over it the file is rejected whole with `ImportTooManyEntriesException` rather
+  than truncated — importing the first 1024 of a 5000-entry file would leave the user believing it all came
+  across. `ImportFileTooLargeException` guards bytes; this one guards count, which a small file of tiny entries
+  blows past on its own.
 - Supabase schema is **unchanged**: imported tokens travel the existing encrypted-blob path.
 
 **Patch 2 — Google Authenticator transfer QR.** The export is a base64 protobuf in
@@ -455,6 +477,27 @@ opaque `ciphertext`/`nonce` (+ `version`, `deleted`) go to the server; AAD is `t
   single write queue). Push is best-effort (its own `try/catch`) → a push error does not block the pull.
 - **Soft-delete (tombstone):** `markDeleted` writes a tombstone with the last blob + atomically; `load()` does not
   show it in accounts, `exportRaw` returns it for push; it is preserved across saves (the token is not resurrected).
+- **A live record beats its own tombstone (deliberate resurrection).** One id may never carry both a live record
+  and a tombstone, so `_writeRecords`, `load` and `importRemote` all drop the tombstone when a live record for the
+  same id is present. The pair can only arise from an **id-preserving backup restore of a token the user had
+  deleted** — which is exactly the user asking for that token back. The restored record is dirty (`sv == null`),
+  so the next push flips the server row to `deleted = false`. Keeping both instead would lose the token silently
+  at the next `importRemote` (the tombstone wins the merge) and would break push permanently, because
+  `pushUpsert(onConflict: 'id')` rejects two rows with the same id (Postgres 21000).
+- **Push and merge are serialized inside `TokenSyncService`** by an async mutex covering `exportRaw + pushUpsert`
+  on one side and the merge write on the other. Otherwise a long import push and an arriving merge interleave: the
+  merge writes a newer blob to disk while the push is still uploading the snapshot it read beforehand, so the
+  server keeps the **stale** blob and the next pull hands it back. The lock is the service's own, not `VaultCubit`'s
+  `_opChain` — the cubit's sequencer guards UI mutations and must not have a network round trip parked in it.
+  **The pull sits BETWEEN the two locked regions, not inside either:** `pullSince` runs unlocked, so a
+  `pushChanged()` slipping in between means the merge applies rows that were read before that push. That is not a
+  loss — arrival-order LWW plus the dirty (`sv == null`) rule decide the outcome, and the pushed record stays
+  dirty until a later pull reconciles it. Holding the lock across the network call instead would block every user
+  mutation for the length of a round trip, which is the cost the service-local lock exists to avoid.
+- **Kill-switch re-enable does a catch-up.** While `token_sync_enabled` is false, `syncOnce`, `pushChanged` and the
+  Realtime trigger are all no-ops, so server rows and local dirty records pile up. Restoring the subscription is not
+  enough — Realtime only announces what happens *next* — so a false→true transition runs a `syncOnce` in the same
+  subscribe-first-then-pull order as `start`.
 - **Realtime = trigger only (#1180):** the payload is NOT READ → REST `pullSince`. Order: subscribe-first → catch-up
   pull → idempotent merge. The subscription is tied to the VaultCubit subtree lifecycle (start on unlock, on lock/background/
   signOut `VaultCubit.close → sync.dispose → unsubscribe`). Live sync is a Settings toggle (off by default).

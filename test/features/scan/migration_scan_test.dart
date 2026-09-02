@@ -5,7 +5,8 @@
 /// `onDetect` geri çağrısı, gerçek bir kamera karesinin girdiği yolun ta
 /// kendisidir (`BarcodeCapture` → `_onDetect`).
 /// Migration beyni de (`debugMigration`) enjekte edilir; böylece bu testler
-/// W1'in protobuf gövdelerinden bağımsızdır.
+/// protobuf çözücünün gövdesinden bağımsız kalır — burada sınanan ekranın
+/// davranışı, `google_auth_parser`/`protobuf_wire` değil.
 library;
 
 import 'dart:async';

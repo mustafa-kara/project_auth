@@ -63,6 +63,15 @@ class OtpAuthUri {
     final issuer = (q['issuer']?.isNotEmpty ?? false) ? q['issuer'] : labelIssuer;
 
     // Steam: host=steam ise SHA1/period=30 sabit; digits Steam kodlamasında kullanılmaz.
+    //
+    // `issuer == "steam"` sezgisi projede kalan TEK issuer tabanlı Steam
+    // çıkarımıdır ve BİLİNÇLİ (denetim B1): `otpauth://` şemasında Steam'in
+    // kendi host'u YOKTUR — Steam Guard bağlantıları konvansiyon gereği
+    // `otpauth://totp/Steam:<hesap>?issuer=Steam` diye kodlanır, yani issuer
+    // burada gerçekten tipin taşıyıcısıdır. Aegis/2FAS/Google yollarında aynı
+    // sezgi KALDIRILDI, çünkü o formatların birinci sınıf bir Steam tipi var
+    // (`type:"steam"`, `tokenType:"STEAM"`) → orada issuer'a bakmak, kullanıcının
+    // yalnızca "Steam" diye ADLANDIRDIĞI sıradan bir TOTP'yi bozar.
     final isSteam = type == OtpType.steam ||
         (issuer?.toLowerCase() == 'steam' && host == 'totp');
 

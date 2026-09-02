@@ -271,8 +271,16 @@ class ImportService {
 
     // Entry ceiling (audit A3) — accounts AND skipped entries, exactly what
     // `GoogleMigrationCollector.maxAccounts` counts, so every import path (file,
-    // encrypted backup, scanned QR) shares one limit. Checked before any per
-    // entry work so an oversized file costs nothing beyond the parse.
+    // encrypted backup, scanned QR) shares one limit.
+    //
+    // NOTE the ceiling is enforced AFTER parsing, not before: the count is only
+    // knowable once the entries exist, so the parse itself is a cost this check
+    // cannot avoid. That cost is bounded on the other axis instead — [maxBytes]
+    // caps the file at 8 MiB before a single byte is decoded — and everything
+    // downstream of here (dedupe, the preview list, the vault write, the push)
+    // IS protected. It rejects rather than truncates: silently importing the
+    // first 1024 of a 5000-entry file would leave the user believing the rest
+    // came across too.
     final entries = parsed.accounts.length + parsed.skipped.length;
     if (entries > maxEntries) {
       throw ImportTooManyEntriesException(entries, maxEntries);

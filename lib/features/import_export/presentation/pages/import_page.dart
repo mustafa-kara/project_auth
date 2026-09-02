@@ -64,6 +64,8 @@ String importErrorMessage(Object error) => switch (error) {
           _ => 'Bu yedek parolayla şifrelenmiş — şifresiz olarak yeniden '
               'dışa aktar.',
         },
+      ImportTooManyEntriesException() =>
+        'Dosyada çok fazla kayıt var (en fazla 1024).',
       EmptyImportException() =>
         'Dosyada içe aktarılacak token bulunamadı.',
       WrongBackupPasswordException() =>

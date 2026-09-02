@@ -72,6 +72,21 @@ String dedupeKey(OtpAccount account) {
 ///
 /// An empty catalog (offline / not fetched yet) makes it a no-op — the issuer
 /// is never invented, only aligned to a name the catalog already carries.
+///
+/// KNOWN LIMIT (accepted): canonicalization is therefore only as good as the
+/// catalog snapshot at the moment of the write. A token stored as "GitHub"
+/// while the catalog was loaded will NOT match a "github.com" imported while it
+/// was empty — the alias half of the mapping is unavailable offline, and only
+/// the slug reduction in [dedupeKey] still applies (which does happen to cover
+/// this particular pair, but not an alias like "AWS" → "Amazon Web Services").
+/// The fix would be to canonicalize lazily at comparison time against the
+/// newest catalog, which costs a rewrite of the stored issuer; not worth it for
+/// a duplicate the user can delete.
+///
+/// ASSUMPTION: canonicalization is applied ONCE, not to a fixed point. The
+/// catalog must therefore never carry a chained alias (`a` → `b` and `b` → `c`)
+/// — with one, two sides that entered at different links in the chain would
+/// still disagree. Catalog rows are authored server-side; keep them flat.
 OtpAccount Function(OtpAccount account) canonicalizerFor(IssuerCatalog catalog) =>
     (account) {
       final canon = catalog.canonicalIssuer(account.issuer);

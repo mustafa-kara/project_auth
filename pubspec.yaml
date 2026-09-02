@@ -61,6 +61,15 @@ dependencies:
   # 11.x hattı: file_picker >=12.1.3 → windows_file_picker → win32 ^6.3.0 iken
   # device_info_plus ^12.1.0 (Patch 5 Android SDK gate'i) win32 ^5.11.0 istiyor →
   # 12.x sürüm çözümü ÇAKIŞIR. 11.0.3 aynı API'yi (withData/saveFile bytes) sunar.
+  # PIN'İN BEDELİ (ikisi de PLAN.md Faz 7'de iş kalemi):
+  #  1) file_picker 12'ye geçiş TEK BAŞINA yapılamaz — device_info_plus 13'ü de
+  #     beraberinde getirir; tek bir bağlı yükseltme olarak planlanmalı.
+  #  2) 11.0.3'ün iOS podspec'i `PICKER_MEDIA` varsayılanda açık olduğu için
+  #     `DKImagePickerController/PhotoGallery` (→ SDWebImage, SwiftyGif) çeker
+  #     (bkz. ios/Podfile.lock). Uygulama YALNIZ doküman seçiyor; yine de fotoğraf
+  #     kitaplığı API'leri binary'ye giriyor → App Store incelemesinde
+  #     `NSPhotoLibraryUsageDescription` sorusu. Çıkış yolu: ios/Podfile'da
+  #     `PICKER_MEDIA=false`.
   file_picker: ^11.0.3
   # Zaten `file_picker`'ın transitive bağımlılığıydı; DOĞRUDAN bağımlılığa
   # yükseltildi çünkü `FilePickerDocumentPort` iOS'ta artık dosyayı temizlemek
