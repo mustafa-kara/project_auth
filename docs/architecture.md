@@ -36,13 +36,15 @@ lib/
     ├── vault/     # main screen + token sync
     │   ├── domain/      # token_sync_service, remote_token_repository, raw_token_record, issuer_catalog, catalog_repository
     │   ├── data/        # encrypted_vault_repository, vault_migration, supabase_token_repository, *_store
-    │   └── presentation/{bloc/vault_cubit, pages/vault_page, widgets/otp_card}
+    │   └── presentation/{bloc/vault_cubit, pages/vault_page,
+    │                     widgets/{otp_card, add_token_sheet, edit_token_sheet, token_action_sheet,
+    │                              tag_chips_bar, tag_manager_sheet}}   # son beşi Faz 5 Patch 3
     ├── scan/      # QR scanning (scan_page → VaultCubit.add; migration modu → VaultCubit.addAll)
-    │   └── presentation/  # scan_page, migration_scan_controller (kamerasız migration beyni)
-    ├── import_export/  # Faz 5 Patch 1–2 — Aegis/2FAS/Google Authenticator import + encrypted backup
-    │   ├── domain/      # import_service, backup_service, backup_envelope, import_format_detector, dedupe, file_port (DocumentPort), import_models, import_exceptions, google_migration (MigrationBatch + GoogleMigrationCollector)
-    │   ├── data/        # aegis_parser, twofas_parser, protobuf_wire (ProtobufReader), google_auth_parser, file_picker_document_port
-    │   └── presentation/  # pages/{import_page, export_page}, widgets/import_preview_view
+    │   └── presentation/  # scan_page (kamera + "Görüntüden oku"), migration_scan_controller (kamerasız migration beyni)
+    ├── import_export/  # Faz 5 Patch 1–3 — Aegis/2FAS/Google Authenticator import + encrypted backup
+    │   ├── domain/      # import_service, backup_service, backup_envelope, import_format_detector, dedupe, file_port (DocumentPort + PickedImage), import_models, import_exceptions, google_migration (MigrationBatch + GoogleMigrationCollector), qr_image_decoder (QrImageDecoder seam + QrImageLimits)
+    │   ├── data/        # aegis_parser, twofas_parser, protobuf_wire (ProtobufReader), google_auth_parser, file_picker_document_port, mobile_scanner_qr_decoder
+    │   └── presentation/  # pages/{import_page, export_page}, widgets/{import_preview_view, migration_progress_band}
     └── settings/  # settings_page (biometrics / live-sync / announcements / backup & transfer)
 ```
 
@@ -52,8 +54,8 @@ lib/
 |---|---|---|
 | `account` | splash, login, register, email_confirm, account_link, restore_failed | `SessionCubit` (Supabase identity) + `AccountVaultManager`, `DeviceRegistrar` |
 | `auth` | setup_password, recovery_show, recovery_verify, unlock, recovery_unlock, auth_integrity | `VaultLockCubit` (vault lock) + `KeyManager` |
-| `vault` | vault, settings | `VaultCubit` + `TokenSyncService`, `FeatureFlagsService`, `AnnouncementsRepository` |
-| `scan` | scan | `VaultCubit.add()`; migration modunda `MigrationScanController` (collector + `ImportService.previewParsed`) → `VaultCubit.addAll()` |
+| `vault` | vault, settings | `VaultCubit` + `TokenSyncService`, `FeatureFlagsService`, `AnnouncementsRepository`. Faz 5 Patch 3 sheet'leri (ekle / düzenle / eylem / etiket yöneticisi) aynı `VaultCubit`'i alır: `add`, `editMetadata`, `renameTag`, `deleteTag`, türetilmiş `allTags`. Etiket filtresi cubit'te DEĞİL — arama gibi `VaultPage` state'i, oturum içi |
+| `scan` | scan | `VaultCubit.add()`; migration modunda `MigrationScanController` (collector + `ImportService.previewParsed`) → `VaultCubit.addAll()`. "Görüntüden oku" (Patch 3): `DocumentPort.pickImage` + `QrImageDecoder` → aynı `_handleRaw` |
 | `import_export` | import, export | `ImportService` / `BackupService` + `VaultCubit.addAll()`, `DocumentPort` |
 
 Navigation is **state-driven**: screens never force routing with `context.go`; when cubit state changes the guard redirects (`refreshListenable`).
@@ -181,9 +183,11 @@ Key transitions: `bootstrap`, `beginSetup`, `commitSetup`, `cancelSetup`, `unloc
 **Screen-capture protection:** sensitive pages wrap their `build` in `SecureScreenScope` — 11 of them today:
 vault, unlock, setup_password, recovery_unlock, recovery_show, recovery_verify, login, register, scan, import, export
 (`grep -rn "SecureScreenScope(" lib/` is the authoritative list). The ref count lives in Dart because
-the native flag is last-caller-wins — see [CRYPTO.md §15](CRYPTO.md).
+the native flag is last-caller-wins — see [CRYPTO.md §15](CRYPTO.md). **Faz 5 Patch 3 did not change this
+list:** its new surfaces are all modal sheets and dialogs rendered inside pages that already hold a scope
+(vault, scan), and a scope is a page-level wrapper — a sheet opened over a protected page is already covered.
 
-## 8.1 Import / Export (Faz 5 Patch 1–2)
+## 8.1 Import / Export (Faz 5 Patch 1–3)
 
 `features/import_export/` is layered like the rest: `domain/` is pure Dart (parsers are driven through the
 `ImportParser` interface, `DocumentPort` abstracts file access), `data/` holds the concrete parsers and the
@@ -229,6 +233,40 @@ the native flag is last-caller-wins — see [CRYPTO.md §15](CRYPTO.md).
   `SecureScreenScope` ile sarılıdır.
 - **`presentation/widgets/import_preview_view.dart`** — onay önizlemesi; dosyadan ve QR'dan içe aktarma aynı
   widget'ı ve aynı metinleri paylaşır.
+
+**Patch 3 — etiketler, yapıştırılan aktarım bağlantısı, görüntüden QR.** Patch 2'nin yalnız canlı kamerayla
+yapılabilen işine iki alternatif giriş, artı içe aktarılan grupların korunması.
+
+- **`OtpAccount.tags`** — şifreli blob'un İÇİNDE; kayıt `v`'si, AAD'si ve yedek zarfının `version`'ı
+  DEĞİŞMEZ, liste boşken anahtar hiç yazılmaz (etiketsiz vault byte-aynı serialize olur → yükseltmede
+  yeniden şifreleme/push dalgası yok). Gerekçeler: [CRYPTO.md §9](CRYPTO.md).
+- **`VaultCubit`** — `editMetadata` (yalnız issuer/hesap adı/etiket; secret ve kod geometrisi parametre
+  olarak dahi alınmaz), `renameTag`, `deleteTag`, türetilmiş `allTags`. Üçü de `addAll` kalıbını izler: tüm
+  süpürme için TEK persist + TEK push, no-op'ta hiçbir yazma ve hiçbir push yok.
+- **`presentation/widgets/tag_chips_bar.dart`** — arama alanının altında yatay çip şeridi. **Tek seçim ve
+  oturum içi**: filtre kalıcı DEĞİL, çünkü yeniden açılışta hayatta kalan bir filtre kullanıcının "token'ım
+  kayboldu" sanmasının klasik yoludur. Vault'ta hiç etiket yoksa şerit hiç render edilmez. Filtre `VaultCubit`
+  değil `VaultPage` state'i (aramayla aynı yerde), ve arama ile AND'lenir. Çip **tam eşleşme** testidir
+  ("iş", "işlem"i getirmez); arama ise etiket metnine de bakar.
+- **`token_action_sheet.dart` / `edit_token_sheet.dart` / `tag_manager_sheet.dart`** — uzun basış artık
+  eylem sheet'i açar (Düzenle / Etiketler / Sil), silme her yolda onaylıdır. Düzenleme sheet'i secret'a
+  hiç dokunmaz. Etiket yöneticisi yeniden adlandırma/silmeyi tüm vault'a uygular ve kaç kodu etkilediğini
+  önden söyler; silinen yalnızca ETİKETtir, token değil.
+- **`OtpCard` sözleşmesi genişledi (geriye uyumlu).** Yeni iki opsiyonel callback:
+  - `onLongPress` — verilmezse kart ESKİ davranışını korur (uzun basış = `onDelete`). `VaultPage` bunu
+    eylem sheet'ine bağlar, yani üründe uzun basış artık doğrudan silmez.
+  - `onEdit` — düzenleme sheet'ini açar. `onLongPress`'in içine katlanmamasının sebebi erişilebilirlik:
+    ekran okuyucu kullanıcısı "uzun basamaz", bu yüzden 'Düzenle' ve 'Sil'
+    `customSemanticsActions` olarak da yayınlanır. Kartın birincil `label`'ı ve tek-tap "kodu kopyala"
+    davranışı değişmedi — yalnız aksiyon EKLENDİ.
+- **`ScanPage` "Görüntüden oku"** — `DocumentPort.pickImage` + `QrImageDecoder`; çözülen her metin mevcut
+  `_handleRaw`'a girer, yani tek-token ve aktarım modu görüntüden de çalışır. Dosya akışlarıyla aynı
+  bütçeli kilit muafiyeti, artık üç akışlı ([CRYPTO.md §17](CRYPTO.md)); seçicinin bıraktığı düz nüshanın
+  temizlik SIRASI kritiktir ([CRYPTO.md §16.5](CRYPTO.md)).
+- **`AddTokenSheet` yapıştırma yolu** — `otpauth-migration://` bağlantısı sheet'in kendi
+  `MigrationScanController`'ına gider; eksik batch'te `MigrationProgressBand`, tamamlanınca sheet içinde
+  `ImportPreviewView`. Pano PROGRAMATİK okunmaz. `ImportPage` rehberi yalnızca bu yolu işaret eden tek bir
+  cümle kazandı — oraya ikinci bir giriş alanı KONMADI.
 
 ## 9. Document Map
 - This file: client UI/state architecture.

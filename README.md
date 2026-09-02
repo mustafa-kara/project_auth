@@ -28,7 +28,7 @@ End-to-end (E2E) encrypted, multi-device synchronized **TOTP/HOTP authenticator*
 
 ---
 
-## Current status (2026-09-01)
+## Current status (2026-09-02)
 
 | Stage | Status |
 |---|---|
@@ -51,6 +51,7 @@ End-to-end (E2E) encrypted, multi-device synchronized **TOTP/HOTP authenticator*
 on the push path and a dirty-local-wins rule on the first pull (no cursor = nothing proves the server row is
 newer); **Steam issuer heuristic removed from Aegis/2FAS** (the declared type is the only authority), official 2FAS `reference` encryption predicate, SHA224/SHA384/MD5 → `unsupportedType`, 512-byte string caps, fixtures aligned with real exports; **iOS export leftover in Documents shredded** (file_picker wrote the backup there and never removed it → it rode into the iCloud backup), camera action guards, bounded skip list, `SecureScreen` retry-on-failure, 10-minute absolute cap on the file-picker lock exemption; docs/CRYPTO.md §15/§16/§17 resynced with the code. **Server schema unchanged.** · **host 992/992** |
 | Flutter — deps: file_picker 12 + device_info_plus 13 | ✅ (2026-09-02) One coupled major upgrade (`file_picker` 11.0.3 → 12.1.3, `device_info_plus` 12.4.0 → 13.2.0 — neither resolved alone, `win32 ^6` vs `^5`). **iOS drops the `DKImagePickerController`/`DKPhotoGallery`/`SDWebImage`/`SwiftyGif` pod chain** (12.x moves Apple platforms into the federated `file_picker_darwin`), which closes the `NSPhotoLibraryUsageDescription` release-review item; **minimum iOS deployment target 13.0 → 14.0** (same device set — iPhone 6s and later). `DocumentPort` migrated to `pickFile()` + `PlatformFile.readAsBytes()` + `saveFile() → Uri?`; behaviour unchanged, and the size ceiling now rejects an oversized file before it is read into memory. The iOS `saveFile` leftover moved upstream to `NSTemporaryDirectory()` (out of the iCloud backup) — the shredder is kept as defence in depth. **Server schema unchanged.** · **host 996/996** |
+| Flutter — Phase 5 Patch 3 (tags, pasted links, QR from image) — **Phase 5 DONE** | ✅ (2026-09-02) **Tags:** `OtpAccount.tags` (≤8 labels, ≤32 runes) inside the encrypted blob — **no record-version bump, no AAD change, no backup-envelope change**, and the key is omitted when empty so an untagged vault serializes byte-identically to before (no re-encrypt/re-push wave on upgrade). Aegis `db.groups` + the legacy singular `group`, and 2FAS `groups`/`groupId`, are mapped onto tags on import; tags are deliberately NOT part of `dedupeKey`. Vault-wide rename/delete with one persist + one push each, session-scoped single-selection filter strip, metadata-only edit sheet (the cubit does not even accept a secret). **Behaviour change:** a long press no longer deletes outright — it opens an action sheet, and every delete path is confirmed. **Pasted migration link** in the add sheet (the clipboard is never read programmatically) and **"Görüntüden oku"** in `ScanPage` (`analyzeImage`, no camera and no camera permission; the picker's plaintext copy is zero-filled and unlinked *before* the general cache sweep, and the user's original image is never touched). **Server schema unchanged.** · **host 1154/1154** |
 | Admin panel (Next.js) | ⏳ Phase 6 |
 
 **Live backend project:** `authenticator-dev` (Supabase, eu-central-1, PG17). Details: [PROJECT_INFO.md](supabase/PROJECT_INFO.md).
@@ -65,7 +66,20 @@ newer); **Steam issuer heuristic removed from Aegis/2FAS** (the declared type is
 | project_auth — own encrypted backup | ✅ | `projectauth-backup` v1, opens with the backup password |
 | Aegis / 2FAS — **encrypted** export | ❌ | Recognized and named (`EncryptedSourceException`), not decrypted: export the plain file from the source app |
 
-The QR import needs the live camera; a pasted migration link or a saved QR image file is Patch 3.
+**Groups → tags** (Patch 3):
+
+| Source | Groups imported as tags | Note |
+|---|---|---|
+| Aegis | ✅ | `db.groups` (`{uuid, name}`) referenced by `entry.groups`, plus the legacy singular `entry.group` (a name, not a uuid). Multiple groups per entry are kept |
+| 2FAS | ✅ | root `groups` (`{id, name}`) referenced by `service.groupId` → at most one tag per service |
+| Google Authenticator | — | the transfer payload carries no grouping field at all |
+| project_auth backup | ✅ | tags ride inside the payload; a restore is tag-lossless |
+
+An unresolvable group reference contributes no tag, silently — it never drops the entry and never shows up as a
+skipped record.
+
+Three ways in for a Google transfer QR: the live camera, a **pasted `otpauth-migration://` link**, or a **saved QR
+image file** (Patch 3). Reading from an image is not available on the iOS Simulator or the web.
 
 ---
 
@@ -77,7 +91,7 @@ The QR import needs the live camera; a pasted migration link or a saved QR image
 3. **Supabase auth + sync** — DB ✅; Flutter Patch 1 (auth) ✅ + Patch 2 (key_attributes) ✅ + Patch 3 (token sync + changePassword UPDATE) ✅ + Patch 4 (devices + catalog/feature_flags/announcements + token_sync kill-switch) ✅ — **Phase 3 DONE**
    - **Phase 3.5 — CI, deps, hardening (2026-09-01) — DONE:** GitHub Actions (`analyze --fatal-infos` + `test`), unused-dependency cleanup, ref-counted screen-capture protection, Supabase config fail-fast
 4. **Social sign-in + push** — Google/Apple Sign-In, FCM *(developer accounts required)*
-5. **Import/Export + catalog** — Patch 1 (Aegis + 2FAS import, encrypted backup export) ✅ 2026-09-02 + Patch 2 (Google Authenticator transfer QR) ✅ 2026-09-02; tags/folders and migration import from a pasted link / QR image file → Patch 3
+5. **Import/Export + catalog** — **DONE 2026-09-02:** Patch 1 (Aegis + 2FAS import, encrypted backup export) ✅ + Patch 2 (Google Authenticator transfer QR) ✅ + Patch 3 (tags — including Aegis/2FAS groups, migration import from a pasted link and from a saved QR image) ✅; the `catalog_services` issuer matching landed back in Phase 3 Patch 4 ✅
 6. **Admin panel** — Next.js, analytics, announcements/push, feature flags
 7. **Hardening & release** — security review, store
 
@@ -122,7 +136,7 @@ In Android Studio / IntelliJ the same flag goes into Run → Edit Configurations
 ```bash
 flutter pub get
 flutter analyze          # lint — currently clean (CI runs it with --fatal-infos)
-flutter test             # 992/992 host — no --dart-define needed (Supabase is not initialized in tests)
+flutter test             # 1154/1154 host — no --dart-define needed (Supabase is not initialized in tests)
 flutter run --dart-define-from-file=env/dev.json   # run on a device/emulator
 ```
 
@@ -151,12 +165,15 @@ lib/
     auth/       vault lock — KeyManager wiring, VaultLockCubit, setup/unlock/recovery pages
     settings/   SettingsPage — biometrics, live sync, announcements, backup & transfer
     vault/      data/ — VaultRepository (secure_storage persistence)
-                presentation/{bloc,pages,widgets} — VaultCubit, VaultPage (search), OtpCard
-    scan/       presentation — ScanPage (mobile_scanner QR scanning; migration mode),
+                presentation/{bloc,pages,widgets} — VaultCubit, VaultPage (search + tag filter), OtpCard,
+                  AddTokenSheet, EditTokenSheet, TokenActionSheet, TagChipsBar, TagManagerSheet
+    scan/       presentation — ScanPage (mobile_scanner QR scanning; migration mode; "read from image"),
                 MigrationScanController (camera-free migration brain)
-    import_export/  domain/ — ImportService, BackupService, DocumentPort, GoogleMigrationCollector (pure Dart)
-                data/ — AegisParser, TwoFasParser, ProtobufReader, GoogleAuthParser, FilePickerDocumentPort
-                presentation/pages — ImportPage, ExportPage; widgets/ — ImportPreviewView
+    import_export/  domain/ — ImportService, BackupService, DocumentPort, GoogleMigrationCollector,
+                  QrImageDecoder seam (pure Dart)
+                data/ — AegisParser, TwoFasParser, ProtobufReader, GoogleAuthParser, FilePickerDocumentPort,
+                  MobileScannerQrDecoder
+                presentation/pages — ImportPage, ExportPage; widgets/ — ImportPreviewView, MigrationProgressBand
   main.dart     DI init + MaterialApp.router + VaultCubit provider
 test/
   core/otp/     RFC 4226/6238 test vectors + URI parse tests

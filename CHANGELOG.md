@@ -2,6 +2,189 @@
 
 Project progress log. Newest at the top.
 
+## 2026-09-02 (Phase 5 Patch 3 — tags, pasted migration links, QR from image)
+
+The last three items on the Phase 5 list, which **completes Phase 5**: user **tags** (including the groups Aegis
+and 2FAS exports have always carried and this app has always thrown away), and two ways to bring in a Google
+Authenticator transfer QR that do not need a working camera — a **pasted `otpauth-migration://` link** and a
+**saved QR image file**.
+
+**No Supabase schema change. No crypto change** — no new primitive, no new AAD, no record-version bump, no backup
+envelope bump; docs/CRYPTO.md §4's AAD table is byte-for-byte the same table it was before this patch. host
+**996/996 → 1154/1154**, integration unchanged (**50**, not run on a device this round), `flutter analyze
+--fatal-infos` clean.
+
+### The model decision: tags live inside the encrypted blob, and nothing around them moves (K1–K6)
+
+`OtpAccount` gained `final List<String> tags` — at most **8** labels of at most **32 runes** each. Six decisions
+shaped it, and each of them is a decision *not* to disturb something:
+
+- **K1 — no record version bump, no AAD change.** Tags are a new optional key inside the token plaintext, which
+  changes neither how a blob is opened nor what it is bound to; the AAD's job is to pin the record to its context
+  (`token|1|<id>`) and the id, the context and the cipher are all unchanged. Bumping `v` to 2 would have been the
+  expensive alternative: `EncryptedBlob` rejects a version above `supportedVersion` (docs/CRYPTO.md §8), so an
+  older client would have refused the **whole vault** ("açılamadı") instead of quietly ignoring one key it does not
+  understand, and the server would have been holding records every not-yet-updated device considered malformed. An
+  additive field must not be able to cause a total outage on another device.
+- **K2 — `toJson` writes the key only when the list is non-empty** (the same conditional shape `issuer` already
+  used). An untagged account therefore serializes **byte-identically** to a pre-Patch-3 one. This is what keeps
+  the upgrade free: `EncryptedVaultRepository.save()` re-encrypts only records whose `OtpAccount` compares
+  unequal, so a vault where nobody has tagged anything re-encrypts nothing, refreshes no `updatedAt` and pushes
+  nothing. Had the key always been written as `[]`, the first save after the update would have re-encrypted and
+  re-pushed **every token in every vault** — a sync storm for a feature nobody had used yet.
+- **K3 — `tags` IS in `OtpAccount.props`, and that is load-bearing, not tidiness.** The repository's
+  unchanged-blob shortcut is literally `if (prev != null && prev.account == account)` → keep the old ciphertext.
+  A field missing from `props` is invisible to that comparison, so an edit that changed **only** tags would have
+  been written back as the old blob: the change would vanish on the next load, with no error and no push. The
+  comment at that call site now says so, and `encrypted_vault_raw_store_test.dart` asserts a tags-only edit does
+  re-encrypt and does refresh `updatedAt`.
+- **K4 — normalize, never reject.** `OtpAccount.normalizeTags` trims → drops blanks → clips to 32 runes → drops
+  exact duplicates (first wins, so the user's own order survives) → keeps the first 8. It cannot throw. Import
+  sources hand over arbitrary group names, and a thrown exception there would drop an otherwise perfectly good
+  token over a *label*. Only a **type** error is fatal (`tags: "work"`, `tags: [1,2]` → `FormatException`), because
+  that means the blob is not what we wrote and `VaultRepository.load` must be able to quarantine that one record
+  rather than half-understand it.
+- **K5 — tags are NOT part of `dedupeKey`.** A token exported from a "Work" group and re-imported after the user
+  moved it to "Personal" is the same token. Including tags would have made every group change look like a brand
+  new account on the next import. Covered by a regression test in `dedupe_test.dart`.
+- **K6 — import group → tag mapping.** Aegis: `db.groups` is `[{uuid, name}]` and an entry references them by uuid
+  in `entry.groups`; older exports instead carry a single `entry.group` holding the **name**, so both are read
+  (uuids first, the legacy field used verbatim). 2FAS: the root `groups` is `[{id, name}]` and a service points at
+  one with `groupId`, so a 2FAS service yields **at most one** tag. Google's migration payload has no grouping
+  field at all. An unresolvable reference (a stale uuid, a wrongly typed row, a missing `groups` array) contributes
+  no tag **in silence** — it produces no `SkippedEntry`, because a broken group reference says nothing about the
+  token, and *nothing* about groups can drop an entry: every accessor on that path is total and the ceilings are
+  applied by `normalizeTags`, which never throws.
+
+Backups needed no change at all: the payload already *is* `OtpAccount.toJson()`, so tags ride along, `version`
+stays **1**, and a pre-Patch-3 backup imports exactly as it did. Round-trip covered in `backup_service_test.dart`
+and end-to-end (grouped Aegis file → preview → `addAll` → export → re-import → tags still there).
+
+### Vault UI — tags, and a long press that no longer destroys anything
+
+- **`VaultCubit.editMetadata / renameTag / deleteTag`, plus a derived `allTags`.** All three follow the `addAll`
+  discipline: `_awaitLoaded` → `_sequence` → `_guardIntegrity` → **one** `_emitAndPersist` and **one**
+  `_pushAfterMutation` for the whole sweep, and a no-op (unknown id, nothing actually changed, a tag nobody
+  carries, a rename to itself) writes nothing and pushes nothing. `editMetadata` runs the result through the same
+  catalog canonicalization `add` uses, so an edited token dedupes against imports exactly like an added one.
+  A rename **merges** on collision rather than erroring — the renamed entry folds into the existing tag through
+  `normalizeTags`, keeping the account's original tag order. `allTags` is a pure derivation of state (usage count
+  descending, ties case-insensitively alphabetical), never a cache: a stale one would offer a filter for a tag the
+  vault no longer has.
+- **`editMetadata` cannot touch the seed, by signature.** It does not accept `secret`, `type`, `algorithm`,
+  `digits`, `period` or `counter` — not "validates them", *does not take them*. An edit screen able to rewrite the
+  seed or the code geometry turns one typo into a token that generates wrong codes forever, with no way back for
+  the user. `EditTokenSheet` correspondingly never reads, shows or copies `account.secret`.
+- **`TagChipsBar`** under the search field: horizontal chips, **single selection, session-scoped**. Not persisted
+  on purpose — a filter that survives a restart is the classic way a user concludes a token has disappeared. The
+  strip renders nothing at all when the vault has no tags, a chip is an **exact** membership test (picking "iş"
+  must not also bring "işlem"), and the search box now also matches tag text, AND-ed with the chip. A selection
+  that stops existing (renamed or deleted, here or on another device) is dropped on the next build rather than
+  left hiding codes.
+- **BEHAVIOUR CHANGE — a long press on a card no longer deletes it.** It used to call `onDelete` directly, with no
+  confirmation: a mis-touch while scrolling silently cost the user access to that account's 2FA. It now opens
+  `TokenActionSheet` (Kodu düzenle / Etiketleri düzenle / Sil), and **every** delete path — the sheet entry and the
+  new assistive action alike — goes through the confirmation dialog first. Anyone with muscle memory for
+  "long-press to delete" now gets one extra tap; that is the point.
+- **`OtpCard` gained `onLongPress` and `onEdit`**, both optional and both backwards compatible (a card given
+  neither behaves exactly as before). `onEdit` is separate rather than folded into the long press for an
+  accessibility reason: a screen-reader user cannot "long press", so 'Düzenle' and 'Sil' are also published as
+  `customSemanticsActions`. The card's primary label and its single-tap "copy the code" are untouched — this only
+  *adds* actions.
+- **`TagManagerSheet`** (the last chip in the strip) renames or removes a tag across the whole vault, saying up
+  front how many codes each operation touches, and its delete dialog spells out that only the **label** goes away.
+
+### Two more ways in for a Google transfer QR
+
+- **A pasted `otpauth-migration://` link** now works in the add sheet (`AddTokenSheet`, lifted out of `VaultPage`
+  as part of this patch). It drives the same `MigrationScanController`, the same progress band and the same
+  `ImportPreviewView` as the camera path: an incomplete multi-QR export shows "N/M bağlantı eklendi" and asks for
+  the rest, a foreign batch offers to start over, a complete one previews and confirms into a single `addAll`.
+  For a user with one device, no camera or a broken camera this is the **only** route in — Patch 2 could only
+  point them at the camera. `ImportPage`'s Google guide gained exactly one sentence pointing here; no second input
+  field was added there.
+- **"Görüntüden oku" in `ScanPage`** reads a saved screenshot or photo. It is deliberately independent of camera
+  state, because `analyzeImage` needs **neither a camera nor the camera permission** — on a device where the
+  permission was denied it is the only thing that works. Every decoded string re-enters the existing `_handleRaw`,
+  so single-token and migration mode both work from an image (two QRs of one export in a single screenshot are
+  handled in order). The decoder is behind a `QrImageDecoder` typedef with a `@visibleForTesting` override, so the
+  entire flow is host-testable with a closure; `MobileScannerQrDecoder` is the one real implementation and is
+  deliberately **not** in DI.
+
+### Security hygiene
+
+- **The picked image's plaintext copy is shredded, and the order matters.** The picker hands over its own cached
+  copy of the image — a plaintext **picture of a live TOTP seed**, in a directory the OS reclaims on its own
+  schedule, possibly never. `ScanPage._pickFromImage` cleans up in a `finally`: first
+  `FilePickerDocumentPort.shredCachedCopy(path)` (synchronous zero-fill in place, *then* unlink), only then
+  `DocumentPort.clearPickerCache()`. Reversed, the general sweep would unlink the file **without overwriting it**
+  and the targeted shred would find nothing, leaving the QR's pixels recoverable. The shred is synchronous on
+  purpose: it must finish before the sweep touches the same file and before a screen torn down mid-flow could
+  abandon a pending `await`. Both steps are best effort and swallow every failure — housekeeping must not turn a
+  finished import into an error. **The user's original image is never touched**; only the sandbox copy is, and the
+  plugin does not even hand over the original's path.
+- **The clipboard is never read programmatically.** The migration paste is a paste *by the user* into a field
+  whose autocorrect and suggestions are off (so the keyboard's learning dictionary never sees a secret); the field
+  is cleared after every submission and on dispose. Nothing on either new path is logged, cached or copied, and
+  the decoder's two exceptions carry no platform message — a plugin error string can quote a file name or file
+  content.
+- **The image is never re-encoded** (`compressionQuality` stays 0 — re-encoding is exactly what smears a dense QR
+  into an undecodable one) and never read into Dart memory: the decoder takes a **path**, and the 16 MiB ceiling
+  is checked against the size the picker reports *before* anything is read.
+- **The lock exemption now has a third call site** and the same discipline: `begin` paired with `end` in an inner
+  `finally` around the pick alone, plus a `dispose` that closes an exemption left open by a screen torn down while
+  the picker is up. docs/CRYPTO.md §17 lists all three flows; the widget tests assert exactly one begin and one
+  end on the cancel, success and failure paths alike.
+- **`NSPhotoLibraryUsageDescription` was added to `ios/Runner/Info.plist`** — which **reverses** the "keep it out"
+  conclusion the file_picker 12 upgrade reached earlier the same day, and PLAN.md's Phase 7 item now says so.
+  Note it is there for **review**, not for a prompt: `file_picker_darwin` picks through PHPicker, which hands over
+  one photo without the app holding library access, so iOS shows no permission dialog. The string keeps App Review
+  from asking about an image-picking app, and keeps the prompt from being string-less if the plugin ever falls
+  back to the older picker. No write-access key was added — the app never writes to the photo library.
+- `SecureScreenScope` coverage is **unchanged at 11 screens**: every new surface is a sheet or dialog rendered
+  inside a page that already holds a scope.
+
+### Accepted limits
+
+- **R1 — an older client that EDITS a tagged token loses its tags, on every device.** It writes the plaintext back
+  without the key it never read. Reading, syncing and generating codes on an old client are all safe; only an edit
+  drops them. This is the price of K1, and it is the cheap side of that trade: the alternative was every old
+  client refusing the entire vault.
+- **R3 — a tag rename or delete widens the LWW conflict radius from 1 record to N.** `renameTag`/`deleteTag`
+  rewrite every token carrying the tag, so one gesture dirties N records (one persist, one push, but still N rows
+  on the wire). Under arrival-order LWW a concurrent edit of any one of those N on another device can lose that
+  device's change for that record. Accepted for now — the operation is rare, deliberate and idempotent — and
+  recorded in PLAN.md's open design decisions, to be revisited **with** the LWW model rather than separately.
+- **R9 — Turkish dotted/dotless İ/i are distinct tags.** Matching is exact string equality, not case- or
+  locale-folded, so "İş" and "iş" coexist. Case-insensitive folding in Turkish is locale-dependent and getting it
+  wrong silently merges two labels the user meant to keep apart; only the chip strip's *ordering* is
+  case-insensitive.
+- **R12 — clipping happens before de-duplication, so two long import group names sharing their first 32 runes
+  merge into one tag.** Deliberate: the alternative leaves the account with two identical-looking labels.
+- **Reading from an image does not work on the iOS Simulator or the web** — the plugin has no Vision/ML Kit path
+  there. The UI says "Bu cihazda görüntüden okuma desteklenmiyor." rather than blaming the image, because
+  retrying with another picture would not help.
+- Tag ordering within an account is the **user's** order, not alphabetical; only the filter strip re-orders (by
+  usage).
+
+### Tests (996 → 1154 host)
+
+New: `vault_cubit_tags_test`, `vault_page_tags_test`, `edit_token_sheet_test`, `tag_manager_sheet_test`,
+`token_action_sheet_test`, `otp_card_a11y_test`, `add_token_sheet_test` (the renamed and much-extended
+`vault_add_sheet_test`), `scan_page_image_test`. Extended: `otp_account_test` (normalization rules, the key absent
+when empty, the type errors, `copyWith([])` clearing), `aegis_parser_test` / `twofas_parser_test` (group mapping,
+unknown references, the legacy field, 40-rune clipping, 12 groups → 8 tags), `dedupe_test`, `backup_service_test`,
+`vault_repository_test`, `encrypted_vault_raw_store_test` (the K3 re-encrypt assertion), `end_to_end_test`.
+
+### Manual checklist (cannot be covered on the host VM)
+
+- [ ] **Read a QR from an image on a real iOS device and a real Android device.** The host tests drive a fake
+      decoder and a fake picker; ML Kit (Android) and Vision (iOS) have never run this path here, and the iOS
+      Simulator cannot. Check both a screenshot of a single `otpauth://` QR and a multi-QR Google export.
+- [ ] **Import a real grouped Aegis export and a real grouped 2FAS export** (the fixtures are hand-written).
+      Confirm group names arrive as tags, an entry in several Aegis groups gets all of them, and an ungrouped
+      entry arrives with none.
+
 ## 2026-09-02 (deps: file_picker 12 + device_info_plus 13)
 
 One coupled major upgrade — `file_picker` **11.0.3 → 12.1.3** and `device_info_plus` **12.4.0 → 13.2.0**. They

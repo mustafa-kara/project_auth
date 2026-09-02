@@ -152,15 +152,18 @@ lib/
 │   ├── vault/                   # TOTP list, adding, code generation
 │   │   ├── data/   (TokenRepository, SyncDataSource)
 │   │   ├── domain/ (Token entity, GenerateCode, AddToken, SyncTokens)
-│   │   └── presentation/ (VaultBloc, code cards, search, folders)
-│   ├── scanner/                 # QR scanning + manual entry
+│   │   └── presentation/ (VaultBloc, code cards, search, tag filter strip,
+│   │                      widgets/ — AddTokenSheet, EditTokenSheet, TokenActionSheet, TagChipsBar, TagManagerSheet)
+│   ├── scanner/                 # QR scanning + manual entry + "read from image" (Patch 3)
 │   │   └── presentation/ (ScanPage, MigrationScanController — camera-free migration brain)
-│   ├── import_export/           # Aegis / 2FAS / Google Authenticator import + encrypted backup (Phase 5 Patches 1–2)
+│   ├── import_export/           # Aegis / 2FAS / Google Authenticator import + encrypted backup (Phase 5 Patches 1–3)
 │   │   ├── domain/  (ImportService, BackupService, BackupEnvelope, detectSource, dedupeKey, DocumentPort,
-│   │   │            google_migration.dart — MigrationBatch + GoogleMigrationCollector)
+│   │   │            google_migration.dart — MigrationBatch + GoogleMigrationCollector,
+│   │   │            qr_image_decoder.dart — QrImageDecoder seam + limits/exceptions)
 │   │   ├── data/    (AegisParser, TwoFasParser, FilePickerDocumentPort,
-│   │   │            protobuf_wire.dart — ProtobufReader, google_auth_parser.dart — GoogleAuthParser)
-│   │   └── presentation/ (ImportPage, ExportPage, widgets/ImportPreviewView)
+│   │   │            protobuf_wire.dart — ProtobufReader, google_auth_parser.dart — GoogleAuthParser,
+│   │   │            mobile_scanner_qr_decoder.dart — analyzeImage adapter)
+│   │   └── presentation/ (ImportPage, ExportPage, widgets/ — ImportPreviewView, MigrationProgressBand)
 │   ├── lock/                    # biometric/PIN app lock
 │   └── settings/                # theme, language, account, change password
 └── shared/                      # shared widgets
@@ -168,7 +171,7 @@ lib/
 
 The `otp/` core (TOTP/HOTP/Steam algorithms) is isolated as a separate `core/otp/` module and validated against the RFC 6238/4226 test vectors with unit tests.
 
-### 4.1 Import / Export (Phase 5 Patches 1–2)
+### 4.1 Import / Export (Phase 5 Patches 1–3)
 
 `features/import_export/` follows the same domain/data/presentation split. `domain/` is pure Dart — parsers are
 reached through the `ImportParser` interface and the file system through `DocumentPort`
@@ -233,6 +236,56 @@ file picker:
   guard or DI change** — and is now wrapped in `SecureScreenScope`.
 - **`presentation/widgets/import_preview_view.dart`** — the confirm-preview block, shared by the file import and
   the QR import so both show one set of strings.
+
+**Patch 3 — tags, pasted migration links, QR from an image file.** Three features, one theme: everything Patch 2
+could only do with a live camera now has a second route in, and imported groups finally survive the import.
+
+- **`core/otp/otp_account.dart` → `OtpAccount.tags`** — at most 8 labels of at most 32 runes, normalized by
+  `normalizeTags` and stored **inside the encrypted blob**. No record version bump, no AAD change, no backup
+  envelope change; the key is omitted entirely when empty, so an untagged vault serializes byte-identically to a
+  pre-Patch-3 one and upgrading triggers no re-encrypt/re-push wave. `tags` IS in `props`, because
+  `EncryptedVaultRepository`'s unchanged-blob shortcut compares `prev.account == account` — leaving it out would
+  make a tags-only edit reuse the old ciphertext and vanish. `dedupeKey` deliberately ignores tags. Reasoning in
+  [docs/CRYPTO.md §9](docs/CRYPTO.md).
+- **`VaultCubit.editMetadata / renameTag / deleteTag / allTags`** — metadata-only editing (the signature does not
+  even accept `secret`/`type`/`algorithm`/`digits`/`period`/`counter`), plus vault-wide tag rename and delete.
+  Each follows the `addAll` shape: one `_emitAndPersist` and one `_pushAfterMutation` for the whole sweep, and a
+  no-op writes and pushes nothing. `allTags` is a pure derivation of state (usage count descending).
+- **Import group → tag mapping** (`data/aegis_parser.dart`, `data/twofas_parser.dart`): Aegis reads `db.groups`
+  (`{uuid, name}`) through the entry's `groups: [uuid]` array, plus the legacy singular `entry.group` which holds
+  a NAME; 2FAS reads the root `groups` (`{id, name}`) through `service.groupId`, so a 2FAS service yields at most
+  one tag. Google's migration payload has no grouping field at all. An unresolvable reference contributes no tag
+  **in silence** — it produces no `SkippedEntry`, and nothing about groups can ever drop an entry.
+- **`domain/qr_image_decoder.dart`** — `typedef QrImageDecoder = Future<List<String>> Function(String path)` plus
+  `QrImageLimits.maxBytes` (16 MiB) and the two outcomes the UI must tell apart:
+  `QrImageUnsupportedException` (iOS Simulator, web — another image would not help) vs
+  `QrImageUnreadableException`. `data/mobile_scanner_qr_decoder.dart` is the only real implementation, a thin
+  adapter over `MobileScannerPlatform.instance.analyzeImage` — which needs **no camera and no camera permission**.
+  It is **not in DI**: `ScanPage` defaults to `const MobileScannerQrDecoder().call` and takes a
+  `@visibleForTesting` override, so the whole flow is host-testable with a closure.
+- **`DocumentPort.pickImage({maxBytes})` + `clearPickerCache()`** (`domain/file_port.dart`,
+  `data/file_picker_document_port.dart`) — returns a `PickedImage` by **path**, not bytes (the decoder takes a
+  path, so a multi-megapixel photo is never pulled into Dart memory), and unlike `pickJson` does not clear the
+  cache on the way out; the caller owns that. The shred order in the caller's `finally` is load-bearing — see
+  [docs/CRYPTO.md §16.5](docs/CRYPTO.md).
+- **`presentation/widgets/migration_progress_band.dart`** — the old private `_MigrationBand` lifted out of
+  `ScanPage` unchanged, now with parameterised label/hint strings, because a second collector screen reuses it.
+- **`features/vault/presentation/widgets/add_token_sheet.dart`** — the old private `_AddSheet` lifted out of
+  `VaultPage`, and now the home of the **pasted migration link**: a `otpauth-migration://` paste goes to a
+  `MigrationScanController` owned by the sheet, an incomplete batch shows the progress band, a complete one opens
+  `ImportPreviewView` inside the sheet. The clipboard is never read programmatically — the user pastes.
+- **`features/scan/presentation/scan_page.dart`** — an AppBar "Görüntüden oku" action, independent of camera
+  state. Every decoded string re-enters the existing `_handleRaw`, so both single-token and migration mode work
+  from an image. Wrapped in the same budgeted lock exemption as the file flows
+  ([docs/CRYPTO.md §17](docs/CRYPTO.md)), now a three-flow list.
+- **New vault widgets** (`features/vault/presentation/widgets/`): `tag_chips_bar.dart` (single-selection,
+  session-scoped filter strip, hidden when the vault has no tags), `token_action_sheet.dart` (long press → Düzenle
+  / Etiketler / Sil), `edit_token_sheet.dart` (issuer / account name / tags; never reads the secret),
+  `tag_manager_sheet.dart` (rename / delete a tag across the vault).
+- **No new route, no guard change, no DI change** beyond the existing `DocumentPort` registration, and the
+  `SecureScreenScope` list is unchanged at 11 screens (`grep -rn "SecureScreenScope(" lib/`).
+- Supabase schema is **unchanged**: tags travel inside the same encrypted blob the tokens already use, so the
+  server sees no new column, no new field and no size class it did not see before.
 
 ---
 
@@ -353,6 +406,16 @@ create policy "admin reads audit_logs" on public.audit_logs
 - **Conflict resolution — arrival-order LWW (Phase 3 model):** since `updated_at` is set server-side with `now()`, on a conflict it is **the one that reaches the server last**, not "the last to edit", that wins. When the same token (same `id`) is edited concurrently on two devices, the UPDATE that reaches the server second overwrites the first; one device's change may silently be lost. This is a **deliberately accepted** simplification for Phase 3.
   - Note: if "the truly last editor wins" is desired, the schema is extended with `client_modified_at timestamptz` + `revision int` (+ `device_id`) fields and LWW is done by client time; the current single `id` cannot be a tie-breaker because `id` is already the same for the same token.
   - For heavy multi-device usage, a CRDT/vector clock will be considered later — see open decisions.
+  - **Tags do not change the sync contract, but they widen its blast radius (Phase 5 Patch 3).** `OtpAccount.tags`
+    lives INSIDE the encrypted blob, so the server still sees one opaque `ciphertext` per token: no new column, no
+    new field, and LWW still resolves **per record**. What is new is that one user gesture can now dirty *many*
+    records at once — `VaultCubit.renameTag`/`deleteTag` rewrite every token carrying the tag, so a rename over N
+    tokens pushes N changed records (in a single persist and a single push, but still N rows). Under arrival-order
+    LWW that means the conflict radius of a tag operation is N, not 1: a concurrent edit of any one of those N
+    tokens on another device can lose that device's change for that record. Accepted for now, and listed as an open
+    decision in [PLAN.md](PLAN.md) (risk R3) — the fix is the same `client_modified_at`/`revision` extension the
+    note above describes, plus possibly a field-level merge, and neither is worth doing before the LWW model
+    itself is revisited.
 
 ---
 
