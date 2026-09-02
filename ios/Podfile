@@ -1,5 +1,8 @@
-# Uncomment this line to define a global platform for your project
-# platform :ios, '13.0'
+# file_picker 12 (file_picker_darwin) requires iOS 14.0; device_info_plus 13
+# requires 13.0. iOS 14 supports the same devices as iOS 13 (iPhone 6s and
+# later), so this costs no hardware coverage. Keep in sync with
+# IPHONEOS_DEPLOYMENT_TARGET in Runner.xcodeproj and AppFrameworkInfo.plist.
+platform :ios, '14.0'
 
 # CocoaPods analytics sends network stats synchronously affecting flutter build latency.
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'

@@ -48,36 +48,43 @@ dependencies:
   local_auth: ^3.0.2
   # Patch 5: Android API<28 biyometri SDK gate'i (flutter_secure_storage native
   # enforceBiometrics <28'de exception fırlatır → buton görünmesin diye SDK kontrolü).
-  device_info_plus: ^12.1.0
+  # 13.x'e `file_picker` 12 ile BİRLİKTE çıkıldı (ikisi de win32 ^6 ister; ayrı ayrı
+  # çözülmezlerdi). 13.0.0'ın tek breaking değişikliği win32 5→6 bump'ıdır — kullanılan
+  # `AndroidDeviceInfo.version.sdkInt` yüzeyi aynı kaldı. 13.0.0 Dart 3.11 isterdi;
+  # 13.1.0 tabanı Dart 3.10 / Flutter 3.38.1'e geri indirdi → bu toolchain'de çözülür.
+  device_info_plus: ^13.0.0
   equatable: ^2.1.0
   crypto: ^3.0.7
   uuid: ^4.6.0
   flutter_svg: ^2.3.0
   # Faz 5 Patch 1 — import/export dosya seçimi ve kaydı. TEK paket yeter:
-  # `pickFiles(withData: true)` bytes'ı belleğe okur (path/izin gerekmez; Android
-  # SAF + iOS document picker runtime izin İSTEMEZ) ve `saveFile(bytes:)` dosyayı
-  # Android/iOS'ta da yazar (paket kaynağı: mobil kanalda `bytes` ZORUNLU, masaüstünde
-  # verilirse yazılır) → share_plus/path_provider fallback'i GEREKMEZ.
-  # 11.x hattı: file_picker >=12.1.3 → windows_file_picker → win32 ^6.3.0 iken
-  # device_info_plus ^12.1.0 (Patch 5 Android SDK gate'i) win32 ^5.11.0 istiyor →
-  # 12.x sürüm çözümü ÇAKIŞIR. 11.0.3 aynı API'yi (withData/saveFile bytes) sunar.
-  # PIN'İN BEDELİ (ikisi de PLAN.md Faz 7'de iş kalemi):
-  #  1) file_picker 12'ye geçiş TEK BAŞINA yapılamaz — device_info_plus 13'ü de
-  #     beraberinde getirir; tek bir bağlı yükseltme olarak planlanmalı.
-  #  2) 11.0.3'ün iOS podspec'i `PICKER_MEDIA` varsayılanda açık olduğu için
-  #     `DKImagePickerController/PhotoGallery` (→ SDWebImage, SwiftyGif) çeker
-  #     (bkz. ios/Podfile.lock). Uygulama YALNIZ doküman seçiyor; yine de fotoğraf
-  #     kitaplığı API'leri binary'ye giriyor → App Store incelemesinde
-  #     `NSPhotoLibraryUsageDescription` sorusu. Çıkış yolu: ios/Podfile'da
-  #     `PICKER_MEDIA=false`.
-  file_picker: ^11.0.3
-  # Zaten `file_picker`'ın transitive bağımlılığıydı; DOĞRUDAN bağımlılığa
-  # yükseltildi çünkü `FilePickerDocumentPort` iOS'ta artık dosyayı temizlemek
-  # için `getApplicationDocumentsDirectory()`'yi kendisi çağırır: file_picker
-  # 11.0.3 `saveFile`'ı iOS'ta önce `NSDocumentDirectory/<fileName>` altına
-  # yazıp oradan dışa aktarır ve o nüshayı HİÇBİR yolda silmez
+  # `pickFile()` seçilen dokümanı eklentinin KENDİ cache'ine kopyalar,
+  # `PlatformFile.readAsBytes()` byte'ları oradan okur (path/izin gerekmez; Android
+  # SAF + iOS document picker runtime izin İSTEMEZ) ve `saveFile(fileName:, bytes:)`
+  # dosyayı Android/iOS'ta da yazar → share_plus fallback'i GEREKMEZ.
+  # 12.x'e device_info_plus 13 ile BİRLİKTE çıkıldı: 11.x pin'inin TEK sebebi
+  # `file_picker >=12.1.3` → windows_file_picker → win32 ^6.3.0 ile
+  # `device_info_plus ^12.1.0`'ın win32 ^5.11.0'ı arasındaki çakışmaydı; iki paket
+  # birlikte yükseltilince çözülüyor. 12.x'in kazanımları:
+  #  1) iOS federated `file_picker_darwin`'e ayrıldı; `DKImagePickerController/
+  #     PhotoGallery` (→ SDWebImage, SwiftyGif) zinciri TAMAMEN düştü
+  #     (bkz. ios/Podfile.lock) → doküman-only uygulamaya artık fotoğraf kitaplığı
+  #     API'leri linklenmiyor, `NSPhotoLibraryUsageDescription` sorusu kalktı.
+  #  2) iOS `saveFile` ara nüshasını NSDocumentDirectory yerine NSTemporaryDirectory
+  #     altına yazıyor → o nüsha artık iCloud yedeğine GİRMİYOR (shred yine de
+  #     savunma amaçlı duruyor; bkz. file_picker_document_port.dart).
+  # BEDELİ: minimum iOS deployment target 13.0 → 14.0 (file_picker_darwin podspec;
+  # ios/Podfile + Runner.xcodeproj + AppFrameworkInfo.plist güncellendi). iOS 14 ile
+  # iOS 13 AYNI cihazları destekler (iPhone 6s ve üstü) → cihaz kaybı YOK.
+  file_picker: ^12.0.0
+  # DOĞRUDAN bağımlılık (yalnız transitive değil): `FilePickerDocumentPort` iOS'ta
+  # `saveFile` artığını temizlemek için `getApplicationDocumentsDirectory()`'yi
+  # kendisi çağırır. file_picker 11.0.3 `saveFile`'ı iOS'ta `NSDocumentDirectory/
+  # <fileName>` altına yazıp oradan dışa aktarır ve o nüshayı HİÇBİR yolda silmezdi
   # (`ios/.../FilePickerPlugin.m` `saveFileWithName:`) → şifreli yedek iCloud
-  # yedeğine sızardı. Bkz. `file_picker_document_port.dart`.
+  # yedeğine sızardı. file_picker_darwin 1.0.4'te hedef NSTemporaryDirectory oldu
+  # (yedeğe girmez) ama shred SAVUNMA amaçlı korunuyor — hedef yeniden değişirse
+  # onu yakalayacak tek şey o. Bkz. `file_picker_document_port.dart`.
   path_provider: ^2.1.5
 
 dev_dependencies:

@@ -2,6 +2,59 @@
 
 Project progress log. Newest at the top.
 
+## 2026-09-02 (deps: file_picker 12 + device_info_plus 13)
+
+One coupled major upgrade — `file_picker` **11.0.3 → 12.1.3** and `device_info_plus` **12.4.0 → 13.2.0**. They
+had to move together: `file_picker >=12.1.3` pulls `windows_file_picker` → `win32 ^6.3.0`, while
+`device_info_plus ^12.1.0` required `win32 ^5.11.0`, so neither resolved on its own. **No schema change, no
+crypto change, no behaviour change.** host **992/992 → 996/996**, `flutter analyze --fatal-infos` clean,
+`flutter build apk --debug` green, `pod install` green.
+
+- **iOS loses the photo-library pod chain.** 12.x moves Apple platforms into the federated `file_picker_darwin`,
+  whose podspec depends on Flutter alone. `ios/Podfile.lock` drops `DKImagePickerController` (Core /
+  ImageDataManager / PhotoGallery / Resource), `DKPhotoGallery` (all four subspecs), `SDWebImage` and
+  `SwiftyGif` — and with them the whole `trunk` SPEC REPOS section. A document-only app no longer links
+  photo-library APIs, which closes the `NSPhotoLibraryUsageDescription` release-review item in PLAN.md Phase 7
+  *without* needing the `PICKER_MEDIA=false` workaround that item proposed. `ios/Runner/Info.plist` still
+  declares only `NSCameraUsageDescription` and `NSFaceIDUsageDescription`.
+- **iOS deployment target 13.0 → 14.0**, required by the `file_picker_darwin` podspec (`pod install` refuses
+  below it). Applied in `ios/Podfile` (the previously commented-out `platform :ios` line is now explicit),
+  all three `IPHONEOS_DEPLOYMENT_TARGET` entries in `Runner.xcodeproj`, and `AppFrameworkInfo.plist`. **No
+  device coverage is lost:** iOS 14 runs on exactly the hardware iOS 13 did (iPhone 6s and later).
+- **`FilePickerDocumentPort` migrated to the 12.x API**, behaviour unchanged.
+  `pickFiles(withData: true)` + `FilePickerResult` are gone: the port now calls `pickFile()` and reads through
+  `PlatformFile.readAsBytes()`. The size ceiling is checked against `length()` **before** the read, so an
+  oversized document is rejected without ever being materialised in memory — the previous code could not do
+  that, because `withData` had already loaded it. A `readAsBytes()` failure maps to the same
+  `MalformedImportFileException` the old `bytes == null` branch produced. `saveFile()` returns a `Uri?` rather
+  than a path string, so the shredder's "did the user pick the leftover itself?" comparison resolves the URI to
+  a filesystem path first and treats non-`file:` schemes (Android SAF `content:`) as "not a local path".
+- **The iOS export leftover moved upstream — the shredder stays.** Re-verified from source
+  (`file_picker_darwin` 1.0.4, `IOSFilePickerHandler.swift` → `saveFile(_:)`): the staging copy is now written to
+  `NSTemporaryDirectory()/<fileName>`, not `NSDocumentDirectory`. It is still never deleted after the export,
+  but `NSTemporaryDirectory()` is excluded from device backups, is reclaimed by the OS, and *is* reachable by
+  `clearTemporaryFiles()` — so the iCloud-backup leak fixed in the audit round (C1) no longer exists upstream.
+  `_shredIosSaveLeftover` was **kept rather than turned into a no-op**: it costs one `exists()` on a directory
+  that should now hold nothing, and it is the only thing that would catch the destination moving back to a
+  backed-up location. Doc comments in the port, docs/CRYPTO.md §16.5 and the test header say so explicitly.
+- **`device_info_plus` 13 needed no code change.** Its only 13.0.0 breaking change is the win32 5→6 bump; the
+  `AndroidDeviceInfo.version.sdkInt` surface used by the API<28 biometric gate
+  (`biometric_service_impl.dart`) is untouched. 13.0.0 alone would have demanded Dart 3.11 / Flutter 3.41.6,
+  which this toolchain (Dart 3.10.7 / Flutter 3.38.6) cannot satisfy — 13.1.0 lowered the floor back to Dart
+  3.10 / Flutter 3.38.1, so the resolved 13.2.0 builds here.
+- **The port's test seam changed with the plugin's architecture (+4 tests).** file_picker 12 is federated: the
+  facade dispatches through `FilePickerPlatform.instance`, and in a host-VM test that instance is the default
+  `MethodChannelFilePicker`, whose `pickFile`/`saveFile` throw `UnimplementedError` — so mocking the method
+  channel no longer reaches the facade at all (the channel name
+  `miguelruivo.flutter.plugins.filepicker` is itself unchanged). `file_picker_document_port_test.dart` now fakes
+  the platform interface instead, which also let it cover three things the channel mock could not: that
+  `pickFile` is asked for `FileType.any`, that an over-limit `length()` short-circuits before `readAsBytes()`,
+  and that a failed read surfaces as `MalformedImportFileException`. A fourth new test covers the non-`file:`
+  URI path added above.
+- **Docs resynced:** the pin rationale in `pubspec.yaml`, `ARCHITECTURE.md` §4.1 and `docs/architecture.md` §8.1
+  described a constraint that no longer exists; PLAN.md's coupled-upgrade item and the
+  `NSPhotoLibraryUsageDescription` Phase 7 item are now `[x]`.
+
 ## 2026-09-02 (Audit follow-ups)
 
 A post-merge audit of Phase 5 (Patches 1–2) produced 23 findings across data integrity, parser fidelity,

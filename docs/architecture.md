@@ -191,14 +191,20 @@ the native flag is last-caller-wins — see [CRYPTO.md §15](CRYPTO.md).
 
 - **`DocumentPort`** (`domain/file_port.dart`) — `pickJson({maxBytes})` / `saveJson({fileName, bytes})`. The only
   seam onto the platform file picker, so the pages stay testable without a plugin.
-- **`file_picker ^11.0.3`** — held on the 11.x line deliberately: `file_picker >=12.1.3` pulls `windows_file_picker` →
-  `win32 ^6.3.0`, while `device_info_plus ^12.1.0` (already a dependency, for the Android SDK gate) requires
-  `win32 ^5.11.0` — the 12.x line does not resolve. 11.0.3 offers the same `withData` / `saveFile(bytes:)` API.
-  Two costs come with the pin, both tracked in PLAN.md Phase 7: (a) moving to `file_picker 12` is not a standalone
-  job, it drags `device_info_plus 13` along, so plan them as ONE upgrade; (b) the 11.0.3 iOS podspec pulls
-  `DKImagePickerController/PhotoGallery` (→ `SDWebImage`, `SwiftyGif`) unless `PICKER_MEDIA=false` is set in
-  `ios/Podfile`, which links photo-library APIs into a build that only ever picks documents and makes
-  `NSPhotoLibraryUsageDescription` a release-review question.
+- **`file_picker ^12.0.0`** (resolved 12.1.3) — raised on 2026-09-02 together with **`device_info_plus ^13.0.0`**
+  (13.2.0), because that was the only way either could move: `file_picker >=12.1.3` pulls `windows_file_picker` →
+  `win32 ^6.3.0`, while `device_info_plus ^12.1.0` (the Android SDK gate) required `win32 ^5.11.0`. Both wins land
+  on iOS: 12.x splits Apple platforms into the federated `file_picker_darwin`, whose podspec depends on Flutter
+  alone, so `DKImagePickerController/PhotoGallery` (→ `SDWebImage`, `SwiftyGif`) is gone from `ios/Podfile.lock`
+  — no photo-library API linked into a document-only build, and no `NSPhotoLibraryUsageDescription` question at
+  review; and its iOS `saveFile` stages the export in `NSTemporaryDirectory()` rather than the app's Documents
+  directory, so the copy no longer lands in the iCloud backup. The one cost is the iOS deployment target moving
+  13.0 → 14.0 (`file_picker_darwin` podspec), which loses no devices — iOS 14 runs on the same hardware as iOS 13.
+- **12.x API shape.** `pickFile()` returns a `PlatformFile` whose bytes are read on demand with `readAsBytes()`
+  (`withData` and the `FilePickerResult` wrapper are gone), and `saveFile()` returns a `Uri?` instead of a path
+  string. The facade dispatches everything through `FilePickerPlatform.instance`, so the port's unit tests fake
+  that platform interface rather than the `miguelruivo.flutter.plugins.filepicker` method channel (the channel
+  name itself is unchanged, but a host-VM test never reaches it).
 - **`VaultCubit.addAll(List<OtpAccount>)`** — bulk insert with exactly one persist and one push, instead of N
   round trips through `add()`. Callers de-duplicate beforehand.
 - **Routes** `/import` and `/export` are children of the unlocked ShellRoute and are on the guard's unlocked
