@@ -287,11 +287,22 @@ class EncryptedVaultRepository implements VaultRepository, RawTokenStore {
 
   // --- RawTokenStore (Faz 3 Patch 3 — token sync; masterKey GEREKTİRMEZ) ---
 
+  /// Diskteki ham kayıtlar (canlı + tombstone), **id başına en fazla bir tane**.
+  ///
+  /// **Id tekilliği (A2):** `_corruptedRaw` decrypt'i başarısız olan kayıtları da
+  /// tutar; bunlar ŞEMA olarak geçerlidir (nonce/ciphertext parse edilir), yalnız
+  /// plaintext'leri çözülemez. `load()` böyle bir kaydı `_corruptedRaw`'a, aynı
+  /// id'nin ikinci (çözülebilen) kaydını `_lastById`'ye koyabilir; `_writeRecords`
+  /// ikisini de diske yazar. Tekilleştirme olmadan `exportRaw` aynı id'yi iki kez
+  /// döndürür ve `pushUpsert(onConflict: 'id')` Postgres 21000 ("ON CONFLICT DO
+  /// UPDATE command cannot affect row a second time") ile ölür — bu da SONRAKİ TÜM
+  /// push'ları kilitler. Kural `load`/`importRemote` ile aynı: CANLI kayıt kendi
+  /// tombstone'unu yener (kasıtlı diriltme), aynı türden ikisinde İLKİ kazanır.
   @override
   Future<List<RawTokenRecord>> exportRaw() async {
     // DİSKTEN okur (decrypt YOK) → in-memory `_lastById`/`_tombstones` tazeliğine
-    // BAĞLI DEĞİL (merge-sonrası-reload yarışına kapalı). Bozuk kayıtlar atlanır
-    // (push edilemez; zaten geçersiz). Canlı + tombstone döner.
+    // BAĞLI DEĞİL (merge-sonrası-reload yarışına kapalı). Şeması bozuk kayıtlar
+    // atlanır (push edilemez; zaten geçersiz). Canlı + tombstone döner.
     final raw = await _storage.read(key: _vaultStorageKey);
     if (raw == null || raw.isEmpty) return const [];
     final Object? decoded;
@@ -301,12 +312,15 @@ class EncryptedVaultRepository implements VaultRepository, RawTokenStore {
       return const [];
     }
     if (decoded is! List) return const [];
-    final out = <RawTokenRecord>[];
+    // LinkedHashMap → disk sırası korunur (ilk-kazanır deterministik kalır).
+    final byId = <String, _TokenRecord>{};
     for (final item in decoded) {
       final rec = _tryParseRecord(item);
-      if (rec != null) out.add(rec.toRaw());
+      if (rec == null) continue;
+      final seen = byId[rec.id];
+      if (seen == null || (seen.deleted && !rec.deleted)) byId[rec.id] = rec;
     }
-    return out;
+    return [for (final rec in byId.values) rec.toRaw()];
   }
 
   @override
@@ -332,6 +346,23 @@ class EncryptedVaultRepository implements VaultRepository, RawTokenStore {
     await _writeRecords(survivors);
   }
 
+  /// Remote satırları LWW ile diske merge eder (decrypt YOK).
+  ///
+  /// **Null cursor kuralı (A2):** `pullCursorIso == null` = bu cihaz HİÇ başarılı
+  /// pull yapmamış. O durumda bir server satırının lokal dirty kaydımızdan SONRA
+  /// gelip gelmediğini kanıtlayacak referans noktası yoktur, bu yüzden **dirty
+  /// lokal kayıt korunur** (server satırı — tombstone dahil — uygulanmaz).
+  /// Lokali OLMAYAN id'ler her zaman kabul edilir, yani ilk pull yine tüm remote
+  /// token'ları getirir; yalnız push bekleyen kayıtlar dokunulmaz kalır.
+  ///
+  /// Bunu gerektiren senaryo: id koruyan bir yedek geri yüklenir, silinmiş bir
+  /// token diriltilir (canlı + `sv == null`), ve cihaz ilk sync'ini yapar. Eski
+  /// kural (`pullCursorIso == null` → server kazanır) sunucudaki tombstone'un
+  /// yeni diriltilen kaydı SESSİZCE silmesine yol açıyordu.
+  ///
+  /// **Davranış değişikliği:** ilk pull'da dirty bir lokal kayıt ile aynı id'li
+  /// bir remote satır çarpışırsa artık LOKAL kazanır; çakışma push sonrası
+  /// sunucudaki LWW ile çözülür (bir sonraki pull uzlaşılmış satırı geri getirir).
   @override
   Future<TokenMergeOutcome> importRemote(
     List<RemoteTokenRow> remote, {
@@ -387,7 +418,9 @@ class EncryptedVaultRepository implements VaultRepository, RawTokenStore {
           : local.serverUpdatedAtIso == null
               // Lokal dirty (push beklemede): server YALNIZ pull-cursor'dan SONRAki
               // bir değişiklikse kazanır (başka cihaz); aksi halde kendi echo'muz → KORU.
-              ? (pullCursorIso == null ||
+              // `pullCursorIso == null` (bu cihaz HİÇ başarılı pull yapmadı) →
+              // "cursor'dan sonra" KANITLANAMAZ → dirty lokal KORUNUR (bkz. doc).
+              ? (pullCursorIso != null &&
                   _isoNewer(r.serverUpdatedAtIso, pullCursorIso))
               // sv'de uzlaşılmış: server daha yeniyse kazanır (idempotent).
               : _isoNewer(r.serverUpdatedAtIso, local.serverUpdatedAtIso!);

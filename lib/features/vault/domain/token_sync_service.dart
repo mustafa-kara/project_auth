@@ -234,11 +234,27 @@ class TokenSyncService {
     }
   }
 
+  /// Dirty (sv == null) kayıtları tek batch hâlinde push eder.
+  ///
+  /// **Id başına tek satır (A2 — defence in depth):** `pushUpsert` `onConflict:
+  /// 'id'` kullanır; aynı batch bir id'yi iki kez taşırsa Postgres 21000 ("ON
+  /// CONFLICT DO UPDATE command cannot affect row a second time") döner ve
+  /// SONRAKİ TÜM push'lar kilitlenir. `EncryptedVaultRepository.exportRaw` zaten
+  /// tekilleştiriyor, ama `RawTokenStore` bir PORT (başka bir implementasyon veya
+  /// elle düzenlenmiş/yarım merge edilmiş bir dosya mükerrer id verebilir) → burada
+  /// da daralt. Kural store ile aynı: CANLI kayıt kendi tombstone'unu yener
+  /// (kasıtlı diriltme), aynı türden ikisinde İLKİ kazanır — "son kazanır" bir
+  /// diriltmeyi tombstone'a çevirebilirdi (sessiz token kaybı).
   Future<void> _pushDirty() async {
     final raw = await _store.exportRaw();
-    final dirty = raw.where((r) => r.isDirty).toList(growable: false);
-    if (dirty.isEmpty) return;
-    await _remote.pushUpsert(_uid, dirty);
+    final byId = <String, RawTokenRecord>{};
+    for (final r in raw) {
+      if (!r.isDirty) continue;
+      final seen = byId[r.id];
+      if (seen == null || (seen.deleted && !r.deleted)) byId[r.id] = r;
+    }
+    if (byId.isEmpty) return;
+    await _remote.pushUpsert(_uid, byId.values.toList(growable: false));
   }
 
   /// Canlı senkronu oturum-içi aç (subtree tear-down YOK).

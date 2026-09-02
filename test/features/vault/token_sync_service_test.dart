@@ -478,8 +478,9 @@ void main() {
           reason: 'merge, push bitmeden diske YAZMAZ');
 
       gate.complete();
-      await push;
-      await sync;
+      // A4: gerçek bir deadlock testi ASMAK yerine HIZLI düşsün.
+      await push.timeout(const Duration(seconds: 2));
+      await sync.timeout(const Duration(seconds: 2));
 
       expect(mergeSawPushInFlight, isFalse);
       expect(store.importCount, 1, reason: 'merge push bitince uygulanır');
@@ -525,8 +526,8 @@ void main() {
           reason: 'push, merge bitmeden exportRaw ÇAĞIRMAZ');
 
       mergeGate.complete();
-      await sync;
-      await push;
+      await sync.timeout(const Duration(seconds: 2));
+      await push.timeout(const Duration(seconds: 2));
 
       expect(store.exportCount, exportsBeforePush + 1);
       expect(remote.lastPushed.single.id, 'fresh',
@@ -545,11 +546,58 @@ void main() {
           safeCursorIso: '2026-06-09T10:00:00.000Z');
       final svc = build();
 
-      await svc.pushChanged(); // hata yutulur
-      await svc.syncOnce();
+      await svc.pushChanged().timeout(const Duration(seconds: 2)); // hata yutulur
+      await svc.syncOnce().timeout(const Duration(seconds: 2));
 
       expect(store.importCount, 1, reason: 'kilit serbest kaldı');
       expect(mergedCount, 1);
+    });
+  });
+
+  // ── Denetim A2 — push batch'inde id tekilliği ───────────────────────────────
+  group('A2 — _pushDirty aynı id\'yi iki kez göndermez', () {
+    test('mükerrer dirty id → tek satır push (canlı tombstone\'u yener)', () async {
+      // pushUpsert onConflict:'id' — aynı batch bir id'yi 2x taşırsa Postgres
+      // 21000 döner ve SONRAKİ TÜM push'lar kilitlenir. Store zaten tekilleştirir;
+      // bu, port'un başka bir implementasyonuna karşı savunma derinliğidir.
+      store.raw = [
+        RawTokenRecord(
+            id: 'dup',
+            blob: _b(),
+            updatedAtMs: 1,
+            deleted: true,
+            serverUpdatedAtIso: null),
+        RawTokenRecord(
+            id: 'dup', blob: _b(), updatedAtMs: 2, serverUpdatedAtIso: null),
+        RawTokenRecord(
+            id: 'other', blob: _b(), updatedAtMs: 3, serverUpdatedAtIso: null),
+      ];
+      final svc = build();
+      await svc.pushChanged().timeout(const Duration(seconds: 2));
+
+      expect(remote.pushCount, 1);
+      expect(remote.lastPushed.map((r) => r.id), ['dup', 'other'],
+          reason: 'id başına tek satır');
+      expect(remote.lastPushed.firstWhere((r) => r.id == 'dup').deleted, isFalse,
+          reason: 'diriltme tombstone\'u yener — "son kazanır" token kaybettirirdi');
+    });
+
+    test('mükerrer id\'lerin hepsi temiz (sv dolu) → push YOK', () async {
+      store.raw = [
+        RawTokenRecord(
+            id: 'dup',
+            blob: _b(),
+            updatedAtMs: 1,
+            serverUpdatedAtIso: '2026-06-09T10:00:00.000Z'),
+        RawTokenRecord(
+            id: 'dup',
+            blob: _b(),
+            updatedAtMs: 2,
+            serverUpdatedAtIso: '2026-06-09T10:00:00.000Z'),
+      ];
+      final svc = build();
+      await svc.pushChanged().timeout(const Duration(seconds: 2));
+      expect(remote.pushCount, 0);
     });
   });
 
