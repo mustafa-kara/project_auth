@@ -18,6 +18,11 @@ import 'import_exceptions.dart';
 import 'import_format_detector.dart';
 import 'import_models.dart';
 
+/// Rewrites one account's issuer to its canonical catalog name. Must be PURE
+/// and isolate-sendable: `preview` resolves it on the UI isolate and hands it
+/// to the worker. `canonicalizerFor` in `dedupe.dart` builds one.
+typedef AccountCanonicalizer = OtpAccount Function(OtpAccount account);
+
 /// What the confirm screen renders: the accounts that would be added plus the
 /// audit trail of everything that would not.
 class ImportPreview {
@@ -61,21 +66,46 @@ class ImportService {
   /// always uses `dedupeKey`.
   final String Function(OtpAccount account) _keyOf;
 
+  /// Resolves the issuer canonicalizer for ONE preview run. Called on the UI
+  /// isolate right before parsing, so a catalog refreshed between two imports
+  /// is picked up, and so the closure that reaches the worker isolate captures
+  /// only the immutable catalog snapshot — never the holder or its repository.
+  ///
+  /// WHY dedupe needs it (audit A2): `VaultCubit` rewrites an issuer to the
+  /// catalog name as the token enters the vault ("github.com" → "GitHub"). If
+  /// the preview deduped on the RAW issuer, re-importing that very file would
+  /// see "github.com", miss the stored "GitHub" and add the token a second
+  /// time. Both sides — the vault accounts AND the parsed entries — therefore
+  /// go through the same rewrite before `keyOf` runs. null → no rewrite
+  /// (legacy/test wiring; behaviour identical to before).
+  final AccountCanonicalizer Function()? _canonicalizeResolver;
+
   /// [detector] and [keyOf] exist only so this service can be unit-tested in
   /// isolation; production wiring passes neither and gets `detectSource` /
-  /// `dedupeKey`.
+  /// `dedupeKey`. [canonicalizeResolver] IS production wiring (locator binds it
+  /// to the same `IssuerCatalogHolder` that `VaultCubit` uses).
   ImportService({
     List<ImportParser>? parsers,
     required this.backup,
     ImportSource Function(Map<String, dynamic> json)? detector,
     String Function(OtpAccount account)? keyOf,
+    AccountCanonicalizer Function()? canonicalizeResolver,
   })  : parsers = parsers ?? const <ImportParser>[],
         _detector = detector ?? detectSource,
-        _keyOf = keyOf ?? dedupeKey;
+        _keyOf = keyOf ?? dedupeKey,
+        _canonicalizeResolver = canonicalizeResolver;
 
   /// Hard ceiling on file size (8 MiB): a real export is orders of magnitude
   /// smaller, and the whole file is decoded in memory.
   static const int maxBytes = 8 * 1024 * 1024;
+
+  /// Hard ceiling on ENTRIES in one import — accounts plus skipped entries
+  /// (audit A3). The same 1024 the scanned Google path already enforces
+  /// (`GoogleMigrationCollector.maxAccounts`), so no file can push more work
+  /// into the preview list, the vault write and the push than a QR batch can.
+  /// A file under [maxBytes] can still hold ~100k tiny entries, which is a real
+  /// UI/memory hazard, and no genuine authenticator export comes close to 1024.
+  static const int maxEntries = 1024;
 
   /// Decodes [raw] far enough to fingerprint it. Throws
   /// [MalformedImportFileException] when it is not a JSON object, and
@@ -100,6 +130,10 @@ class ImportService {
       throw const UnsupportedImportFormatException();
     }
 
+    // Resolved HERE (UI isolate): the closure captures only the immutable
+    // catalog snapshot, so it stays sendable to the worker below.
+    final canonicalize = _canonicalizeResolver?.call();
+
     if (source == ImportSource.projectauthBackup) {
       if (backupPassword == null || backupPassword.isEmpty) {
         throw ArgumentError.value(backupPassword, 'backupPassword',
@@ -117,6 +151,7 @@ class ImportService {
         ),
         existing: existing,
         keyOf: _keyOf,
+        canonicalize: canonicalize,
       );
     }
 
@@ -130,6 +165,7 @@ class ImportService {
           parsers: selected,
           existing: existing,
           keyOf: keyOf,
+          canonicalize: canonicalize,
         ));
   }
 
@@ -146,7 +182,12 @@ class ImportService {
     ParsedImport parsed, {
     required List<OtpAccount> existing,
   }) =>
-      dedupeSync(parsed, existing: existing, keyOf: _keyOf);
+      dedupeSync(
+        parsed,
+        existing: existing,
+        keyOf: _keyOf,
+        canonicalize: _canonicalizeResolver?.call(),
+      );
 
   /// Size guard (UTF-8 bytes) → root JSON object. Shared by [detect] and
   /// [preview] so an oversized or unreadable file is rejected on both entries.
@@ -184,6 +225,7 @@ class ImportService {
     required List<ImportParser> parsers,
     required List<OtpAccount> existing,
     required String Function(OtpAccount account) keyOf,
+    AccountCanonicalizer? canonicalize,
   }) {
     ImportParser? parser;
     for (final candidate in parsers) {
@@ -197,7 +239,8 @@ class ImportService {
       // outcome as an unrecognized file.
       throw const UnsupportedImportFormatException();
     }
-    return dedupeSync(parser.parse(root), existing: existing, keyOf: keyOf);
+    return dedupeSync(parser.parse(root),
+        existing: existing, keyOf: keyOf, canonicalize: canonicalize);
   }
 
   /// Drops accounts already present in [existing] ([SkipReason.alreadyInVault])
@@ -220,22 +263,43 @@ class ImportService {
     ParsedImport parsed, {
     required List<OtpAccount> existing,
     required String Function(OtpAccount account) keyOf,
+    AccountCanonicalizer? canonicalize,
   }) {
     if (parsed.accounts.isEmpty && parsed.skipped.isEmpty) {
       throw const EmptyImportException();
     }
 
+    // Entry ceiling (audit A3) — accounts AND skipped entries, exactly what
+    // `GoogleMigrationCollector.maxAccounts` counts, so every import path (file,
+    // encrypted backup, scanned QR) shares one limit. Checked before any per
+    // entry work so an oversized file costs nothing beyond the parse.
+    final entries = parsed.accounts.length + parsed.skipped.length;
+    if (entries > maxEntries) {
+      throw ImportTooManyEntriesException(entries, maxEntries);
+    }
+
+    // Canonicalize BOTH sides with the same function before any key is built:
+    // the vault stores the catalog name, the file may carry an alias, and only
+    // matching forms make `alreadyInVault` fire (audit A2). The accounts kept
+    // in `toAdd` are the canonicalized ones, so what the preview shows is what
+    // `VaultCubit.addAll` will store.
+    final vaultAccounts =
+        canonicalize == null ? existing : existing.map(canonicalize).toList();
+    final parsedAccounts = canonicalize == null
+        ? parsed.accounts
+        : parsed.accounts.map(canonicalize).toList();
+
     final matchIds = parsed.source == ImportSource.projectauthBackup;
-    final existingKeys = existing.map(keyOf).toSet();
+    final existingKeys = vaultAccounts.map(keyOf).toSet();
     final existingIds =
-        matchIds ? existing.map((a) => a.id).toSet() : const <String>{};
+        matchIds ? vaultAccounts.map((a) => a.id).toSet() : const <String>{};
 
     final seenKeys = <String>{};
     final seenIds = <String>{};
     final toAdd = <OtpAccount>[];
     final skipped = <SkippedEntry>[...parsed.skipped];
 
-    for (final account in parsed.accounts) {
+    for (final account in parsedAccounts) {
       final key = keyOf(account);
       if (existingKeys.contains(key) ||
           (matchIds && existingIds.contains(account.id))) {

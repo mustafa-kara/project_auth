@@ -281,6 +281,69 @@ void main() {
           ['vardi', 'yeni'], reason: 'mevcut satır korunur, kopya düşer');
     });
 
+    // --- Denetim A6: id DIŞINDA içerik elemesi (önizleme–onay arası pull) ---
+    test('addAll AYNI içeriği FARKLI id ile getiren satırı eler', () async {
+      // Önizleme alındıktan sonra sync pull aynı token'ı BAŞKA bir id ile
+      // getirmiş olabilir (başka cihazda eklenmiş satır) → id kontrolü bunu
+      // yakalamaz, içerik anahtarı yakalar.
+      final vardi = OtpAccount(
+        id: 'sunucudan-gelen',
+        secret: 'JBSWY3DPEHPK3PXP',
+        type: OtpType.totp,
+        accountName: 'a',
+      );
+      final ayniIcerik = OtpAccount(
+        id: 'onizlemeden-gelen',
+        secret: 'JBSWY3DPEHPK3PXP',
+        type: OtpType.totp,
+        accountName: 'a',
+      );
+      final repo = _FakeRepo();
+      final cubit = VaultCubit(repo);
+      await cubit.add(vardi);
+      final savesBefore = repo.saveCount;
+
+      await cubit.addAll([ayniIcerik]);
+
+      expect(cubit.state.accounts.map((e) => e.id), ['sunucudan-gelen']);
+      expect(repo.saveCount, savesBefore, reason: 'yazma da push da yok');
+    });
+
+    test('addAll listenin İÇİNDEKİ içerik kopyasını da eler (ilk kazanır)',
+        () async {
+      final repo = _FakeRepo();
+      final cubit = VaultCubit(repo);
+      await cubit.load();
+
+      await cubit.addAll([_acc('a'), _acc('a'), _acc('b')]);
+
+      expect(cubit.state.accounts.map((e) => e.accountName), ['a', 'b']);
+    });
+
+    test('addAll keyOf: null → içerik elemesi YOK (eski davranış)', () async {
+      final repo = _FakeRepo();
+      final cubit = VaultCubit(repo);
+      await cubit.load();
+
+      await cubit.addAll([_acc('a'), _acc('a')], keyOf: null);
+
+      expect(cubit.state.accounts.length, 2);
+    });
+
+    test('addAll FARKLI içerik (secret) aynı isimle eklenebilir', () async {
+      final repo = _FakeRepo();
+      final cubit = VaultCubit(repo);
+      await cubit.add(_acc('a'));
+
+      await cubit.addAll([
+        OtpAccount(
+            secret: 'GEZDGNBVGY3TQOJQ', type: OtpType.totp, accountName: 'a'),
+      ]);
+
+      expect(cubit.state.accounts.length, 2,
+          reason: 'anahtar secret\'i İÇERİR → farklı token ayrı kalır');
+    });
+
     test('addAll TAMAMI kopya id ise no-op (save YOK)', () async {
       final vardi = OtpAccount(
         id: 'sabit-id',

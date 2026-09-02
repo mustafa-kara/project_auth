@@ -5,6 +5,8 @@
 /// Gerçek ağ GEREKMEZ.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -58,11 +60,22 @@ class FakeRemote implements RemoteTokenRepository {
 
   SyncError? pushError;
 
+  /// A4: held open to keep a push "in flight" while the test drives a merge.
+  Completer<void>? pushGate;
+  bool pushInFlight = false;
+
   @override
   Future<void> pushUpsert(String uid, List<RawTokenRecord> records) async {
     pushCount++;
     lastPushed = records;
-    if (pushError != null) throw pushError!;
+    pushInFlight = true;
+    try {
+      final gate = pushGate;
+      if (gate != null) await gate.future;
+      if (pushError != null) throw pushError!;
+    } finally {
+      pushInFlight = false;
+    }
   }
 
   @override
@@ -91,16 +104,25 @@ class _FakeHandle implements RealtimeChannelHandle {
 class FakeRawStore implements RawTokenStore {
   List<RawTokenRecord> raw = [];
   int importCount = 0;
+  int exportCount = 0;
   String? lastPullCursor;
   TokenMergeOutcome importResult = const TokenMergeOutcome(changed: true, appliedCount: 1);
 
+  /// A4: ordered trace of the critical regions ('export', 'merge').
+  final List<String> trace = [];
+
   @override
-  Future<List<RawTokenRecord>> exportRaw() async => raw;
+  Future<List<RawTokenRecord>> exportRaw() async {
+    exportCount++;
+    trace.add('export');
+    return raw;
+  }
 
   @override
   Future<TokenMergeOutcome> importRemote(List<RemoteTokenRow> remote,
       {required String? pullCursorIso}) async {
     importCount++;
+    trace.add('merge');
     lastPullCursor = pullCursorIso;
     return importResult;
   }
@@ -422,6 +444,208 @@ void main() {
       await svc.syncOnce();
       expect(remote.pullCount, 1);
       expect(mergedCount, 1);
+    });
+  });
+
+  // ── Denetim A4 — push/merge mutex ───────────────────────────────────────────
+  group('A4 — push ile merge tek kilitte serileşir', () {
+    test('uçuştaki push biterken merge BEKLER (eski blob geri yazılmaz)',
+        () async {
+      // Uzun bir import push\'u sürerken pull/merge gelirse: merge daha YENİ
+      // blob\'u diske yazar, uçuştaki push okuduğu ESKİ snapshot\'ı sunucuya
+      // koyar → bir sonraki pull eskiyi geri getirir.
+      store.raw = [
+        RawTokenRecord(id: 'd', blob: _b(), updatedAtMs: 1, serverUpdatedAtIso: null),
+      ];
+      remote.next = RemotePullResult(
+          rows: [_row('x', '2026-06-09T10:00:00Z')],
+          safeCursorIso: '2026-06-09T10:00:00.000Z');
+      final gate = Completer<void>();
+      remote.pushGate = gate;
+
+      final svc = build();
+      var mergeSawPushInFlight = false;
+      final push = svc.pushChanged(); // kilidi alır, gate\'te bekler
+      await Future<void>.delayed(Duration.zero);
+      expect(remote.pushInFlight, isTrue, reason: 'push uçuşta');
+
+      final sync = svc.syncOnce();
+      for (var i = 0; i < 8; i++) {
+        await Future<void>.delayed(Duration.zero);
+        if (store.importCount > 0) mergeSawPushInFlight |= remote.pushInFlight;
+      }
+      expect(store.importCount, 0,
+          reason: 'merge, push bitmeden diske YAZMAZ');
+
+      gate.complete();
+      await push;
+      await sync;
+
+      expect(mergeSawPushInFlight, isFalse);
+      expect(store.importCount, 1, reason: 'merge push bitince uygulanır');
+      expect(store.trace.first, 'export');
+      expect(store.trace.last, 'merge');
+    });
+
+    test('merge sürerken gelen push, merge SONRASI dirty\'yi TAZE okur',
+        () async {
+      // Ters yön: merge kritik bölgede iken push kilide takılır ve exportRaw\'ı
+      // ancak merge diske yazdıktan SONRA çağırır.
+      remote.next = RemotePullResult(
+          rows: [_row('x', '2026-06-09T10:00:00Z')],
+          safeCursorIso: '2026-06-09T10:00:00.000Z');
+      final mergeGate = Completer<void>();
+      final svc = TokenSyncService(
+        remote: remote,
+        store: store,
+        lastSync: lastSync,
+        uid: 'u1',
+        mergeRemote: (rows, cursor) async {
+          await mergeGate.future;
+          return store.importRemote(rows, pullCursorIso: cursor);
+        },
+        onStatus: (_) {},
+      );
+
+      final sync = svc.syncOnce();
+      // İlk export (syncOnce\'ın kendi push\'u) bitsin, merge kilidi alsın.
+      for (var i = 0; i < 4; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      final exportsBeforePush = store.exportCount;
+
+      store.raw = [
+        RawTokenRecord(id: 'fresh', blob: _b(), updatedAtMs: 2, serverUpdatedAtIso: null),
+      ];
+      final push = svc.pushChanged();
+      for (var i = 0; i < 4; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      expect(store.exportCount, exportsBeforePush,
+          reason: 'push, merge bitmeden exportRaw ÇAĞIRMAZ');
+
+      mergeGate.complete();
+      await sync;
+      await push;
+
+      expect(store.exportCount, exportsBeforePush + 1);
+      expect(remote.lastPushed.single.id, 'fresh',
+          reason: 'merge sonrası TAZE dirty push edilir');
+      expect(store.trace.indexOf('merge') < store.trace.lastIndexOf('export'),
+          isTrue);
+    });
+
+    test('push hatası kilidi KİLİTLEMEZ (sonraki merge çalışır)', () async {
+      store.raw = [
+        RawTokenRecord(id: 'd', blob: _b(), updatedAtMs: 1, serverUpdatedAtIso: null),
+      ];
+      remote.pushError = const SyncNetworkError();
+      remote.next = RemotePullResult(
+          rows: [_row('x', '2026-06-09T10:00:00Z')],
+          safeCursorIso: '2026-06-09T10:00:00.000Z');
+      final svc = build();
+
+      await svc.pushChanged(); // hata yutulur
+      await svc.syncOnce();
+
+      expect(store.importCount, 1, reason: 'kilit serbest kaldı');
+      expect(mergedCount, 1);
+    });
+  });
+
+  // ── Denetim A5 — kill-switch yeniden açılınca resync ────────────────────────
+  group('A5 — flag false→true resync', () {
+    late ValueNotifier<int> flagVersion;
+    late bool flagEnabled;
+    late bool livePref;
+
+    TokenSyncService buildGated() {
+      statuses = [];
+      mergedCount = 0;
+      return TokenSyncService(
+        remote: remote,
+        store: store,
+        lastSync: lastSync,
+        uid: 'u1',
+        mergeRemote: (rows, cursor) async {
+          final outcome = await store.importRemote(rows, pullCursorIso: cursor);
+          if (outcome.changed) mergedCount++;
+          return outcome;
+        },
+        onStatus: statuses.add,
+        isEnabled: () => flagEnabled,
+        flagListenable: flagVersion,
+        livePreferenceResolver: () async => livePref,
+      );
+    }
+
+    setUp(() {
+      flagVersion = ValueNotifier<int>(0);
+      flagEnabled = false;
+      livePref = false;
+      remote.next = RemotePullResult(
+          rows: [_row('x', '2026-06-09T10:00:00Z')],
+          safeCursorIso: '2026-06-09T10:00:00.000Z');
+    });
+
+    Future<void> settle() async {
+      for (var i = 0; i < 8; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+    }
+
+    test('flag açılınca catch-up syncOnce çalışır (Realtime yetmez)', () async {
+      buildGated();
+      expect(remote.pullCount, 0);
+
+      flagEnabled = true;
+      flagVersion.value++;
+      await settle();
+
+      expect(remote.pullCount, 1,
+          reason: 'flag kapalıyken kaçan sunucu değişiklikleri çekilir');
+      expect(mergedCount, 1);
+    });
+
+    test('livePref kapalı olsa da resync olur (abonelik ayrı karar)', () async {
+      livePref = false;
+      buildGated();
+      flagEnabled = true;
+      flagVersion.value++;
+      await settle();
+      expect(remote.subscribeCount, 0);
+      expect(remote.pullCount, 1);
+    });
+
+    test('livePref açık → önce abone, sonra pull (start ile aynı sıra)',
+        () async {
+      livePref = true;
+      buildGated();
+      flagEnabled = true;
+      flagVersion.value++;
+      await settle();
+      expect(remote.subscribeCount, 1);
+      expect(remote.pullCount, 1);
+    });
+
+    test('flag AÇIKKEN gelen notify resync TETİKLEMEZ (yalnız geçişte)',
+        () async {
+      flagEnabled = true;
+      livePref = false;
+      buildGated();
+      flagVersion.value++; // aynı (açık) değer, sadece katalog/flag refresh
+      await settle();
+      expect(remote.pullCount, 0,
+          reason: 'her flag refresh\'inde pull etmek gereksiz trafik olurdu');
+    });
+
+    test('dispose sonrası flag notify no-op', () async {
+      final svc = buildGated();
+      await svc.dispose();
+      flagEnabled = true;
+      flagVersion.value++;
+      await settle();
+      expect(remote.pullCount, 0);
     });
   });
 }

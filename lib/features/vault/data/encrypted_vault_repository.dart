@@ -154,6 +154,13 @@ class EncryptedVaultRepository implements VaultRepository, RawTokenStore {
         continue;
       }
       final id = parsed.id;
+      // A1 defence-in-depth: a well-formed store never holds two live records
+      // for one id, but a hand-edited/half-merged file could. Keep the FIRST
+      // one instead of emitting the account twice — a duplicated id would show
+      // up twice in the UI, be deleted twice by `removeById`, and make
+      // `pushUpsert`'s `onConflict: 'id'` fail with Postgres 21000, which
+      // wedges every later push.
+      if (_lastById.containsKey(id)) continue;
       try {
         final plaintext =
             _crypto.decrypt(blob: parsed.blob, key: _masterKey, aad: _aad(id));
@@ -174,6 +181,15 @@ class EncryptedVaultRepository implements VaultRepository, RawTokenStore {
         corrupted++;
       }
     }
+
+    // A1: a live record WINS over its own tombstone (deliberate resurrection).
+    // The pair can only exist after an id-preserving backup restore of a token
+    // the user had deleted; the user just asked for that token back. Dropping
+    // the tombstone here (instead of hiding the account) means the freshly
+    // written record is dirty (`sv == null`) and the next push flips the server
+    // row back to `deleted = false`. Keeping both would silently lose the token
+    // on the next `importRemote` and break push with a duplicate-id upsert.
+    _tombstones.removeWhere((id, _) => _lastById.containsKey(id));
 
     // Tüm kayıtlar fail (yanlış masterKey / toptan bozulma) → integrity error,
     // boş vault gösterme (review). NOT: tombstone-only vault (canlı 0 + corrupted 0)
@@ -231,6 +247,17 @@ class EncryptedVaultRepository implements VaultRepository, RawTokenStore {
       }
     }
 
+    // Bu save'de var olan id'ler — tombstone filtresi ve `_lastById` temizliği
+    // ikisi de bunu kullanır (A1: filtre tombstone döngüsünden ÖNCE hesaplanmalı).
+    final presentIds = {for (final a in accounts) a.id};
+
+    // A1: a live account overrides its own tombstone. Without this both records
+    // reach the disk, `importRemote` later lets the tombstone win (silent loss)
+    // and `pushUpsert(onConflict: 'id')` dies with Postgres 21000 while both are
+    // dirty. Dropping it is a DELIBERATE resurrection: the live record is dirty
+    // (`sv == null`), so the next push sets `deleted = false` on the server.
+    _tombstones.removeWhere((id, _) => presentIds.contains(id));
+
     // Tombstone'lar (soft-delete) AYNEN korunur → push edilebilsin + bir sonraki
     // save token'ı diriltmesin (sunucu hâlâ row'a sahip; tombstone gitmezse LWW geri ekler).
     for (final t in _tombstones.values) {
@@ -243,7 +270,6 @@ class EncryptedVaultRepository implements VaultRepository, RawTokenStore {
     records.addAll(_corruptedRaw);
 
     // Bu save'de artık var olmayan id'leri _lastById'den temizle (kullanıcı sildi).
-    final presentIds = {for (final a in accounts) a.id};
     _lastById.removeWhere((id, _) => !presentIds.contains(id));
 
     await _storage.write(key: _vaultStorageKey, value: jsonEncode(records));
@@ -317,6 +343,9 @@ class EncryptedVaultRepository implements VaultRepository, RawTokenStore {
     final raw = await _storage.read(key: _vaultStorageKey);
     final byId = <String, _TokenRecord>{}; // canlı + tombstone (id → kayıt)
     final corruptedRaw = <Object?>[]; // verbatim korunur (decode edilemeyenler)
+    // Disk carried more than one record for the same id → rewrite even if no
+    // remote row wins, so the duplicate does not survive to the next push.
+    var healedDuplicate = false;
 
     if (raw != null && raw.isNotEmpty) {
       final Object? decoded;
@@ -331,13 +360,24 @@ class EncryptedVaultRepository implements VaultRepository, RawTokenStore {
         final rec = _tryParseRecord(item);
         if (rec == null) {
           corruptedRaw.add(item);
-        } else {
-          byId[rec.id] = rec;
+          continue;
         }
+        final seen = byId[rec.id];
+        if (seen == null) {
+          byId[rec.id] = rec;
+          continue;
+        }
+        // A1 defence-in-depth: the disk should never hold two records for one
+        // id. If it does, the LIVE one wins (same deliberate resurrection rule
+        // as `load`/`_writeRecords`) and the extra record is dropped, which
+        // heals the file — `byId` alone would silently keep whichever came
+        // last. Two live rows: first wins, matching `load`.
+        if (seen.deleted && !rec.deleted) byId[rec.id] = rec;
+        healedDuplicate = true;
       }
     }
 
-    var changed = false;
+    var changed = healedDuplicate;
     var applied = 0;
 
     for (final r in remote) {

@@ -86,6 +86,9 @@ class TokenSyncService {
     // Faz 3 Patch 4 (Adım F): flag değişince gate'i yeniden değerlendir (SELF-SUBSCRIBE —
     // root'ta cubit ref'i GEREKMEZ; Realtime bypass'ı kapatır). VaultCubit gate'i YETMEZ
     // çünkü _onRealtimeEvent doğrudan syncOnce çağırır.
+    // A5: flag'in BAŞLANGIÇ değeri burada sabitlenir (lazy `late` DEĞİL — ilk
+    // erişim `_onFlagChanged` içinde olurdu ve false→true geçişi kaçardı).
+    _lastEnabled = _enabled;
     _flagListenable?.addListener(_onFlagChanged);
   }
 
@@ -115,6 +118,45 @@ class TokenSyncService {
   bool _pendingEvent = false; // sync sürerken gelen Realtime olayı işareti
   int _lastMalformed = 0;
 
+  /// Kill-switch'in en son GÖRÜLEN değeri — `_onFlagChanged` false→true geçişini
+  /// buradan anlar (her flag notify'ında değil, YALNIZ yeniden açılışta resync).
+  late bool _lastEnabled;
+
+  /// **Store-vs-network mutex (audit A4).** Serializes the two critical regions
+  /// that both read the vault blob and write somewhere else:
+  ///
+  ///   - `_pushDirty`: `exportRaw` (read disk) → `pushUpsert` (write server)
+  ///   - `_mergeRemote`: apply server rows (write disk)
+  ///
+  /// Without it a long import push and an incoming merge interleave: the merge
+  /// writes a NEWER blob to disk while the in-flight push is still uploading the
+  /// snapshot it read before the merge, so the server ends up with the STALE
+  /// blob and the next pull hands it back. Under the lock a merge either waits
+  /// for the push to finish, or the push runs after the merge and re-reads the
+  /// dirty set from the already-merged disk.
+  ///
+  /// NOT VaultCubit's `_opChain`: that sequencer guards UI mutations, and the
+  /// merge callback already runs inside it — reusing it here would put a
+  /// network round trip inside the queue every user mutation waits on.
+  ///
+  /// DEADLOCK-FREE by construction: the regions are never nested (`syncOnce`
+  /// takes the lock twice in sequence, not recursively), and the one path that
+  /// crosses into `_opChain` — the merge region — is only ever entered from a
+  /// mutation that fires `pushChanged()` WITHOUT awaiting it, so `_opChain`
+  /// never waits on this lock.
+  Future<void> _storeLock = Future<void>.value();
+
+  /// Runs [action] with [_storeLock] held. The lock is released even when
+  /// [action] throws (push failures are best-effort and must not wedge sync).
+  Future<T> _locked<T>(Future<T> Function() action) {
+    final release = Completer<void>();
+    final previous = _storeLock;
+    _storeLock = release.future;
+    return previous
+        .then((_) => action())
+        .whenComplete(() => release.complete());
+  }
+
   /// Unlock'ta çağrılır. [live] → Realtime aboneliği aç (subscribe ÖNCE, pull SONRA).
   Future<void> start({required bool live}) async {
     if (_disposed || !_enabled) return; // kill-switch: token sync HİÇ başlamaz
@@ -141,7 +183,7 @@ class TokenSyncService {
       // 1) Push (dirty kayıtlar) — GERÇEKTEN best-effort: hatası pull'u ENGELLEMEZ
       //    (reviewer [P2]). Push başarısız olsa bile remote değişiklikleri çekilmeli.
       try {
-        await _pushDirty();
+        await _locked(_pushDirty); // A4: exportRaw+pushUpsert atomik bölge
       } catch (_) {
         // best-effort; bir sonraki tur reconcile eder (push edilemeyen dirty kalır).
       }
@@ -153,7 +195,9 @@ class TokenSyncService {
       // 3) Merge — VaultCubit sequencer'ı ALTINDA (import yazımı + reload tek kritik
       //    bölümde; kullanıcı add/delete ile yarışmaz — reviewer [P1]). pullCursorIso=cursor0
       //    (dirty-vs-echo ayrımı için ŞART). _store.importRemote DOĞRUDAN çağrılMAZ.
-      final merged = await _mergeRemote(result.rows, cursor0);
+      // A4: merge de AYNI kilit altında — uçuştaki bir push bitmeden disk
+      // değişmez, bir sonraki push merge SONRASI diski okur.
+      final merged = await _locked(() => _mergeRemote(result.rows, cursor0));
 
       // 4) Cursor ilerlet — YALNIZ (a) merge GERÇEKTEN UYGULANDIYSA (merged != null;
       //    vault kapandıysa null → remote satırlar diske YAZILMADI → cursor ilerlerse
@@ -183,7 +227,8 @@ class TokenSyncService {
   Future<void> pushChanged() async {
     if (_disposed || !_enabled) return; // kill-switch
     try {
-      await _pushDirty();
+      // A4: kilit altında — süren bir merge biter, sonra dirty TAZE okunur.
+      await _locked(_pushDirty);
     } catch (_) {
       // best-effort; bir sonraki syncOnce reconcile eder.
     }
@@ -235,16 +280,34 @@ class TokenSyncService {
   /// (toggle "açık" ⇔ abonelik aktif). `enableLive` idempotent (_channel!=null → no-op).
   void _onFlagChanged() {
     if (_disposed) return;
-    if (!_enabled) {
+    final enabled = _enabled;
+    final reEnabled = enabled && !_lastEnabled;
+    _lastEnabled = enabled;
+    if (!enabled) {
       unawaited(disableLive());
       return;
     }
-    // Flag açıldı: kullanıcı tercihi açıksa aboneliği geri kur.
-    final resolver = _livePreferenceResolver;
-    if (resolver == null) return;
-    unawaited(resolver().then((live) {
-      if (!_disposed && _enabled && live) enableLive();
-    }).catchError((_) {}));
+    unawaited(_onFlagEnabled(reEnabled));
+  }
+
+  /// Flag AÇIK durumdayken yapılacaklar: aboneliği tercihe göre geri kur, ve
+  /// kill-switch YENİ açıldıysa (false→true) bir catch-up `syncOnce` çalıştır.
+  ///
+  /// **A5 — resync ŞART:** flag kapalıyken `syncOnce`/`pushChanged` ve Realtime
+  /// tetikleyicisinin HEPSİ no-op'tu; o pencerede sunucuda biriken satırlar ve
+  /// lokal dirty kayıtlar bir sonraki tetiği (unlock / kullanıcı mutasyonu)
+  /// bekliyordu. Aboneliği geri açmak yetmez: Realtime yalnız BUNDAN SONRAKİ
+  /// değişikliği haber verir. Sıra `start` ile aynı: önce abone, sonra pull.
+  Future<void> _onFlagEnabled(bool reEnabled) async {
+    try {
+      final live =
+          await (_livePreferenceResolver?.call() ?? Future<bool>.value(false));
+      if (_disposed || !_enabled) return;
+      if (live) enableLive();
+    } catch (_) {
+      // canlı tercih okunamadı → abonelik olduğu gibi kalır; resync yine yapılır.
+    }
+    if (reEnabled && !_disposed && _enabled) await syncOnce();
   }
 
   /// VaultCubit.close → çağrılır. Aboneliği kapatır; sonrası tüm callback'ler no-op.
