@@ -1,0 +1,70 @@
+name: Admin CI
+
+# The admin panel is a standalone npm package with its own lockfile, so it gets its
+# own workflow instead of being bolted onto the Flutter job in ci.yml. The paths
+# filter keeps it off Dart-only changes (and keeps ci.yml off admin-only ones).
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'admin/**'
+      - '.github/workflows/admin-ci.yml'
+  pull_request:
+    paths:
+      - 'admin/**'
+      - '.github/workflows/admin-ci.yml'
+
+# Least privilege: the workflow only reads the repository (no writes, no packages).
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same ref (a new push to a PR invalidates the old run).
+# Namespaced by workflow, so it never cancels the Flutter CI run for the same ref.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-typecheck-test-build:
+    name: Lint, typecheck, test & build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Applies to `run` steps only; `uses` steps are unaffected, which is why
+    # cache-dependency-path below is still written relative to the repo root.
+    defaults:
+      run:
+        working-directory: admin
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # Node 22 matches `engines.node: >=22` in admin/package.json.
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: admin/package-lock.json
+
+      - name: Node version
+        run: node --version && npm --version
+
+      - name: Install dependencies
+        # `npm ci` (not `npm install`): CI must build the EXACT resolution in
+        # package-lock.json and fails if the lockfile and package.json disagree.
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm run test
+
+      # No Supabase secrets are provided on purpose: src/lib/env.ts validates lazily
+      # (at request time), so `next build` must succeed with no environment at all.
+      # A build that starts requiring real credentials fails this step.
+      - name: Build
+        run: npm run build
