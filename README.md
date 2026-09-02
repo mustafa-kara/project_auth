@@ -137,7 +137,7 @@ In Android Studio / IntelliJ the same flag goes into Run → Edit Configurations
 flutter pub get
 dart format --output=none --set-exit-if-changed .   # formatting gate — CI runs the same command
 flutter analyze          # lint — currently clean (CI runs it with --fatal-infos)
-flutter test             # 1165/1165 host — no --dart-define needed (Supabase is not initialized in tests)
+flutter test             # 1188/1188 host — no --dart-define needed (Supabase is not initialized in tests)
 flutter run --dart-define-from-file=env/dev.json   # run on a device/emulator
 ```
 

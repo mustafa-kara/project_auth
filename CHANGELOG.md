@@ -2,7 +2,7 @@
 
 Project progress log. Newest at the top.
 
-## 2026-09-02 (chore: repo-wide `dart format` + CI format gate)
+## 2026-09-02 (chore: repo-wide `dart format` + CI format gate + repository/DI tests)
 
 Phase 0's last open infrastructure item, and the one Phase 3.5 left as known debt: the tree was never
 `dart format`-clean, so the gate could not be turned on without a reformat first.
@@ -18,6 +18,18 @@ Phase 0's last open infrastructure item, and the one Phase 3.5 left as known deb
   `dart format --output=none --set-exit-if-changed .`, placed before **Analyze** so a formatting-only failure
   is reported as formatting rather than as a lint failure. All action SHA pins, `permissions: contents: read`
   and the existing comments are unchanged.
+- **Tests (1165 → 1188 host):** two documented coverage gaps closed, **no `lib/` change**.
+  `test/features/vault/supabase_token_repository_test.dart` now drives a **real** `SupabaseClient` over a
+  recording `http.BaseClient` (`test/support/fake_http_client.dart`), so PostgREST's own request building and
+  error parsing are under test: `pushUpsert` 1200 rows → 3 POSTs of 500/500/200 with `on_conflict=id` and
+  `Prefer: resolution=merge-duplicates`, exactly six columns per row and never `updated_at`/`created_at`, empty
+  list → no request, first-chunk failure stops the rest; `_mapError` 401/403 → `SyncPermissionDenied`, 500 →
+  `SyncUnknownError`, `SocketException` → `SyncNetworkError`; `tombstoneAllRemote`/`tombstoneAllRemoteBefore`
+  PATCH shape and filters; `pullSince` cursor filter, ordering, row mapping and malformed-row quarantine.
+  `test/core/di/locator_test.dart` runs `configureDependencies()` on the host VM (fake `SodiumPlatform`, fake
+  HTTP-backed `Supabase.initialize`): all 30 registrations resolve, are singletons, survive `locator.reset()`,
+  and the concrete wiring is asserted. Not covered, by design: Realtime `subscribe` (WebSocket bypasses the
+  injected HTTP client) and real libsodium (integration_test only).
 
 ## 2026-09-02 (Phase 5 Patch 3 — tags, pasted migration links, QR from image)
 
