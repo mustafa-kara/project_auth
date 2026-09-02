@@ -21,6 +21,7 @@ library;
 import 'package:equatable/equatable.dart';
 
 import '../../../core/otp/otp_account.dart';
+import '../../import_export/data/google_auth_parser.dart';
 import '../../import_export/domain/google_migration.dart';
 import '../../import_export/domain/import_service.dart';
 
@@ -87,37 +88,69 @@ final class MigrationMalformedQr extends MigrationScanEvent {
 class MigrationScanController {
   /// [collector] is injectable so tests can pre-seed or observe it; production
   /// passes nothing and gets a fresh one.
-  MigrationScanController(ImportService service,
-      {GoogleMigrationCollector? collector}) {
-    throw UnimplementedError('W2 fills this');
-  }
+  ///
+  /// [parse] is injectable for the same reason: `GoogleAuthParser.parseUri` is
+  /// static, so a widget/unit test could not otherwise exercise the malformed
+  /// and multi-batch paths without hand-building real protobuf payloads.
+  /// Production passes neither.
+  MigrationScanController(
+    ImportService service, {
+    GoogleMigrationCollector? collector,
+    MigrationBatch Function(String raw)? parse,
+  })  : _service = service,
+        _collector = collector ?? GoogleMigrationCollector(),
+        _parse = parse ?? GoogleAuthParser.parseUri;
+
+  final ImportService _service;
+  final GoogleMigrationCollector _collector;
+  final MigrationBatch Function(String raw) _parse;
 
   /// Parses [raw] and merges it, mapping every failure mode onto a
   /// [MigrationScanEvent]. Never throws: a hostile QR is a UI message, not a
   /// crash.
-  MigrationScanEvent handleRaw(String raw) =>
-      throw UnimplementedError('W2 fills this');
+  MigrationScanEvent handleRaw(String raw) {
+    final MigrationBatch batch;
+    try {
+      batch = _parse(raw);
+    } catch (_) {
+      // Every documented failure (`MalformedMigrationUriException` at the URI /
+      // base64 layer, `FormatException` from the wire decoder) and anything
+      // unforeseen collapse into ONE outcome on purpose: the cause is derived
+      // from secret material and must not be disclosed, and a hostile QR must
+      // never take down a live camera session. Nothing is logged.
+      return const MigrationMalformedQr();
+    }
+    return switch (_collector.add(batch)) {
+      MigrationAddOutcome.added => _collector.isComplete
+          ? MigrationScanComplete(scannedCount, batchSize)
+          : MigrationBatchAdded(scannedCount, batchSize),
+      MigrationAddOutcome.duplicateIndex => const MigrationDuplicateScan(),
+      MigrationAddOutcome.differentBatch => const MigrationDifferentBatch(),
+      MigrationAddOutcome.invalidBatch => const MigrationInvalidBatch(),
+      MigrationAddOutcome.full => const MigrationScanFull(),
+    };
+  }
 
   /// Codes collected so far.
-  int get scannedCount => throw UnimplementedError('W2 fills this');
+  int get scannedCount => _collector.scannedCount;
 
   /// Codes the export claims in total, or 0 before the first successful scan.
-  int get batchSize => throw UnimplementedError('W2 fills this');
+  int get batchSize => _collector.batchSize;
 
   /// Whether every code of the export has been scanned.
-  bool get isComplete => throw UnimplementedError('W2 fills this');
+  bool get isComplete => _collector.isComplete;
 
   /// Whether nothing has been scanned yet.
-  bool get isEmpty => throw UnimplementedError('W2 fills this');
+  bool get isEmpty => _collector.isEmpty;
 
   /// Drops everything collected. Called by "Baştan başla" and by the page's
   /// `dispose`.
-  void reset() => throw UnimplementedError('W2 fills this');
+  void reset() => _collector.reset();
 
   /// Builds the confirmation preview from what has been scanned, deduplicated
   /// against [existing] (the vault). Side-effect free — the page applies the
   /// result via `VaultCubit.addAll`. Throws `EmptyImportException` when the
   /// scanned codes yielded nothing at all.
   ImportPreview preview({required List<OtpAccount> existing}) =>
-      throw UnimplementedError('W2 fills this');
+      _service.previewParsed(_collector.toParsedImport(), existing: existing);
 }
