@@ -387,6 +387,91 @@ class VaultCubit extends Cubit<VaultState> {
     });
   }
 
+  /// Phase 5 Patch 3 — edits the NON-SECRET metadata of one token.
+  ///
+  /// Filled by W1; the signature is frozen here because W2 (vault UI) and the
+  /// tag tests are written against it.
+  ///
+  /// SECURITY: `secret`, `type`, `algorithm`, `digits`, `period` and `counter`
+  /// are deliberately NOT parameters. An edit screen has no business rewriting
+  /// the seed or the code geometry — a typo there silently produces a token
+  /// that generates wrong codes forever, and the user has no way back. Not
+  /// accepting them at all is stronger than validating them.
+  ///
+  /// [issuer] runs through the SAME canonicalization as [add] (`_canonicalize`
+  /// → `canonicalizerFor`), so an edited token dedupes against imports exactly
+  /// like an added one (audit A2).
+  ///
+  /// A null argument means "leave this field alone"; passing `const []` for
+  /// [tags] clears them (`OtpAccount.copyWith` semantics). Unknown [id], or an
+  /// edit that changes nothing after normalization → NO write and NO push
+  /// (risk R4: a no-op must not cost a re-encrypt or a sync round trip).
+  ///
+  /// Follows the [addAll] shape: `_awaitLoaded` → `_sequence` →
+  /// `_guardIntegrity` → single `_emitAndPersist` → single `_pushAfterMutation`.
+  Future<void> editMetadata({
+    required String id,
+    String? issuer,
+    String? accountName,
+    List<String>? tags,
+  }) =>
+      throw UnimplementedError('W1 fills this');
+
+  /// Phase 5 Patch 3 — renames [from] to [to] across EVERY account carrying it.
+  ///
+  /// Filled by W1.
+  ///
+  /// One `_emitAndPersist` and one `_pushAfterMutation` for the whole sweep, not
+  /// one per account (risk R4) — a rename can touch every token in the vault.
+  ///
+  /// Collision is a MERGE, not an error: if an account already has [to], the
+  /// renamed entry folds into it via `OtpAccount.normalizeTags` (first
+  /// occurrence wins), so the account's existing tag order is preserved.
+  ///
+  /// No-op rules — nothing is written or pushed when: [to] normalizes to empty,
+  /// [from] equals [to] after normalization, or no account carries [from].
+  ///
+  /// R3 (documented): tokens are last-write-wins per record, so a rename that
+  /// touches N accounts pushes N changed records; a concurrent edit of one of
+  /// them on another device can lose that device's change for that record.
+  Future<void> renameTag(String from, String to) =>
+      throw UnimplementedError('W1 fills this');
+
+  /// Phase 5 Patch 3 — removes [tag] from every account that carries it.
+  ///
+  /// Filled by W1. Same discipline as [renameTag]: single persist, single push,
+  /// no-op when nothing carries [tag]. Deletes the LABEL only — no token is ever
+  /// removed by this call.
+  Future<void> deleteTag(String tag) =>
+      throw UnimplementedError('W1 fills this');
+
+  /// Every tag currently in use, ordered for the chip strip.
+  ///
+  /// Usage count DESCENDING (what the user filters by most is reachable without
+  /// scrolling), ties broken case-insensitively alphabetically, and — for tags
+  /// that differ only by case (R9: "İş" and "iş" are distinct tags) — by exact
+  /// string order so the result is deterministic.
+  ///
+  /// Pure derivation of [state]: no storage read, no caching, no emit. The chip
+  /// strip rebuilds from the same `BlocBuilder` as the list, so a stale cache
+  /// would show a tag the vault no longer has.
+  List<String> get allTags {
+    final counts = <String, int>{};
+    for (final account in state.accounts) {
+      for (final tag in account.tags) {
+        counts[tag] = (counts[tag] ?? 0) + 1;
+      }
+    }
+    final tags = counts.keys.toList();
+    tags.sort((a, b) {
+      final byCount = counts[b]!.compareTo(counts[a]!);
+      if (byCount != 0) return byCount;
+      final byName = a.toLowerCase().compareTo(b.toLowerCase());
+      return byName != 0 ? byName : a.compareTo(b);
+    });
+    return List<String>.unmodifiable(tags);
+  }
+
   /// Bütünlük hatası state'inde mutasyonu reddeder (review P1 — kritik).
   void _guardIntegrity() {
     if (state.error != null) {

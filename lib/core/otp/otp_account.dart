@@ -33,6 +33,46 @@ class OtpAccount extends Equatable {
   final int period; // TOTP/Steam için saniye
   final int counter; // HOTP için sayaç
 
+  /// Phase 5 Patch 3 — user labels, in the order the user put them.
+  ///
+  /// Always normalized (see [normalizeTags]) and always unmodifiable, so no
+  /// caller can push a 9th tag or a blank one into an already built account.
+  ///
+  /// K1 — NO record version bump. Tags live INSIDE the encrypted token blob;
+  /// the record `v`, the AAD (`token|1|<id>`) and the backup envelope `version`
+  /// are unchanged. Bumping `v` would make every older client reject the WHOLE
+  /// vault ("açılamadı") instead of quietly ignoring one unknown key.
+  ///
+  /// K2 — [toJson] omits the key entirely when the list is empty, so an
+  /// untagged account serializes byte-identically to a pre-Patch-3 one. No
+  /// re-encrypt wave, no `updatedAt` churn, no sync storm on upgrade.
+  ///
+  /// K3 — tags ARE in [props] (see the note there): the repository's
+  /// unchanged-blob shortcut compares `prev.account == account`
+  /// (`encrypted_vault_repository.dart:219`), so leaving them out would make an
+  /// edit that changed ONLY tags reuse the old ciphertext — the change would
+  /// vanish on the next load and never reach the cloud.
+  ///
+  /// K4 — the model normalizes rather than rejects; only a type error is fatal
+  /// (see [fromJson]). Import sources hand over arbitrary group names and a
+  /// thrown exception there would drop an otherwise valid token.
+  ///
+  /// K5 — tags are NOT part of `dedupeKey` (`import_export/domain/dedupe.dart`):
+  /// the same secret imported with a different group is still the same token.
+  ///
+  /// R1 (accepted, documented): an older client that EDITS a tagged token drops
+  /// the key it never read, so the tags are lost on every device.
+  final List<String> tags;
+
+  /// Ceiling on tags per account. Beyond this the extras are dropped, never
+  /// an exception (K4).
+  static const int maxTags = 8;
+
+  /// Ceiling on the length of ONE tag, counted in runes (user-perceived code
+  /// points) rather than UTF-16 units, so an emoji or a combining Turkish
+  /// character is not cut in half.
+  static const int maxTagRunes = 32;
+
   OtpAccount({
     String? id,
     required this.secret,
@@ -43,7 +83,9 @@ class OtpAccount extends Equatable {
     this.digits = 6,
     this.period = 30,
     this.counter = 0,
-  }) : id = id ?? _uuid.v4() {
+    List<String> tags = const [],
+  })  : id = id ?? _uuid.v4(),
+        tags = normalizeTags(tags) {
     // TEK doğrulama noktası: parse, fromJson ve doğrudan kurulum hepsi buradan
     // geçer → geçersiz bir OtpAccount HİÇBİR yoldan oluşamaz (kart render/timer'da
     // geç crash yerine kaynakta FormatException). otpauth:// parser'ı ayrıca
@@ -85,6 +127,46 @@ class OtpAccount extends Equatable {
     }
   }
 
+  /// Cleans an arbitrary tag list into the canonical shape stored on an account.
+  ///
+  /// NEVER throws — every rule below drops or shortens, so a hostile import file
+  /// or a fat-fingered edit can shrink the list but can never fail a token (K4).
+  ///
+  /// Order of operations:
+  /// 1. `trim()` each entry (leading/trailing whitespace is invisible in the UI
+  ///    and would make two visually identical tags distinct);
+  /// 2. drop entries that are empty after trimming;
+  /// 3. clip to [maxTagRunes] runes;
+  /// 4. drop exact duplicates, FIRST occurrence wins (so the user's own order
+  ///    survives a rename that collides with an existing tag);
+  /// 5. keep the first [maxTags].
+  ///
+  /// R12: clipping happens BEFORE the uniqueness check on purpose — two long
+  /// import group names that share their first 32 runes MERGE into one tag
+  /// instead of leaving the account with two identical labels.
+  ///
+  /// R9: matching is exact string equality, NOT case- or locale-folded. Turkish
+  /// dotted/dotless İ/i pairs ("İş" vs "iş") therefore stay distinct tags; only
+  /// the chip-strip ORDERING is case-insensitive (`VaultCubit.allTags`).
+  ///
+  /// The result is unmodifiable: it is handed straight to the [tags] field.
+  static List<String> normalizeTags(Iterable<String> raw) {
+    final out = <String>[];
+    final seen = <String>{};
+    for (final entry in raw) {
+      final trimmed = entry.trim();
+      if (trimmed.isEmpty) continue;
+      final runes = trimmed.runes.toList(growable: false);
+      final clipped = runes.length <= maxTagRunes
+          ? trimmed
+          : String.fromCharCodes(runes.take(maxTagRunes));
+      if (!seen.add(clipped)) continue; // duplicate → first one wins
+      out.add(clipped);
+      if (out.length == maxTags) break;
+    }
+    return List<String>.unmodifiable(out);
+  }
+
   /// Base32 secret'ın decode edilmiş byte hali.
   Uint8List get secretBytes => Base32.decode(secret);
 
@@ -103,6 +185,11 @@ class OtpAccount extends Equatable {
         'digits': digits,
         'period': period,
         'counter': counter,
+        // K2: written ONLY when non-empty. An untagged account keeps producing
+        // the exact same JSON as before Patch 3, so upgrading a vault does not
+        // re-encrypt (and re-push) every record. Unknown to older clients →
+        // ignored on read, never a parse failure.
+        if (tags.isNotEmpty) 'tags': tags,
       };
 
   /// [toJson] çıktısından geri kurar. Bilinmeyen/eksik/YANLIŞ TİPLİ alan →
@@ -136,6 +223,7 @@ class OtpAccount extends Equatable {
       digits: _asInt(json['digits'], 'digits') ?? 6,
       period: _asInt(json['period'], 'period') ?? 30,
       counter: _asInt(json['counter'], 'counter') ?? 0,
+      tags: _asTags(json['tags']),
     );
   }
 
@@ -144,6 +232,33 @@ class OtpAccount extends Equatable {
     if (v == null) return null;
     if (v is String) return v;
     throw FormatException('OtpAccount.fromJson: "$name" String olmalı (verilen ${v.runtimeType})');
+  }
+
+  /// Missing/null → `const []`; a `List` of `String` → itself; anything else →
+  /// [FormatException].
+  ///
+  /// Only the TYPE is strict here. Content is normalized by the constructor and
+  /// never rejected (K4) — a stored tag that is blank, over-long or duplicated
+  /// is a normalization job, not a corrupt record. A `tags: "work"` or a
+  /// `tags: [1, 2]` on the other hand means the blob is not what we wrote, and
+  /// `VaultRepository.load` must be able to quarantine that single record
+  /// instead of silently loading a half-understood token.
+  static List<String> _asTags(Object? v) {
+    if (v == null) return const [];
+    if (v is! List) {
+      throw FormatException(
+          'OtpAccount.fromJson: "tags" liste olmalı (verilen ${v.runtimeType})');
+    }
+    final out = <String>[];
+    for (final e in v) {
+      if (e is! String) {
+        throw FormatException(
+            'OtpAccount.fromJson: "tags" elemanları String olmalı '
+            '(verilen ${e.runtimeType})');
+      }
+      out.add(e);
+    }
+    return out;
   }
 
   /// null → null; int → itself; integer-valued double (e.g. 3.0) → int;
@@ -182,6 +297,7 @@ class OtpAccount extends Equatable {
     int? digits,
     int? period,
     int? counter,
+    List<String>? tags,
   }) {
     return OtpAccount(
       id: id ?? this.id,
@@ -193,12 +309,32 @@ class OtpAccount extends Equatable {
       digits: digits ?? this.digits,
       period: period ?? this.period,
       counter: counter ?? this.counter,
+      // Passing `const []` CLEARS the tags (the constructor normalizes it to an
+      // empty list). There is no separate `clearTags` flag: an empty list is
+      // already the "no tags" value, so the null-means-keep rule is enough.
+      tags: tags ?? this.tags,
     );
   }
 
   @override
-  List<Object?> get props =>
-      [id, secret, type, issuer, accountName, algorithm, digits, period, counter];
+  List<Object?> get props => [
+        id,
+        secret,
+        type,
+        issuer,
+        accountName,
+        algorithm,
+        digits,
+        period,
+        counter,
+        // K3 — MANDATORY (risk R2). `EncryptedVaultRepository._writeRecords`
+        // keeps the previous ciphertext when `prev.account == account`
+        // (encrypted_vault_repository.dart:219). Omitting [tags] here would make
+        // a tags-only edit compare equal, so the new tags would never be
+        // encrypted, never reach the store and never sync — and nothing would
+        // report an error.
+        tags,
+      ];
 
   /// SECURITY: Equatable's `stringify` defaults to ON in debug builds, which
   /// would make `toString()` print every prop — [secret] included. Any debug

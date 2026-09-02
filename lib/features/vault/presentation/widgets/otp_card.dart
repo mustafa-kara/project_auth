@@ -24,6 +24,17 @@ class OtpCard extends StatefulWidget {
   final VoidCallback? onIncrement; // HOTP için
   final VoidCallback? onDelete;
 
+  /// Phase 5 Patch 3 — long-press handler. When null the card keeps its old
+  /// behaviour and long-press deletes directly ([onDelete]).
+  ///
+  /// W2 passes the action sheet ("Kodu düzenle" / "Etiketleri düzenle" / "Sil")
+  /// here, which is what finally puts a CONFIRMATION in front of the delete:
+  /// today a long-press on the vault list removes a token outright, and a
+  /// mis-touch costs the user access to that account's 2FA (risk R10 —
+  /// behaviour change, goes in the CHANGELOG). The fallback keeps every
+  /// existing call site and test working until then.
+  final VoidCallback? onLongPress;
+
   /// Kompakt liste görünümü mü (false = spacious kart).
   final bool compact;
 
@@ -32,6 +43,7 @@ class OtpCard extends StatefulWidget {
     required this.account,
     this.onIncrement,
     this.onDelete,
+    this.onLongPress,
     this.compact = false,
   });
 
@@ -226,7 +238,7 @@ class _OtpCardState extends State<OtpCard> {
       onTap: _copy,
       child: InkWell(
         onTap: _copy, // tek tap = kopyala
-        onLongPress: widget.onDelete,
+        onLongPress: widget.onLongPress ?? widget.onDelete,
         borderRadius: BorderRadius.circular(Radii.lg),
         child: content,
       ),

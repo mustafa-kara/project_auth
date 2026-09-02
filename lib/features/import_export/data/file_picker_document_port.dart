@@ -114,6 +114,22 @@ class FilePickerDocumentPort implements DocumentPort {
     }
   }
 
+  /// Phase 5 Patch 3 — image pick for "read a QR from a saved screenshot".
+  ///
+  /// Filled by W3: `FileType.image` + `withData: false` (the decoder wants a
+  /// PATH, not bytes), size checked from the reported length, and — unlike
+  /// [pickJson] — the picker cache is deliberately NOT cleared here, because the
+  /// returned path must stay readable until the decode finishes. The scan screen
+  /// owns that cleanup in a `finally`.
+  @override
+  Future<PickedImage?> pickImage({required int maxBytes}) =>
+      throw UnimplementedError('W3 fills this');
+
+  /// Public face of [_clearPickerCache], for callers that own the cache
+  /// lifetime themselves (see [pickImage]).
+  @override
+  Future<void> clearPickerCache() => _clearPickerCache();
+
   @override
   Future<bool> saveJson({
     required String fileName,

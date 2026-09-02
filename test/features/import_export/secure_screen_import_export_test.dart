@@ -55,6 +55,10 @@ class _NoopDocuments implements DocumentPort {
     required Uint8List bytes,
   }) async =>
       false;
+  @override
+  Future<PickedImage?> pickImage({required int maxBytes}) async => null;
+  @override
+  Future<void> clearPickerCache() async {}
 }
 
 class _NoopImportService implements ImportService {

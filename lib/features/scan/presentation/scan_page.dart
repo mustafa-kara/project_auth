@@ -34,6 +34,7 @@ import '../../import_export/data/google_auth_parser.dart';
 import '../../import_export/domain/import_exceptions.dart';
 import '../../import_export/domain/import_service.dart';
 import '../../import_export/presentation/widgets/import_preview_view.dart';
+import '../../import_export/presentation/widgets/migration_progress_band.dart';
 import '../../vault/presentation/bloc/vault_cubit.dart';
 import 'migration_scan_controller.dart';
 
@@ -493,7 +494,7 @@ class _ScanPageState extends State<ScanPage> {
       // mesajı ilerlemeyi ve üç çıkış yolunu örtmez (bkz. [_showError]).
       bottomNavigationBar: inPreview || !inMigration
           ? null
-          : _MigrationBand(
+          : MigrationProgressBand(
               scanned: _scanned,
               total: _total,
               complete: _isComplete,
@@ -575,69 +576,6 @@ class _ScanPageState extends State<ScanPage> {
         errorBuilder: (context, error) => _ScanError(error: error),
         overlayBuilder: (context, _) => const _ScanReticle(),
       );
-}
-
-/// Migration modunun alt bandı: ilerleme + üç çıkış yolu.
-class _MigrationBand extends StatelessWidget {
-  const _MigrationBand({
-    required this.scanned,
-    required this.total,
-    required this.complete,
-    required this.onContinue,
-    required this.onStopEarly,
-    required this.onRestart,
-  });
-
-  final int scanned;
-  final int total;
-  final bool complete;
-  final VoidCallback onContinue;
-  final VoidCallback onStopEarly;
-  final VoidCallback onRestart;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Material(
-      color: theme.colorScheme.surface,
-      // `bottomNavigationBar` gövdenin SafeArea'sının dışında → alt çentik
-      // dolgusunu bant kendi üstlenir.
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.all(Gap.lg),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text('$scanned/$total kod tarandı',
-                  style: theme.textTheme.titleMedium),
-              if (!complete) ...[
-                const SizedBox(height: Gap.xs),
-                Text(
-                  'Kalan kodları sırayla okut',
-                  style: theme.textTheme.bodyMedium
-                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                ),
-              ],
-              const SizedBox(height: Gap.md),
-              if (complete)
-                FilledButton(onPressed: onContinue, child: const Text('Devam'))
-              else
-                OutlinedButton(
-                  onPressed: onStopEarly,
-                  child: const Text('Bu kadar yeter'),
-                ),
-              TextButton(
-                onPressed: onRestart,
-                child: const Text('Baştan başla'),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
 }
 
 /// Kamera izni reddi / başlatma hatası için kullanıcı dostu durum (EmptyState,
