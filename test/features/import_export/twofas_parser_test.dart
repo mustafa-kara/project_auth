@@ -102,6 +102,199 @@ void main() {
     test('fresh ids are generated for every account', () {
       expect(result.accounts.map((a) => a.id).toSet(), hasLength(4));
     });
+
+    test('groupId resolves to exactly one tag', () {
+      expect(result.accounts[0].tags, ['Work']);
+      expect(result.accounts[2].tags, ['Kişisel']);
+    });
+
+    test('groupId: null yields no tag', () {
+      expect(result.accounts[1].tags, isEmpty);
+    });
+
+    test('an unknown groupId yields no tag and NO skipped entry', () {
+      expect(result.accounts[3].tags, isEmpty);
+      expect(result.skipped, hasLength(1)); // still only the MD5 capability gap
+      expect(result.skipped.single.detail, 'algorithm=MD5');
+    });
+  });
+
+  // --- Phase 5 Patch 3 (K6): groups → tags ---
+  group('groups → tags', () {
+    /// A 2FAS envelope with an explicit root `groups` index.
+    Map<String, dynamic> exportWithGroups(
+            List<Object?> groups, List<Object?> services) =>
+        {
+          'services': services,
+          'groups': groups,
+          'updatedAt': 1699999999500,
+          'schemaVersion': 4,
+          'appOrigin': 'android',
+        };
+
+    Map<String, dynamic> group(String id, String name) =>
+        {'id': id, 'name': name, 'updatedAt': 1699999999500};
+
+    List<String> tagsOf(Map<String, dynamic> export) =>
+        parser.parse(export).accounts.single.tags;
+
+    test('a service carries AT MOST one tag', () {
+      final export = exportWithGroups([
+        group('g1', 'Work'),
+        group('g2', 'Kişisel'),
+      ], [
+        {..._service(), 'groupId': 'g2'},
+      ]);
+      expect(tagsOf(export), ['Kişisel']);
+    });
+
+    test('the group id is trimmed before the lookup', () {
+      final export = exportWithGroups([
+        group('g1', 'Work'),
+      ], [
+        {..._service(), 'groupId': '  g1  '},
+      ]);
+      expect(tagsOf(export), ['Work']);
+    });
+
+    // 2FAS writes uuid strings, but exports in the wild (and hand-edited files)
+    // carry plain integer ids. Both halves are compared in their STRING form,
+    // so a `7` that fails to match a `"7"` cannot silently cost the token its
+    // group. The NAME is not given the same tolerance: a number is not a label.
+    test('an integer group id matches an integer groupId', () {
+      final export = exportWithGroups([
+        {'id': 7, 'name': 'Work'},
+      ], [
+        {..._service(), 'groupId': 7},
+      ]);
+      expect(tagsOf(export), ['Work']);
+    });
+
+    test('an integer groupId matches a string group id', () {
+      final export = exportWithGroups([
+        group('7', 'Work'),
+      ], [
+        {..._service(), 'groupId': 7},
+      ]);
+      expect(tagsOf(export), ['Work']);
+    });
+
+    test('a string groupId matches an integer group id', () {
+      final export = exportWithGroups([
+        {'id': 7, 'name': 'Work'},
+      ], [
+        {..._service(), 'groupId': ' 7 '},
+      ]);
+      expect(tagsOf(export), ['Work']);
+    });
+
+    test('a non-scalar groupId is still no group at all', () {
+      for (final bad in <Object?>[true, <String>[], <String, Object?>{}]) {
+        final export = exportWithGroups([
+          {'id': 7, 'name': 'Work'},
+          group('true', 'Bool'),
+        ], [
+          {..._service(), 'groupId': bad},
+        ]);
+        expect(tagsOf(export), isEmpty, reason: 'groupId: $bad');
+      }
+    });
+
+    test('a numeric group NAME is still rejected', () {
+      final export = exportWithGroups([
+        {'id': 7, 'name': 7},
+      ], [
+        {..._service(), 'groupId': 7},
+      ]);
+      expect(tagsOf(export), isEmpty);
+    });
+
+    test('a 40-character group name is clipped to 32 runes', () {
+      final export = exportWithGroups([
+        group('g1', 'g' * 40),
+      ], [
+        {..._service(), 'groupId': 'g1'},
+      ]);
+      expect(tagsOf(export).single, 'g' * OtpAccount.maxTagRunes);
+    });
+
+    test('the first row wins a duplicated group id', () {
+      final export = exportWithGroups([
+        group('g1', 'Once'),
+        group('g1', 'Twice'),
+      ], [
+        {..._service(), 'groupId': 'g1'},
+      ]);
+      expect(tagsOf(export), ['Once']);
+    });
+
+    test('a broken groups index never costs the service its token', () {
+      final broken = <Map<String, dynamic>>[
+        // no such group
+        exportWithGroups(const [], [
+          {..._service(), 'groupId': 'nobody'},
+        ]),
+        // groups index is not a list
+        {
+          'services': [
+            {..._service(), 'groupId': 'g1'},
+          ],
+          'groups': 'Work',
+          'schemaVersion': 4,
+        },
+        // groups key absent entirely (older schemas)
+        {
+          'services': [
+            {..._service(), 'groupId': 'g1'},
+          ],
+          'schemaVersion': 4,
+        },
+        // groupId is a number that matches nothing in the index
+        exportWithGroups([
+          group('g1', 'Work'),
+        ], [
+          {..._service(), 'groupId': 7},
+        ]),
+        // groupId is a type that can never be an id
+        exportWithGroups([
+          group('g1', 'Work'),
+        ], [
+          {..._service(), 'groupId': <String>['g1']},
+        ]),
+        // group rows are missing halves / wrongly typed / unmatched
+        exportWithGroups([
+          {'id': 'g1'},
+          {'name': 'Work'},
+          {'id': 'g2', 'name': '  '},
+          {'id': 5, 'name': 'Work'},
+          'not a map',
+        ], [
+          {..._service(), 'groupId': 'g1'},
+        ]),
+      ];
+
+      for (final export in broken) {
+        final result = parser.parse(export);
+        expect(result.accounts, hasLength(1));
+        expect(result.accounts.single.tags, isEmpty);
+        expect(result.skipped, isEmpty,
+            reason: 'a group problem must never produce a SkippedEntry');
+      }
+    });
+
+    test('a skipped service stays skipped regardless of its group', () {
+      final export = exportWithGroups([
+        group('g1', 'Work'),
+      ], [
+        {
+          ..._service(otp: const {'tokenType': 'YANDEX'}),
+          'groupId': 'g1',
+        },
+      ]);
+      final result = parser.parse(export);
+      expect(result.accounts, isEmpty);
+      expect(result.skipped.single.reason, SkipReason.unsupportedType);
+    });
   });
 
   group('twofas_steam_hotp.json — Steam and HOTP', () {

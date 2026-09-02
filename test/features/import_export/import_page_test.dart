@@ -101,6 +101,13 @@ class _FakeDocuments implements DocumentPort {
     required Uint8List bytes,
   }) async =>
       true;
+
+  // Faz 5 Patch 3 — görüntüden okuma ScanPage'in yolu; burada kullanılmaz.
+  @override
+  Future<PickedImage?> pickImage({required int maxBytes}) async => null;
+
+  @override
+  Future<void> clearPickerCache() async {}
 }
 
 class _FakeImportService implements ImportService {

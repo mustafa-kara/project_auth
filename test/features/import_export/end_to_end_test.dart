@@ -33,8 +33,11 @@ import 'package:project_auth/features/import_export/domain/import_models.dart';
 import 'package:project_auth/features/import_export/domain/import_service.dart';
 import 'package:project_auth/features/import_export/domain/dedupe.dart';
 import 'package:project_auth/features/scan/presentation/migration_scan_controller.dart';
+import 'package:project_auth/features/vault/data/vault_load_result.dart';
+import 'package:project_auth/features/vault/data/vault_repository.dart';
 import 'package:project_auth/features/vault/domain/catalog_repository.dart';
 import 'package:project_auth/features/vault/domain/issuer_catalog.dart';
+import 'package:project_auth/features/vault/presentation/bloc/vault_cubit.dart';
 
 import '../../support/fake_crypto.dart';
 import '../../support/protobuf_encoder.dart';
@@ -116,6 +119,8 @@ void main() {
         preview.toAdd.map((a) => a.accountName),
         containsAll(<String>['alice@example.com', 'bob@example.com']),
       );
+      // Phase 5 Patch 3: `db.groups` reached the preview as tags.
+      expect(preview.toAdd.first.tags, ['Work']);
     });
 
     test('a token already in the vault is reported as alreadyInVault',
@@ -235,6 +240,9 @@ void main() {
       expect(preview.addCount, 4);
       expect(preview.skippedCount, 1);
       expect(preview.duplicateCount, 0);
+      // Phase 5 Patch 3: root `groups` + `groupId` reached the preview as tags.
+      expect(preview.toAdd.map((a) => a.tags),
+          [['Work'], <String>[], ['Kişisel'], <String>[]]);
     });
   });
 
@@ -435,6 +443,78 @@ void main() {
     });
   });
 
+  // --- Phase 5 Patch 3: a grouped import survives the whole loop ---
+  group('tags end to end (grouped Aegis → vault → backup → re-import)', () {
+    test('group labels reach the vault and come back out of our own backup',
+        () async {
+      // 1. A real grouped Aegis file, through the real parser + real dedupe.
+      final raw = _fixture('aegis_plain_v1.json');
+      final preview = await service.preview(raw: raw, existing: const []);
+      expect(preview.addCount, 4);
+      expect(preview.toAdd.map((a) => a.tags), [
+        ['Work'], // GitHub / alice
+        ['Work', 'Kişisel'], // bob, two groups in file order
+        <String>[], // ACME, unknown group uuid → silently untagged
+        <String>[], // the ungrouped row
+      ]);
+
+      // 2. Confirming the preview: ONE addAll, exactly like the import page.
+      final repo = _MemoryRepo();
+      final cubit = VaultCubit(repo);
+      await cubit.load();
+      await cubit.addAll(preview.toAdd);
+
+      expect(cubit.state.accounts, hasLength(4));
+      expect(cubit.allTags, ['Work', 'Kişisel']); // usage count descending
+      expect(repo.saveCount, 1, reason: 'tek toplu yazma');
+
+      // 3. The user renames a tag: every carrier is rewritten in one save.
+      await cubit.renameTag('Work', 'Ofis');
+      expect(cubit.allTags, ['Ofis', 'Kişisel']);
+      expect(repo.saveCount, 2);
+
+      // 4. Export the vault and read it back through the REAL backup path.
+      final backupJson = await backup.export(
+          accounts: cubit.state.accounts, password: _backupPassword);
+      expect(service.detect(backupJson), ImportSource.projectauthBackup);
+
+      final restored = await service.preview(
+        raw: backupJson,
+        existing: const [],
+        backupPassword: _backupPassword,
+      );
+
+      // 5. The tags survived the round trip, renames included.
+      expect(restored.addCount, 4);
+      expect(restored.toAdd.map((a) => a.tags), [
+        ['Ofis'],
+        ['Ofis', 'Kişisel'],
+        <String>[],
+        <String>[],
+      ]);
+      expect(restored.toAdd, cubit.state.accounts,
+          reason: 'tags are in props → full record equality');
+    });
+
+    test('re-importing the SAME tokens under different groups adds nothing '
+        '(tags are not identity — K5)', () async {
+      // The vault holds the Aegis tokens with the tags the user ended up with.
+      final parsed = await service.preview(
+          raw: _fixture('aegis_plain_v1.json'), existing: const []);
+      final vault = [
+        for (final a in parsed.toAdd) a.copyWith(tags: const ['Arşiv']),
+      ];
+
+      // The very same file re-imported: every token is already in the vault
+      // even though its groups now say something else.
+      final again = await service.preview(
+          raw: _fixture('aegis_plain_v1.json'), existing: vault);
+
+      expect(again.addCount, 0);
+      expect(_countOf(again, SkipReason.alreadyInVault), 5);
+    });
+  });
+
   test('an unrecognized JSON object is refused before any parser runs',
       () async {
     const raw = '{"totallyUnknown": true}';
@@ -472,4 +552,24 @@ void main() {
           .having((e) => e.source, 'source', ImportSource.aegis)),
     );
   });
+}
+
+/// Minimal in-memory vault repository — the import→vault hop needs persistence
+/// but not encryption (the crypto path has its own tests).
+class _MemoryRepo implements VaultRepository {
+  List<OtpAccount> stored = const [];
+  int saveCount = 0;
+
+  @override
+  Future<VaultLoadResult> load() async =>
+      VaultLoadResult(accounts: List.of(stored));
+
+  @override
+  Future<void> save(List<OtpAccount> accounts) async {
+    saveCount++;
+    stored = List.of(accounts);
+  }
+
+  @override
+  Future<void> purgeCorrupted() async {}
 }

@@ -128,6 +128,29 @@ an integer-valued double (`3.0`) is accepted.
 { id, v, n(nonce b64), c(ciphertext b64), updatedAt(epoch ms), deleted }
 ```
 - plaintext = `OtpAccount.toJson()` → UTF-8 → `encrypt(aad: token|1|<id>)`.
+- **Record plaintext schema** (what `OtpAccount.toJson()` produces):
+  ```
+  { id, secret, type, issuer?, accountName, algorithm, digits, period, counter, tags? }
+  ```
+  `issuer` and `tags` are written **only when present/non-empty**; every other key is always there.
+- **`tags` (optional, Phase 5 Patch 3).** A list of at most 8 user labels, each at most 32 runes,
+  normalized by `OtpAccount.normalizeTags` (trim → drop blanks → clip → drop exact duplicates → keep
+  the first 8). It lives **inside the encrypted blob**, so a label like "Work" or "Bank" is as opaque
+  to the server as the secret is; nothing about tags is added to the record envelope, and the admin
+  panel cannot count them.
+  **The AAD and the record `v` are UNCHANGED — deliberately.** A new optional key inside the
+  plaintext changes neither how the blob is opened nor what it is bound to: the AAD's job is to pin
+  the record to its context (`token|1|<id>`), and the id, the context and the cipher are all the same.
+  Bumping `v` (or the AAD) would instead make every pre-Patch-3 client reject the **whole** vault as a
+  future schema (§8) rather than quietly ignore one key it does not know — turning an additive field
+  into a total outage on the older device. So §4's table needs no new row.
+  Two consequences follow from the same choice, and both are accepted:
+  - `toJson` omits the key entirely when the list is empty, so an untagged account serializes
+    byte-identically to a pre-Patch-3 one. Upgrading a vault therefore re-encrypts nothing, refreshes
+    no `updatedAt` and pushes nothing (the unchanged-blob shortcut below sees no change).
+  - An older client that **edits** a tagged token writes the plaintext back without the key it never
+    read, so those tags are lost on every device (risk R1). Reading, syncing and generating codes on
+    an old client are all safe; only an edit drops them.
 - `deleted` is always `false` in Phase 2 (soft-delete requires the Phase 3 API expansion —
   `save(List)` replace semantics cannot produce a tombstone).
 - **Unchanged-blob protection:** `save()` re-encrypts only the new/changed record
@@ -418,6 +441,12 @@ The encrypted payload is `{"exportedAt": "...", "accounts": [OtpAccount.toJson()
 JSON the local store uses, so the stable `id` survives a restore (which is what lets the import
 preview detect "already in your vault" by id rather than only by issuer/name).
 
+Because the payload IS `OtpAccount.toJson()`, the optional `tags` of §9 ride along automatically:
+a restore brings the user's labels back with their codes, and re-importing an exported backup is
+tag-lossless. This needed **no envelope change** — `version` stays **1**, the AAD formula is
+untouched, and a backup written before Patch 3 (no `tags` key anywhere) imports exactly as it did.
+Tags are inside `ciphertext` like everything else, so the file leaks no label.
+
 Everything outside `ciphertext` is public metadata. Nothing in the envelope reveals a secret, an
 issuer or an account name.
 
@@ -518,6 +547,32 @@ directly. A weak backup password is refused **before** any Argon2id work.
   destination — and the shredder would then be deleting the file the user just saved. The code does
   guard against that (it compares the chosen path against the leftover path and backs off), but the
   guard is a second line: do not add those keys without revisiting `_shredIosSaveLeftover`.
+- **The picked-image copy is shredded, and the ORDER of the two cleanups matters (Phase 5 Patch 3).**
+  "Görüntüden oku" (`ScanPage`) hands the system picker's cached copy of an image to the platform QR
+  decoder. That copy is a plaintext **picture of a live TOTP seed** sitting in the app cache, a
+  directory the OS reclaims on its own schedule — possibly never. `ScanPage._pickFromImage` therefore
+  cleans up in a `finally`, in exactly this order:
+  1. `FilePickerDocumentPort.shredCachedCopy(path)` — zero-fill in place (opened `writeOnlyAppend`, so
+     the bytes are overwritten rather than truncated away) **then** unlink. It is deliberately
+     **synchronous**: it has to finish before step 2 touches the same file, and before a screen torn
+     down mid-flow could abandon a pending `await`.
+  2. `DocumentPort.clearPickerCache()` — the plugin's general cache sweep, which catches anything the
+     targeted shred did not (an earlier pick, a copy under a name we were never told).
+  Reversed, step 2 would **unlink the file without overwriting it** and step 1 would find nothing —
+  leaving the QR's pixels recoverable on the block device. Both steps are best effort and swallow
+  every failure (housekeeping must not turn a completed import into an error).
+  **The user's original image is never touched.** The plugin hands over the sandbox copy's path only;
+  nothing in the app writes to or deletes anything in the photo library. On iOS the pick goes through
+  `file_picker_darwin`'s PHPicker, so the app gets one photo *without* holding library access — no
+  permission prompt appears. `ios/Runner/Info.plist` declares `NSPhotoLibraryUsageDescription` all the
+  same: App Review looks for it in an app that picks images, and it keeps the prompt from being
+  string-less should the plugin ever fall back to the older picker.
+  The image is also never re-encoded (`compressionQuality` stays 0) and never read into Dart memory —
+  the decoder takes a **path**, so a multi-megapixel photo is not copied into a `Uint8List`, and the
+  16 MiB ceiling (`QrImageLimits.maxBytes`) is checked against the size the picker reports *before*
+  anything is read. Decoded strings are returned to the caller and nothing else: never logged, never
+  cached, never placed on the clipboard, and the two decoder exceptions deliberately carry no platform
+  message (a plugin error string can quote a file name or file content).
 - A malformed record inside a decrypted payload is **skipped, not fatal** — one bad row must never
   cost the user the rest of their tokens. `import()` returns the usable accounts; `importDetailed()`
   additionally returns a `SkippedEntry` per dropped record so the preview can report the count. Skip
@@ -548,8 +603,22 @@ wipes the master key from memory and tears the unlocked subtree down. Applied li
 file would therefore always lock the vault before the import/export flow could finish — the feature
 would be impossible.
 
-The import and export flows are consequently wrapped in a
-`VaultLockCubit.beginSystemFileFlow()` / `endSystemFileFlow()` pair:
+The flows that open it are consequently wrapped in a
+`VaultLockCubit.beginSystemFileFlow()` / `endSystemFileFlow()` pair. There are **three** of them:
+
+| Flow | Screen | Picker |
+|---|---|---|
+| Import a vault file | `ImportPage._pickFile` | document picker (`DocumentPort.pickJson`) |
+| Export an encrypted backup | `ExportPage` | save dialog (`DocumentPort.saveJson`) |
+| Read a QR from a saved image (Phase 5 Patch 3) | `ScanPage._pickFromImage` | image picker (`DocumentPort.pickImage`) |
+
+The third one follows the identical discipline: the `begin` is paired with an `end` in an **inner
+`finally` around the pick itself** — the exemption covers the picker round-trip and nothing more, so
+the decode, the shred and the preview all run with the ordinary lock rules back in force. Because
+`ScanPage` can be torn down while the picker is still up (back gesture, router redirect), `dispose`
+additionally closes an exemption that is still active, exactly as the import/export screens do.
+
+The pair, in all three cases:
 
 - the exemption skips the background lock **including `paused`**, not only `inactive` (which is all
   the pre-existing biometric-prompt exemption covers);
@@ -582,4 +651,5 @@ The budget, the `finally` discipline and the resume check bound the exposure; th
 
 Covered by `test/features/auth/vault_lock_cubit_test.dart` (exemption honoured, budget expiry,
 renewal, the absolute cap and its reset by `endSystemFileFlow`, the `finally` pairing) and by the
-import/export widget tests, which assert the begin/end call counts.
+import/export widget tests plus `test/features/scan/scan_page_image_test.dart`, which assert the
+begin/end call counts (exactly one each, on the cancel, success and failure paths alike).

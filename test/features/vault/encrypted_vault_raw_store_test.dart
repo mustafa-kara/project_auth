@@ -11,6 +11,7 @@ import 'dart:typed_data';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:project_auth/core/crypto/encrypted_blob.dart';
+import 'package:project_auth/core/crypto/key_handle.dart';
 import 'package:project_auth/core/otp/otp_account.dart';
 import 'package:project_auth/features/vault/data/encrypted_vault_repository.dart';
 import 'package:project_auth/features/vault/domain/remote_token_repository.dart';
@@ -64,12 +65,33 @@ class FakeSecureStorage implements FlutterSecureStorage {
   noSuchMethod(Invocation invocation) => throw UnimplementedError();
 }
 
-EncryptedVaultRepository _repo(FakeSecureStorage storage) =>
+EncryptedVaultRepository _repo(FakeSecureStorage storage, {FakeCrypto? crypto}) =>
     EncryptedVaultRepository(
       masterKey: FakeKeyHandle(),
-      crypto: FakeCrypto(),
+      crypto: crypto ?? FakeCrypto(),
       storage: storage,
     );
+
+/// `encrypt` çağrılarını sayar — "değişmemiş kayıt YENİDEN şifrelenmez"
+/// kısayolunu doğrudan ölçmek için.
+class CountingCrypto extends FakeCrypto {
+  int encryptCalls = 0;
+
+  @override
+  EncryptedBlob encrypt({
+    required Uint8List plaintext,
+    required KeyHandle key,
+    required Uint8List aad,
+  }) {
+    encryptCalls++;
+    return super.encrypt(plaintext: plaintext, key: key, aad: aad);
+  }
+}
+
+/// Depodaki ham kayıt dizisi.
+List<Map<String, dynamic>> _records(FakeSecureStorage storage) =>
+    (jsonDecode(storage.data[EncryptedVaultRepository.vaultKey]!) as List)
+        .cast<Map<String, dynamic>>();
 
 OtpAccount _acc(String name) =>
     OtpAccount(secret: 'JBSWY3DPEHPK3PXP', type: OtpType.totp, accountName: name);
@@ -378,6 +400,103 @@ void main() {
       // reload → decrypt çalışır (FakeCrypto AAD token|1|<id> eşleşir).
       final loaded = await repoB.load();
       expect(loaded.accounts.single.accountName, 'shared');
+    });
+  });
+
+  // --- Faz 5 Patch 3 (K3/R2): tags props'ta → yalnız-etiket düzenlemesi yazılır ---
+  group('unchanged-blob kısayolu vs tags', () {
+    /// Diskteki tek kaydı "sunucuyla uzlaşmış ve eski" hale getirir: böylece
+    /// yeniden şifreleme `updatedAt` tazelemesi ve `sv` düşmesiyle ölçülebilir.
+    void ageRecord(FakeSecureStorage storage) {
+      final records = _records(storage);
+      records.single['updatedAt'] = 1000;
+      records.single['sv'] = '2020-01-01T00:00:00.000Z';
+      storage.data[EncryptedVaultRepository.vaultKey] = jsonEncode(records);
+    }
+
+    test('YALNIZ tags değişti → yeniden şifrelenir, updatedAt tazelenir, sv düşer',
+        () async {
+      final storage = FakeSecureStorage();
+      final account = OtpAccount(
+        id: 'tok-1',
+        secret: 'JBSWY3DPEHPK3PXP',
+        type: OtpType.totp,
+        issuer: 'GitHub',
+        accountName: 'alice@example.com',
+        tags: const ['iş'],
+      );
+      await _repo(storage).save([account]);
+      ageRecord(storage);
+      final before = _records(storage).single;
+
+      final crypto = CountingCrypto();
+      final repo = _repo(storage, crypto: crypto);
+      await repo.load(); // _lastById dolar (kısayolun ön koşulu)
+      crypto.encryptCalls = 0;
+
+      await repo.save([account.copyWith(tags: const ['ev'])]);
+
+      final after = _records(storage).single;
+      expect(crypto.encryptCalls, 1, reason: 'tags props\'ta → değişmiş sayılır');
+      expect(after['c'], isNot(before['c']), reason: 'yeni etiket → yeni blob');
+      expect(after['updatedAt'], greaterThan(1000));
+      expect(after.containsKey('sv'), isFalse,
+          reason: 'lokal değişiklik → dirty (push edilecek)');
+
+      // Ve yeni etiket gerçekten okunabilir olmalı (sessiz kayıp YOK — R2).
+      final reloaded = await _repo(storage).load();
+      expect(reloaded.accounts.single.tags, ['ev']);
+    });
+
+    test('etiketler de dahil hiçbir şey değişmedi → ESKİ blob korunur', () async {
+      final storage = FakeSecureStorage();
+      final account = OtpAccount(
+        id: 'tok-1',
+        secret: 'JBSWY3DPEHPK3PXP',
+        type: OtpType.totp,
+        issuer: 'GitHub',
+        accountName: 'alice@example.com',
+        tags: const ['iş'],
+      );
+      await _repo(storage).save([account]);
+      ageRecord(storage);
+      final before = _records(storage).single;
+
+      final crypto = CountingCrypto();
+      final repo = _repo(storage, crypto: crypto);
+      await repo.load();
+      crypto.encryptCalls = 0;
+
+      // Aynı hesap, yalnız kirli etiket yazımıyla → normalize sonrası BİREBİR aynı.
+      await repo.save([account.copyWith(tags: const ['  iş  ', 'iş'])]);
+
+      final after = _records(storage).single;
+      expect(crypto.encryptCalls, 0, reason: 'gereksiz re-encrypt dalgası YOK');
+      expect(after['c'], before['c']);
+      expect(after['updatedAt'], 1000);
+      expect(after['sv'], '2020-01-01T00:00:00.000Z',
+          reason: 'sunucu cursor\'ı korunur → sahte push yok');
+    });
+
+    test('etiketsiz hesap Patch 3 öncesiyle AYNI ciphertext\'i üretir (K2)',
+        () async {
+      // Aynı düz metin → FakeCrypto\'da aynı gövde; yalnız nonce sayaçtan gelir.
+      final untagged = OtpAccount(
+        id: 'tok-1',
+        secret: 'JBSWY3DPEHPK3PXP',
+        type: OtpType.totp,
+        issuer: 'GitHub',
+        accountName: 'alice@example.com',
+      );
+      expect(untagged.toJson().containsKey('tags'), isFalse);
+
+      final storage = FakeSecureStorage();
+      await _repo(storage).save([untagged]);
+      final repo = _repo(storage);
+      await repo.load();
+      final before = _records(storage).single;
+      await repo.save([untagged]);
+      expect(_records(storage).single['c'], before['c']);
     });
   });
 

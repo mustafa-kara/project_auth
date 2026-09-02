@@ -139,6 +139,13 @@ class _FakeDocuments implements DocumentPort {
     if (open != null) return open.future;
     return saveResult;
   }
+
+  // Faz 5 Patch 3 — bu ekran görüntü seçmez; sözleşme gereği override edilir.
+  @override
+  Future<PickedImage?> pickImage({required int maxBytes}) async => null;
+
+  @override
+  Future<void> clearPickerCache() async {}
 }
 
 Future<void> _pumpPage(

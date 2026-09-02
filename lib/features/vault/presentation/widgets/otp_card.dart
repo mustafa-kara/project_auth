@@ -9,6 +9,7 @@ library;
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 
 import '../../../../core/di/locator.dart';
@@ -24,6 +25,24 @@ class OtpCard extends StatefulWidget {
   final VoidCallback? onIncrement; // HOTP için
   final VoidCallback? onDelete;
 
+  /// Phase 5 Patch 3 — long-press handler. Null → a long press does NOTHING.
+  ///
+  /// There is deliberately no fallback to [onDelete]: a long press used to
+  /// remove a token outright, so a mis-touch while scrolling cost the user
+  /// access to that account's 2FA (risk R10 — behaviour change, in the
+  /// CHANGELOG). The vault passes the action sheet ("Kodu düzenle" /
+  /// "Etiketleri düzenle" / "Sil") here, and every delete path is confirmed by
+  /// the caller before [onDelete] is ever invoked.
+  final VoidCallback? onLongPress;
+
+  /// Phase 5 Patch 3 — opens the edit sheet for this token.
+  ///
+  /// Exposed as its own callback (not folded into [onLongPress]) because a
+  /// screen-reader user cannot "long press": the action sheet is unreachable
+  /// for them, so 'Düzenle' and 'Sil' are published as
+  /// `customSemanticsActions` instead. Null → that action is not offered.
+  final VoidCallback? onEdit;
+
   /// Kompakt liste görünümü mü (false = spacious kart).
   final bool compact;
 
@@ -32,6 +51,8 @@ class OtpCard extends StatefulWidget {
     required this.account,
     this.onIncrement,
     this.onDelete,
+    this.onLongPress,
+    this.onEdit,
     this.compact = false,
   });
 
@@ -220,13 +241,25 @@ class _OtpCardState extends State<OtpCard> {
       ),
     );
 
+    // 'Düzenle' / 'Sil' as assistive actions: the same operations the long-press
+    // sheet offers, reachable without a long press (TalkBack/VoiceOver expose
+    // them in the actions menu). The primary label and tap (copy the code) are
+    // untouched — this only ADDS actions.
+    final actions = <CustomSemanticsAction, VoidCallback>{
+      if (widget.onEdit != null)
+        const CustomSemanticsAction(label: 'Düzenle'): widget.onEdit!,
+      if (widget.onDelete != null)
+        const CustomSemanticsAction(label: 'Sil'): widget.onDelete!,
+    };
+
     final tappable = Semantics(
       label: _semanticsLabel,
       button: true,
       onTap: _copy,
+      customSemanticsActions: actions.isEmpty ? null : actions,
       child: InkWell(
         onTap: _copy, // tek tap = kopyala
-        onLongPress: widget.onDelete,
+        onLongPress: widget.onLongPress,
         borderRadius: BorderRadius.circular(Radii.lg),
         child: content,
       ),

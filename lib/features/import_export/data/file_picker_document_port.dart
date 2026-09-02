@@ -114,6 +114,117 @@ class FilePickerDocumentPort implements DocumentPort {
     }
   }
 
+  /// Phase 5 Patch 3 — image pick for "read a QR from a saved screenshot".
+  ///
+  /// [FileType.image] here (rather than [FileType.any] as in [pickJson]) because
+  /// the destination is a platform IMAGE decoder, not a content sniffer: on iOS
+  /// this is what routes the pick through `file_picker_darwin`'s PHPicker,
+  /// which hands over one photo WITHOUT the app holding photo-library access.
+  ///
+  /// No `withData`/compression knobs are passed: file_picker 12's `pickFile`
+  /// reads bytes lazily (`PlatformFile.readAsBytes()`) so nothing is
+  /// materialised by picking, and `compressionQuality` defaults to 0, i.e. the
+  /// image is handed over untouched — re-encoding a screenshot is exactly what
+  /// would smear a dense QR into an undecodable one.
+  ///
+  /// The size ceiling is checked from `length()`, which answers from the size
+  /// the platform reported, so an oversized pick is rejected before anything is
+  /// read.
+  ///
+  /// Unlike [pickJson] the picker cache is deliberately NOT cleared here: the
+  /// returned path must stay readable until the decode finishes. The caller
+  /// owns that cleanup ([clearPickerCache] + [shredCachedCopy]) in a `finally`.
+  @override
+  Future<PickedImage?> pickImage({required int maxBytes}) async {
+    final file = await FilePicker.pickFile(type: FileType.image);
+    if (file == null) return null; // user cancelled
+
+    final reportedSize = await file.length();
+    if (reportedSize > maxBytes) {
+      throw ImportFileTooLargeException(reportedSize, maxBytes);
+    }
+
+    // `PlatformFile.path` is null when the pick is not on local disk (web
+    // blob/data URIs). The decoder takes a path and nothing else, so there is
+    // no degraded mode to fall back to.
+    final path = file.path;
+    if (path == null) {
+      throw const MalformedImportFileException('picked image has no local path');
+    }
+    return PickedImage(
+      path: path,
+      name: file.name,
+      sizeBytes: reportedSize,
+    );
+  }
+
+  /// Public face of [_clearPickerCache], for callers that own the cache
+  /// lifetime themselves (see [pickImage]).
+  @override
+  Future<void> clearPickerCache() => _clearPickerCache();
+
+  /// Zero-fills and unlinks ONE cached pick, given its path.
+  ///
+  /// [clearPickerCache] alone would unlink the file without overwriting it,
+  /// which leaves the pixels of a QR — i.e. of a live TOTP seed — recoverable
+  /// on the block device. This is the same treatment [_shredIosSaveLeftover]
+  /// gives an export leftover, exposed because [pickImage]'s caller, not this
+  /// port, decides when the file has served its purpose.
+  ///
+  /// Operates ONLY on the picker's own cached copy inside the app sandbox. The
+  /// user's original in the photo library is never touched — the plugin does
+  /// not hand that path over, and the app declares no write access to it.
+  ///
+  /// SYNCHRONOUS on purpose, unlike [_zeroFill]'s async twin: this must finish
+  /// BEFORE [clearPickerCache] unlinks the same file (an unlink with no
+  /// overwrite is exactly what it is guarding against) and before the screen
+  /// that owns the flow can be torn down mid-await. The cost is bounded by
+  /// `QrImageLimits.maxBytes` and paid once, right after a system-picker
+  /// round-trip the user just sat through.
+  ///
+  /// Best effort: every failure is swallowed, for the same reason as
+  /// [_clearPickerCache].
+  static void shredCachedCopy(String path) {
+    try {
+      final file = File(path);
+      if (!file.existsSync()) return;
+      _zeroFillSync(file);
+      file.deleteSync();
+    } catch (_) {
+      // Best effort; see doc comment.
+    }
+  }
+
+  /// [_zeroFill]'s synchronous twin — see [shredCachedCopy] for why.
+  ///
+  /// WORST CASE it blocks the UI isolate for the whole overwrite. The size is
+  /// capped by `QrImageLimits.maxBytes` (16 MiB), and a 16 MiB sequential write
+  /// to app-sandbox flash is on the order of ~200 ms on the slow devices this
+  /// app targets — a jank of a few frames, once, on a path the user has just
+  /// spent seconds in the system photo picker. Accepted knowingly: making it
+  /// async would let [clearPickerCache] unlink the file mid-overwrite, or let
+  /// the screen be disposed with a plaintext picture of a TOTP seed still
+  /// readable on disk, which is the exact thing this guards against.
+  static void _zeroFillSync(File file) {
+    final length = file.lengthSync();
+    if (length <= 0) return;
+    final raf = file.openSync(mode: FileMode.writeOnlyAppend);
+    try {
+      raf.setPositionSync(0);
+      final zeros = Uint8List(length < _shredChunk ? length : _shredChunk);
+      var written = 0;
+      while (written < length) {
+        final remaining = length - written;
+        final take = remaining < zeros.length ? remaining : zeros.length;
+        raf.writeFromSync(zeros, 0, take);
+        written += take;
+      }
+      raf.flushSync();
+    } finally {
+      raf.closeSync();
+    }
+  }
+
   @override
   Future<bool> saveJson({
     required String fileName,

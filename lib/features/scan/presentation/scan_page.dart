@@ -7,12 +7,20 @@
 ///   dışa aktarmanın QR'ları sırayla toplanır, sonra ortak içe aktarma
 ///   önizlemesi onaya sunulur. Yeni rota YOK — mod şemadan anlaşılır.
 ///
+/// Faz 5 Patch 3: AppBar'daki "Görüntüden oku" aksiyonu KAYITLI bir görüntüden
+/// (ekran görüntüsü, kaydedilmiş QR fotoğrafı) okur. Kamera yolundan tek farkı
+/// ham metnin nereden geldiğidir — çözülen her QR aynı [_handleRaw]'a girer, o
+/// yüzden iki mod da görüntüden çalışır.
+///
 /// SECURITY:
 /// - Sayfa [SecureScreenScope] ile sarılıdır: kamera önizlemesi QR'ın KENDİSİNİ
 ///   (yani düz secret'ları) gösterir, önizleme adımı da issuer/hesap listesi.
 /// - Ham QR metni parse edildikten sonra TUTULMAZ; panoya hiçbir şey yazılmaz;
 ///   secret hiçbir mesaja/loga girmez (hata metinleri sabit).
 /// - Toplanan hesaplar yalnız controller'ın içinde yaşar; `dispose`'ta reset.
+/// - Görüntü yolunda seçicinin bıraktığı DÜZ nüsha (canlı bir secret'ın
+///   resmidir) her çıkışta sıfırlanıp silinir; kullanıcının galerideki
+///   ORİJİNALİNE dokunulmaz (bkz. [_ScanPageState._pickFromImage]).
 library;
 
 import 'dart:async';
@@ -30,10 +38,16 @@ import '../../../core/otp/otpauth_uri.dart';
 import '../../../core/platform/secure_screen.dart';
 import '../../../core/ui/tokens.dart';
 import '../../../core/ui/widgets/empty_state.dart';
+import '../../auth/presentation/bloc/vault_lock_cubit.dart';
+import '../../import_export/data/file_picker_document_port.dart';
 import '../../import_export/data/google_auth_parser.dart';
+import '../../import_export/data/mobile_scanner_qr_decoder.dart';
+import '../../import_export/domain/file_port.dart';
 import '../../import_export/domain/import_exceptions.dart';
 import '../../import_export/domain/import_service.dart';
+import '../../import_export/domain/qr_image_decoder.dart';
 import '../../import_export/presentation/widgets/import_preview_view.dart';
+import '../../import_export/presentation/widgets/migration_progress_band.dart';
 import '../../vault/presentation/bloc/vault_cubit.dart';
 import 'migration_scan_controller.dart';
 
@@ -59,6 +73,8 @@ class ScanPage extends StatefulWidget {
     this.debugCamera,
     this.debugNow,
     this.debugScannerState,
+    this.debugQrDecoder,
+    this.debugDocuments,
   });
 
   /// Aynı hata mesajının yeniden SnackBar'a dönmesi için geçmesi gereken süre
@@ -90,6 +106,18 @@ class ScanPage extends StatefulWidget {
   /// `ValueNotifier<MobileScannerState>`).
   @visibleForTesting
   final ValueListenable<MobileScannerState>? debugScannerState;
+
+  /// Test tohumu: görüntüden QR çözücü. Prod'da `null` →
+  /// [MobileScannerQrDecoder]. Gerçek çözücü platform kanalına gider, yani host
+  /// VM'de her zaman patlar; testte kapanışla değiştirilir.
+  @visibleForTesting
+  final QrImageDecoder? debugQrDecoder;
+
+  /// Test tohumu: görüntü seçici portu. Prod'da `null` → DI'daki
+  /// [DocumentPort]. TEMBEL çözülür: görüntü aksiyonuna basılmadıkça locator'a
+  /// dokunulmaz (locator'sız mevcut tarama testleri bozulmasın).
+  @visibleForTesting
+  final DocumentPort? debugDocuments;
 
   @override
   State<ScanPage> createState() => _ScanPageState();
@@ -124,6 +152,26 @@ class _ScanPageState extends State<ScanPage> {
   /// kadrajda duran QR her karede yeniden gelir — aşağıdaki nota bak).
   bool _previewing = false;
 
+  /// Görüntüden okuma sürüyor ([_previewing] disipliniyle aynı iş): sistem
+  /// seçicisi açıkken ya da çözüm sürerken gelen bir kamera karesi araya
+  /// girmesin, aksiyona ikinci kez basılamasın.
+  bool _pickingImage = false;
+
+  /// Görüntü seçici portu ve kilit cubit'i — ilk kullanımda çözülür.
+  ///
+  /// `dispose` içinde `context.read` GÜVENLİ DEĞİL, bu yüzden cubit ağaçtayken
+  /// yakalanır; `didChangeDependencies` yerine ilk kullanımda yakalanmasının
+  /// sebebi ise bu ekranın kilit cubit'i OLMADAN da pump edilebilmesi (mevcut
+  /// tarama testleri kamera yolunu sürüyor, kilidi hiç sağlamıyor).
+  DocumentPort? _documentsPort;
+  VaultLockCubit? _lock;
+
+  DocumentPort get _documents =>
+      _documentsPort ??= widget.debugDocuments ?? locator<DocumentPort>();
+
+  QrImageDecoder get _decoder =>
+      widget.debugQrDecoder ?? const MobileScannerQrDecoder().call;
+
   bool _busy = false;
   String? _importError;
 
@@ -145,6 +193,12 @@ class _ScanPageState extends State<ScanPage> {
 
   @override
   void dispose() {
+    // Sayfa, sistem seçicisi AÇIKKEN sökülebilir (geri hareketi, rota
+    // değişimi). O durumda [_pickFromImage]'in `finally`'si henüz çalışmamıştır
+    // ve kilit muafiyeti bütçesi dolana kadar açık kalırdı → burada kapatılır.
+    // `endSystemFileFlow` idempotent (docs/CRYPTO.md §17 "screen dispose").
+    final lock = _lock;
+    if (lock != null && lock.systemFileFlowActive) lock.endSystemFileFlow();
     // Toplanan hesaplar canlı secret taşır → ekran kapanırken düşür.
     _migration?.reset();
     _controller.dispose();
@@ -160,6 +214,9 @@ class _ScanPageState extends State<ScanPage> {
   /// okunmayan kodu tekrar tekrar göstermeye çalışırdı. Tek-token modunda
   /// ilk geçerli değer yeterli: orada ilk başarılı okuma zaten ekranı kapatır.
   Future<void> _onDetect(BarcodeCapture capture) async {
+    // Görüntüden okuma sürerken kamera zaten durdurulmuştur; gecikmiş bir kare
+    // araya girip sayaçları oynatmasın ([_previewing] ile aynı disiplin).
+    if (_pickingImage) return;
     final raws = capture.barcodes
         .map((b) => b.rawValue)
         .whereType<String>()
@@ -345,6 +402,76 @@ class _ScanPageState extends State<ScanPage> {
     }
   }
 
+  /// Kaydedilmiş bir görüntüden QR okur (plan §5 D5).
+  ///
+  /// Kamera yolundan tek farkı ham metnin kaynağıdır: çözülen her QR aynı
+  /// [_handleRaw]'a girer, yani hem tek-token hem aktarım modu görüntüden de
+  /// çalışır (bir aktarımın iki QR'ı tek ekran görüntüsünde olabilir).
+  ///
+  /// Üç ayrı `finally` üç ayrı sözü tutar:
+  /// 1. `endSystemFileFlow` — sistem seçicisi app'i arka plana atar ve kilit
+  ///    muafiyeti iptal/hata/başarı fark etmeksizin KAPANMALI (plan §3.2).
+  /// 2. Seçilen nüshanın sıfırlanıp silinmesi + picker cache temizliği — nüsha
+  ///    canlı bir secret'ın DÜZ resmidir. Önce hedefli shred (üzerine yazıp
+  ///    sil), sonra genel temizlik: sırası ters olsaydı `clearPickerCache`
+  ///    dosyayı üzerine yazılmadan unlink ederdi. Kullanıcının galerideki
+  ///    ORİJİNALİNE dokunulmaz — eklenti zaten o yolu vermez.
+  /// 3. [_pickingImage] düşer ve kamera geri açılır (yeni bir ekrana
+  ///    geçilmediyse).
+  Future<void> _pickFromImage() async {
+    if (_pickingImage || _previewing || _preview != null) return;
+    // Cubit ağaçtayken yakalanır: `dispose` muafiyeti kapatmak için buna bakar.
+    final lock = _lock ??= context.read<VaultLockCubit>();
+    setState(() => _pickingImage = true);
+    await _stopCamera();
+
+    PickedImage? picked;
+    try {
+      lock.beginSystemFileFlow();
+      try {
+        picked = await _documents.pickImage(maxBytes: QrImageLimits.maxBytes);
+      } finally {
+        lock.endSystemFileFlow();
+      }
+      if (picked == null) return; // kullanıcı iptal etti → kamera geri gelir
+
+      final raws = await _decoder(picked.path);
+      if (raws.isEmpty) {
+        _showError('Bu görüntüde QR kod bulunamadı.');
+        return;
+      }
+      for (final raw in raws) {
+        if (!mounted) return;
+        await _handleRaw(raw);
+      }
+    } on ImportFileTooLargeException {
+      // Boyut kapısı çözümden ÖNCE, bildirilen boyuttan: devasa bir "görüntü"
+      // platform çözücüsüne hiç verilmez.
+      _showError('Görüntü çok büyük (en fazla 16 MB).');
+    } on QrImageUnsupportedException {
+      // iOS Simulator / web: başka bir görüntü denemek DE işe yaramaz.
+      _showError('Bu cihazda görüntüden okuma desteklenmiyor.');
+    } on QrImageUnreadableException {
+      _showError('Görüntü okunamadı.');
+    } catch (_) {
+      // Çözülemedi ya da seçici patladı. Neden gösterilmez: platform mesajı
+      // dosya adı/içeriği alıntılayabilir.
+      _showError('Görüntü okunamadı.');
+    } finally {
+      final path = picked?.path;
+      if (path != null) FilePickerDocumentPort.shredCachedCopy(path);
+      await _documents.clearPickerCache();
+      if (mounted) {
+        setState(() => _pickingImage = false);
+        // Token eklenip sayfa pop'landıysa ([_handled]) ya da önizlemeye
+        // geçildiyse kamerayı geri açma.
+        if (!_handled && !_previewing && _preview == null) {
+          await _startCamera();
+        }
+      }
+    }
+  }
+
   /// Toplananları önizlemeye çevirir.
   ///
   /// [_previewing] daha İLK await'ten önce set edilir: kamera durdurulurken
@@ -483,7 +610,19 @@ class _ScanPageState extends State<ScanPage> {
       appBar: AppBar(
         title: Text(_total > 0 ? 'Google Authenticator kodunu tara' : 'QR Tara'),
         // Önizleme adımında kamera zaten durdurulmuştur → aksiyonlar gizlenir.
-        actions: inPreview ? null : [_cameraActions()],
+        actions: inPreview
+            ? null
+            : [
+                IconButton(
+                  tooltip: 'Görüntüden oku',
+                  icon: const Icon(Icons.image_outlined),
+                  // Kamera durumundan BAĞIMSIZ: `analyzeImage` kamerayı ya da
+                  // kamera iznini gerektirmez (mobile_scanner 7.4), yani izin
+                  // reddedilmiş bir cihazda bile tek çalışan yol budur.
+                  onPressed: _pickingImage ? null : _pickFromImage,
+                ),
+                _cameraActions(),
+              ],
       ),
       body: SafeArea(
         child: inPreview ? _buildPreview(context) : _buildCamera(context),
@@ -493,7 +632,7 @@ class _ScanPageState extends State<ScanPage> {
       // mesajı ilerlemeyi ve üç çıkış yolunu örtmez (bkz. [_showError]).
       bottomNavigationBar: inPreview || !inMigration
           ? null
-          : _MigrationBand(
+          : MigrationProgressBand(
               scanned: _scanned,
               total: _total,
               complete: _isComplete,
@@ -575,69 +714,6 @@ class _ScanPageState extends State<ScanPage> {
         errorBuilder: (context, error) => _ScanError(error: error),
         overlayBuilder: (context, _) => const _ScanReticle(),
       );
-}
-
-/// Migration modunun alt bandı: ilerleme + üç çıkış yolu.
-class _MigrationBand extends StatelessWidget {
-  const _MigrationBand({
-    required this.scanned,
-    required this.total,
-    required this.complete,
-    required this.onContinue,
-    required this.onStopEarly,
-    required this.onRestart,
-  });
-
-  final int scanned;
-  final int total;
-  final bool complete;
-  final VoidCallback onContinue;
-  final VoidCallback onStopEarly;
-  final VoidCallback onRestart;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Material(
-      color: theme.colorScheme.surface,
-      // `bottomNavigationBar` gövdenin SafeArea'sının dışında → alt çentik
-      // dolgusunu bant kendi üstlenir.
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.all(Gap.lg),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text('$scanned/$total kod tarandı',
-                  style: theme.textTheme.titleMedium),
-              if (!complete) ...[
-                const SizedBox(height: Gap.xs),
-                Text(
-                  'Kalan kodları sırayla okut',
-                  style: theme.textTheme.bodyMedium
-                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                ),
-              ],
-              const SizedBox(height: Gap.md),
-              if (complete)
-                FilledButton(onPressed: onContinue, child: const Text('Devam'))
-              else
-                OutlinedButton(
-                  onPressed: onStopEarly,
-                  child: const Text('Bu kadar yeter'),
-                ),
-              TextButton(
-                onPressed: onRestart,
-                child: const Text('Baştan başla'),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
 }
 
 /// Kamera izni reddi / başlatma hatası için kullanıcı dostu durum (EmptyState,

@@ -89,11 +89,14 @@
 - [ ] FCM setup (Firebase project + APNs certificate).
 - [ ] Device push token registration (`devices`) + admin→push Edge Function.
 
-## Phase 5 — Import/Export + service catalog (weeks 5–6)
+## Phase 5 — Import/Export + service catalog (weeks 5–6) — DONE
 > **Patch 1 (2026-09-02) — DONE:** Aegis + 2FAS import and the encrypted backup export.
 > **Patch 2 (2026-09-02) — DONE:** Google Authenticator transfer-QR import (hand-written protobuf decoder,
 > multi-QR batch collector, migration mode inside the existing `ScanPage`).
-> **NO server schema change, NO new crypto primitive.** Details: [CHANGELOG 2026-09-02](CHANGELOG.md).
+> **Patch 3 (2026-09-02) — DONE:** tags (`OtpAccount.tags` inside the encrypted blob; Aegis/2FAS groups mapped
+> onto them), migration import from a **pasted link** and from a **saved QR image**.
+> **NO server schema change, NO new crypto primitive** in any of the three — not even a record-version or AAD
+> change for tags. Details: [CHANGELOG 2026-09-02](CHANGELOG.md).
 - [x] **Import: Aegis, 2FAS** ✅ (Patch 1, 2026-09-02) — plain-JSON Aegis (`db`/`header`) and 2FAS schema v4, format
   auto-detection, tolerant per-entry skipping (the file never fails as a whole), Base32-canonicalizing dedupe key,
   preview → confirm → single `VaultCubit.addAll`.
@@ -106,10 +109,22 @@
   independent of the master password.
 - [x] **Issuer logo/matching via `catalog_services`** ✅ — already delivered in Phase 3 Patch 4 (issuer canonicalization;
   `logo_url` is deliberately ignored for offline/privacy).
-- [ ] Tag/folder organization → **Patch 3** (neither patch reads Aegis/2FAS `groups`; Google's payload has no
-  grouping field at all).
-- [ ] Import a migration QR from a **pasted link** or a **saved QR image file** → **Patch 3** (Patch 2 covers the
-  live camera only; both need a decoder the camera path does not have).
+- [x] **Tag/folder organization** ✅ (Patch 3, 2026-09-02) — `OtpAccount.tags` (≤8 labels, ≤32 runes each) INSIDE
+  the encrypted blob: no record-version bump, no AAD change, no backup-envelope change, and the key is omitted
+  when empty so an untagged vault serializes byte-identically to before. Vault-wide rename/delete with one persist
+  and one push each, a session-scoped single-selection filter strip, and a metadata-only edit sheet that cannot
+  touch the secret. Aegis `db.groups` (uuid refs + the legacy singular `group`) and 2FAS `groups`/`groupId` are
+  now mapped onto tags; Google's payload has no grouping field at all. Tags are deliberately NOT part of
+  `dedupeKey` — moving a token between groups must not make it look like a new token.
+- [x] **Import a migration QR from a pasted link or a saved QR image file** ✅ (Patch 3, 2026-09-02) — the pasted
+  `otpauth-migration://` link goes through `AddTokenSheet` (the same `MigrationScanController`, progress band and
+  shared preview as the camera path; the clipboard is never read programmatically), and "Görüntüden oku" in
+  `ScanPage` decodes a saved screenshot through `MobileScannerPlatform.analyzeImage` — which needs no camera and
+  no camera permission, so it is the only working route on a device where the camera is broken or denied. The
+  picker's plaintext copy is zero-filled and unlinked before the general cache sweep
+  ([docs/CRYPTO.md §16.5](docs/CRYPTO.md)); the user's original image is never touched. **Not supported on the
+  iOS Simulator or the web** (the plugin has no Vision/ML Kit path there) — the UI says so distinctly instead of
+  blaming the image.
 - [x] **`device_info_plus` 13 + `file_picker` 12 coupled upgrade** (2026-09-02). The 11.x hold existed only because
   `file_picker >=12.1.3` pulls `windows_file_picker` → `win32 ^6.3.0` while `device_info_plus ^12.1.0` required
   `win32 ^5.11.0`; raised together they resolve (13.2.0 / 12.1.3). `DocumentPort` migrated to the federated 12.x API
@@ -133,7 +148,7 @@
 ## Phase 7 — Hardening & release
 - [~] Security review (key lifecycle, memory wiping, screenshot blocking) — **screenshot blocking partially done 2026-09-01** (see [CHANGELOG](CHANGELOG.md)): ref-counted `SecureScreen` on **11** sensitive screens — vault, unlock, setup_password, recovery_show/verify/unlock, login, register (the last two added in the review follow-ups), scan (Phase 5 Patch 2) and import/export (Phase 5 Patch 1). `grep -rn "SecureScreenScope(" lib/` is the authoritative list. **Still open:** iOS has no FLAG_SECURE equivalent → screenshots/recording are NOT blocked there (only the recents/background snapshot is hidden). Key lifecycle + memory wiping review not yet done.
 - [ ] **Supabase leaked-password protection** — enable the HaveIBeenPwned check on the `authenticator-dev` project (Auth → Policies): the *login* password is the only credential the server sees, and it is currently accepted even if it appears in a known breach corpus. Does not touch the E2E model (the master password never reaches the server, so no server-side check is possible or wanted for it).
-- [x] **iOS release-build check — `NSPhotoLibraryUsageDescription`** — resolved by the `file_picker` 12 upgrade (2026-09-02), not by a `PICKER_MEDIA=false` flag. 11.0.3's iOS podspec pulled `DKImagePickerController/PhotoGallery` (→ `SDWebImage`, `SwiftyGif`) at its default settings, linking photo-library APIs into a build that only ever picks documents while `ios/Runner/Info.plist` declares no photo-library string. 12.x moved iOS into `file_picker_darwin`, which depends on Flutter alone: `ios/Podfile.lock` now lists none of those pods, so there is nothing for review to ask about. `Info.plist` still declares only `NSCameraUsageDescription` + `NSFaceIDUsageDescription` — keep it that way.
+- [x] **iOS release-build check — `NSPhotoLibraryUsageDescription`** — closed twice over, and the second pass reversed the conclusion of the first. **(1) The `PICKER_MEDIA=false` workaround this item originally proposed is dead:** the `file_picker` 12 upgrade (2026-09-02) moved iOS into `file_picker_darwin`, which depends on Flutter alone, so `DKImagePickerController/PhotoGallery` (→ `SDWebImage`, `SwiftyGif`) left `ios/Podfile.lock` — a document-only build links no photo-library API at all, with no flag needed. **(2) Phase 5 Patch 3 then made the app pick images on purpose** ("Görüntüden oku" in `ScanPage`), so `ios/Runner/Info.plist` now DOES declare `NSPhotoLibraryUsageDescription`, and that is the correct end state — the earlier "keep it out" instruction no longer applies. Note it is declared for **review**, not for a prompt: `file_picker_darwin` picks through PHPicker, which hands over one photo without the app holding library access, so iOS shows no permission dialog. The string keeps App Review from asking about an image-picking app, and keeps the prompt from being string-less if the plugin ever falls back to the older picker. `Info.plist` declares exactly three usage strings today (`NSCameraUsageDescription`, `NSPhotoLibraryUsageDescription`, `NSFaceIDUsageDescription`) and no write-access key — the app never writes to the photo library.
 - [ ] **iOS release-build check — keep `UIFileSharingEnabled` / `LSSupportsOpeningDocumentsInPlace` OUT of `ios/Runner/Info.plist`.** Either key exposes the app's own Documents directory in Files, which lets the user pick it as the export destination — and `FilePickerDocumentPort` shreds a leftover in exactly that directory after `saveFile`. The shredder compares paths and backs off, but that is the second line of defence; adding either key means revisiting `_shredIosSaveLeftover` first. See [docs/CRYPTO.md §16.5](docs/CRYPTO.md).
 - [ ] Accessibility, language support, store materials.
 - [ ] App Store / Play Store release (Apple developer account required).
@@ -155,5 +170,6 @@ Phase 4 (social+push) ── plugs in at any point once developer accounts are r
 
 ## Open design decisions (to be clarified later)
 - Conflict resolution starts with **arrival-order LWW** (the last to reach the server wins; see ARCHITECTURE §5); for heavy multi-device usage a move to CRDT/true-modified-time can be evaluated.
+- **Tag operations widen the LWW conflict radius from 1 record to N (risk R3, Phase 5 Patch 3).** `renameTag`/`deleteTag` rewrite every token carrying the tag, so one gesture dirties N records (in a single persist and a single push, but still N rows on the wire). Under arrival-order LWW a concurrent edit of any one of those N tokens on another device can lose that device's change for that record — where before Patch 3 a user action touched one token at a time. Accepted for now: the operation is rare, deliberate and idempotent, and the loss window is the ordinary sync round trip. Revisit **together with** the LWW decision above, not separately — the candidate fixes are the same `client_modified_at`/`revision` extension, plus possibly a field-level merge so a tag rename and a name edit on the same token stop overwriting each other.
 - Recovery key format: BIP39 word list or hex? (Decide via UX testing.)
 - Admin analytics metrics are metadata-only because of E2E; the exact full list of which metrics will be clarified.

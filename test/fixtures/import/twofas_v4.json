@@ -32,7 +32,7 @@
       "badge": {
         "color": "Default"
       },
-      "groupId": null
+      "groupId": "3d0b8a11-6c4f-4e2a-9b3d-5a7c1e2f4d60"
     },
     {
       "name": "",
@@ -90,7 +90,7 @@
       "badge": {
         "color": "Default"
       },
-      "groupId": null
+      "groupId": "9f2e7c53-1a4b-4d8e-8c60-2b3a4d5e6f71"
     },
     {
       "name": "Legacy",
@@ -115,7 +115,7 @@
       "badge": {
         "color": "Default"
       },
-      "groupId": null
+      "groupId": "11111111-2222-4333-8444-555555555555"
     },
     {
       "name": "WeirdAlgo",
@@ -144,10 +144,21 @@
       "badge": {
         "color": "Default"
       },
-      "groupId": null
+      "groupId": "3d0b8a11-6c4f-4e2a-9b3d-5a7c1e2f4d60"
     }
   ],
-  "groups": [],
+  "groups": [
+    {
+      "id": "3d0b8a11-6c4f-4e2a-9b3d-5a7c1e2f4d60",
+      "name": "Work",
+      "updatedAt": 1699999999500
+    },
+    {
+      "id": "9f2e7c53-1a4b-4d8e-8c60-2b3a4d5e6f71",
+      "name": "Kişisel",
+      "updatedAt": 1699999999500
+    }
+  ],
   "updatedAt": 1699999999500,
   "schemaVersion": 4,
   "appVersionCode": 50000,
