@@ -18,6 +18,7 @@ import '../../../../core/ui/widgets/skeleton_loader.dart';
 import '../../../../core/ui/widgets/staggered_entrance.dart';
 import '../../../../core/ui/widgets/status_badge.dart';
 import '../../../auth/presentation/bloc/vault_lock_cubit.dart';
+import '../../../import_export/data/google_auth_parser.dart';
 import '../../data/view_mode_store.dart';
 import '../../domain/token_sync_service.dart';
 import '../bloc/vault_cubit.dart';
@@ -492,6 +493,15 @@ class _AddSheetState extends State<_AddSheet> {
   bool _saving = false;
 
   Future<void> _submit() async {
+    // Google Authenticator aktarım bağlantısı TEK token değil: protobuf'lu bir
+    // yığın. `OtpAuthUri.parse` bunu anlamsız bir şema hatasıyla reddederdi →
+    // kullanıcıyı doğru girişe yönlendir, `add` ÇAĞIRMA.
+    if (GoogleAuthParser.looksLikeMigrationUri(_controller.text)) {
+      setState(() => _error = 'Bu bir Google Authenticator aktarım bağlantısı. '
+          'Ekle → "QR kod tara" ile okut.');
+      return;
+    }
+
     final OtpAccount account;
     try {
       account = OtpAuthUri.parse(_controller.text);

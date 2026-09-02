@@ -34,22 +34,15 @@ import '../../domain/file_port.dart';
 import '../../domain/import_exceptions.dart';
 import '../../domain/import_models.dart';
 import '../../domain/import_service.dart';
+import '../widgets/import_preview_view.dart';
 
 /// Kaynak biçiminin kullanıcıya gösterilen adı.
 String importSourceLabel(ImportSource source) => switch (source) {
       ImportSource.aegis => 'Aegis',
       ImportSource.twofas => '2FAS',
+      ImportSource.googleAuth => 'Google Authenticator',
       ImportSource.projectauthBackup => 'Şifreli yedek',
       ImportSource.unknown => 'Bilinmeyen biçim',
-    };
-
-/// Bir girdinin neden atlandığının Türkçe açıklaması.
-String skipReasonLabel(SkipReason reason) => switch (reason) {
-      SkipReason.unsupportedType => 'Desteklenmeyen token türü',
-      SkipReason.invalidSecret => 'Secret okunamadı',
-      SkipReason.invalidFields => 'Alanlar geçersiz',
-      SkipReason.duplicateInFile => 'Dosyada tekrar ediyor',
-      SkipReason.alreadyInVault => 'Zaten vault\'unda var',
     };
 
 /// Dosya seviyesi hataların Türkçe karşılıkları (plan §3.8). Beklenmeyen hata
@@ -293,8 +286,63 @@ class _ImportPageState extends State<ImportPage> {
               primaryAction: true,
             ),
           ),
+          // Google Authenticator dosya DEĞİL, QR üretir (plan §5b) → ikinci
+          // aksiyon kamerayı açar. `EmptyState` tek CTA taşır, bu yüzden ayrı.
+          Padding(
+            padding: const EdgeInsets.fromLTRB(Gap.lg, 0, Gap.lg, Gap.lg),
+            child: OutlinedButton.icon(
+              onPressed: _busy ? null : _showGoogleGuide,
+              icon: const Icon(Icons.qr_code_scanner_outlined),
+              label: const Text('Google Authenticator (QR)'),
+            ),
+          ),
         ],
       );
+
+  /// Kısa yönerge: kullanıcı Google Authenticator'da aktarım QR'ını nerede
+  /// bulacağını bilmiyor. Sheet kapanınca tarama ekranı açılır.
+  void _showGoogleGuide() {
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (sheetCtx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(Gap.lg),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Google Authenticator\'dan aktar',
+                style: Theme.of(sheetCtx).textTheme.titleMedium,
+              ),
+              const SizedBox(height: Gap.sm),
+              Text(
+                'Google Authenticator → ⋮ → Hesapları aktar → Hesapları dışa '
+                'aktar → QR\'ı bu kameraya göster. Birden fazla QR çıkarsa '
+                'hepsini sırayla okut.',
+                style: Theme.of(sheetCtx).textTheme.bodyMedium?.copyWith(
+                      color: Theme.of(sheetCtx).colorScheme.onSurfaceVariant,
+                    ),
+              ),
+              const SizedBox(height: Gap.xl),
+              FilledButton(
+                onPressed: () {
+                  Navigator.of(sheetCtx).pop();
+                  // Sheet kapanırken sayfa da sökülmüş olabilir (geri tuşu,
+                  // rota değişimi) → disposed context'le push etme.
+                  if (!mounted) return;
+                  // Testlerde sayfa GoRouter'sız pump edilebiliyor (mevcut
+                  // önizleme testleri) → `maybeOf` ile sessiz kal.
+                  GoRouter.maybeOf(context)?.push(Routes.scan);
+                },
+                child: const Text('Kamerayı aç'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
   Widget _buildPassword(BuildContext context) => ListView(
         padding: const EdgeInsets.all(Gap.lg),
@@ -335,115 +383,14 @@ class _ImportPageState extends State<ImportPage> {
         ],
       );
 
-  Widget _buildPreview(BuildContext context) {
-    final preview = _preview!;
-    final theme = Theme.of(context);
-    return Column(
-      children: [
-        Expanded(
-          child: ListView(
-            padding: const EdgeInsets.all(Gap.lg),
-            children: [
-              Row(
-                children: [
-                  StatusBadge(
-                    kind: StatusKind.primary,
-                    icon: Icons.description_outlined,
-                    label: importSourceLabel(_source ?? ImportSource.unknown),
-                  ),
-                  if (_fileName != null) ...[
-                    const SizedBox(width: Gap.sm),
-                    Expanded(
-                      child: Text(
-                        _fileName!,
-                        style: theme.textTheme.bodySmall
-                            ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-              const SizedBox(height: Gap.lg),
-              _countLine(
-                context,
-                Icons.add_circle_outline,
-                '${preview.addCount} token içe aktarılacak',
-                emphasis: true,
-              ),
-              _countLine(
-                context,
-                Icons.copy_all_outlined,
-                '${preview.duplicateCount} zaten var',
-              ),
-              _countLine(
-                context,
-                Icons.block_outlined,
-                '${preview.skippedCount} desteklenmiyor',
-              ),
-              if (preview.skipped.isNotEmpty) ...[
-                const SizedBox(height: Gap.md),
-                ExpansionTile(
-                  title: Text('Atlananlar (${preview.skipped.length})'),
-                  childrenPadding:
-                      const EdgeInsets.only(left: Gap.sm, right: Gap.sm),
-                  children: [
-                    for (final s in preview.skipped)
-                      ListTile(
-                        dense: true,
-                        leading: const Icon(Icons.remove_circle_outline),
-                        title: Text(s.label ?? '(isimsiz)'),
-                        subtitle: Text(
-                          s.detail == null
-                              ? skipReasonLabel(s.reason)
-                              : '${skipReasonLabel(s.reason)} — ${s.detail}',
-                        ),
-                      ),
-                  ],
-                ),
-              ],
-              if (_error != null) ...[
-                const SizedBox(height: Gap.md),
-                AuthErrorText(_error!),
-              ],
-            ],
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.all(Gap.lg),
-          child: FilledButton(
-            onPressed:
-                _busy || preview.toAdd.isEmpty ? null : _confirmImport,
-            child: _busy ? const BtnSpinner() : const Text('İçe aktar'),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _countLine(BuildContext context, IconData icon, String text,
-      {bool emphasis = false}) {
-    final theme = Theme.of(context);
-    final color = emphasis
-        ? theme.colorScheme.onSurface
-        : theme.colorScheme.onSurfaceVariant;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: Gap.sm),
-      child: Row(
-        children: [
-          Icon(icon, size: 18, color: color),
-          const SizedBox(width: Gap.sm),
-          Expanded(
-            child: Text(
-              text,
-              style: (emphasis
-                      ? theme.textTheme.titleMedium
-                      : theme.textTheme.bodyMedium)
-                  ?.copyWith(color: color),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  /// Önizleme, QR tarama akışıyla ORTAK widget'a delege edilir — iki giriş
+  /// noktasının sayı/atlanan listesi ve metinleri birebir aynı kalsın diye.
+  Widget _buildPreview(BuildContext context) => ImportPreviewView(
+        preview: _preview!,
+        headerLabel: importSourceLabel(_source ?? ImportSource.unknown),
+        headerDetail: _fileName,
+        error: _error,
+        busy: _busy,
+        onConfirm: _confirmImport,
+      );
 }

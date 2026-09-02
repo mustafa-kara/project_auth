@@ -37,11 +37,12 @@ lib/
     │   ├── domain/      # token_sync_service, remote_token_repository, raw_token_record, issuer_catalog, catalog_repository
     │   ├── data/        # encrypted_vault_repository, vault_migration, supabase_token_repository, *_store
     │   └── presentation/{bloc/vault_cubit, pages/vault_page, widgets/otp_card}
-    ├── scan/      # QR scanning (scan_page → VaultCubit.add)
-    ├── import_export/  # Faz 5 Patch 1 — Aegis/2FAS import + encrypted backup
-    │   ├── domain/      # import_service, backup_service, backup_envelope, import_format_detector, dedupe, file_port (DocumentPort), import_models, import_exceptions
-    │   ├── data/        # aegis_parser, twofas_parser, file_picker_document_port
-    │   └── presentation/pages/{import_page, export_page}
+    ├── scan/      # QR scanning (scan_page → VaultCubit.add; migration modu → VaultCubit.addAll)
+    │   └── presentation/  # scan_page, migration_scan_controller (kamerasız migration beyni)
+    ├── import_export/  # Faz 5 Patch 1–2 — Aegis/2FAS/Google Authenticator import + encrypted backup
+    │   ├── domain/      # import_service, backup_service, backup_envelope, import_format_detector, dedupe, file_port (DocumentPort), import_models, import_exceptions, google_migration (MigrationBatch + GoogleMigrationCollector)
+    │   ├── data/        # aegis_parser, twofas_parser, protobuf_wire (ProtobufReader), google_auth_parser, file_picker_document_port
+    │   └── presentation/  # pages/{import_page, export_page}, widgets/import_preview_view
     └── settings/  # settings_page (biometrics / live-sync / announcements / backup & transfer)
 ```
 
@@ -52,7 +53,7 @@ lib/
 | `account` | splash, login, register, email_confirm, account_link, restore_failed | `SessionCubit` (Supabase identity) + `AccountVaultManager`, `DeviceRegistrar` |
 | `auth` | setup_password, recovery_show, recovery_verify, unlock, recovery_unlock, auth_integrity | `VaultLockCubit` (vault lock) + `KeyManager` |
 | `vault` | vault, settings | `VaultCubit` + `TokenSyncService`, `FeatureFlagsService`, `AnnouncementsRepository` |
-| `scan` | scan | `VaultCubit.add()` |
+| `scan` | scan | `VaultCubit.add()`; migration modunda `MigrationScanController` (collector + `ImportService.previewParsed`) → `VaultCubit.addAll()` |
 | `import_export` | import, export | `ImportService` / `BackupService` + `VaultCubit.addAll()`, `DocumentPort` |
 
 Navigation is **state-driven**: screens never force routing with `context.go`; when cubit state changes the guard redirects (`refreshListenable`).
@@ -157,7 +158,7 @@ Key transitions: `bootstrap`, `beginSetup`, `commitSetup`, `cancelSetup`, `unloc
 
 ## 8. Dependencies
 
-`flutter_bloc` · `go_router 17.x` (custom `CubitRefreshNotifier` — no `GoRouterRefreshStream`) · `get_it` (**hand-written composition root — no `injectable`/codegen**) · `supabase_flutter` (PKCE) · `sodium`/`sodium_libs` (libsodium — Argon2id/XChaCha20) · `flutter_secure_storage` · `mobile_scanner` · `local_auth` + `device_info_plus` · `flutter_svg` (issuer SVG) · `equatable` · `uuid` · `crypto`. Design: embedded Geist/GeistMono (NO google_fonts), simple-icons CC0. Tests: `flutter_test` + `mocktail`.
+`flutter_bloc` · `go_router 17.x` (custom `CubitRefreshNotifier` — no `GoRouterRefreshStream`) · `get_it` (**hand-written composition root — no `injectable`/codegen**; aynı kural gereği Google Authenticator aktarım QR'ının protobuf yükü de `protobuf` paketi + `build_runner` yerine elle yazılmış `protobuf_wire.dart` ile çözülür — üstelik proto3 **alan mevcudiyeti**ni yalnız elle decoder görebilir, sayaçsız HOTP kaydının 0 varsayılarak içeri alınmasını bu engeller) · `supabase_flutter` (PKCE) · `sodium`/`sodium_libs` (libsodium — Argon2id/XChaCha20) · `flutter_secure_storage` · `mobile_scanner` · `local_auth` + `device_info_plus` · `flutter_svg` (issuer SVG) · `equatable` · `uuid` · `crypto`. Design: embedded Geist/GeistMono (NO google_fonts), simple-icons CC0. Tests: `flutter_test` + `mocktail`.
 
 **No code generation anywhere.** JSON (`fromJson`/`toJson`) and state classes are hand-written; on 2026-09-01
 `injectable`, `injectable_generator`, `freezed`, `freezed_annotation`, `json_annotation`, `json_serializable`,
@@ -169,10 +170,10 @@ Key transitions: `bootstrap`, `beginSetup`, `commitSetup`, `cancelSetup`, `unloc
 `--dart-define-from-file=env/dev.json` (see the README).
 
 **Screen-capture protection:** sensitive pages wrap their `build` in `SecureScreenScope`
-(vault, unlock, setup_password, recovery_unlock, recovery_show, recovery_verify). The ref count lives in Dart because
+(vault, unlock, setup_password, recovery_unlock, recovery_show, recovery_verify, scan). The ref count lives in Dart because
 the native flag is last-caller-wins — see [CRYPTO.md §15](CRYPTO.md).
 
-## 8.1 Import / Export (Faz 5 Patch 1)
+## 8.1 Import / Export (Faz 5 Patch 1–2)
 
 `features/import_export/` is layered like the rest: `domain/` is pure Dart (parsers are driven through the
 `ImportParser` interface, `DocumentPort` abstracts file access), `data/` holds the concrete parsers and the
@@ -189,6 +190,24 @@ the native flag is last-caller-wins — see [CRYPTO.md §15](CRYPTO.md).
   allow-list (`app_router.dart`), so a deep link into them while locked still redirects to unlock.
 - **Lock exemption** — both flows wrap the picker in `VaultLockCubit.beginSystemFileFlow()` /
   `endSystemFileFlow()`; a budgeted, deliberate concession documented in [CRYPTO.md §17](CRYPTO.md).
+
+**Patch 2 — Google Authenticator aktarım QR'ı.** Dışa aktarım bir `otpauth://` URI'si değil,
+`otpauth-migration://offline?data=…` içinde base64'lenmiş protobuf; bu yüzden dosya seçici yerine kameradan girer:
+
+- **`data/protobuf_wire.dart`** — `ProtobufReader` (tag / varint / length-delimited / skip) ve sert sınırlar
+  (8 KiB URI, 64 KiB payload, kod başına 256 kayıt, 1024 hesap, 10 byte varint). Codegen yok (§7 paket notu).
+- **`data/google_auth_parser.dart`** — `looksLikeMigrationUri` / `parseUri`: query elle ayrıştırılır
+  (`Uri.queryParameters` base64'teki `+`'yı boşluğa çevirirdi), ardından `OtpAccount` eşlemesi; eşlenemeyen her
+  kayıt kodu düşürmek yerine `SkippedEntry` olur.
+- **`domain/google_migration.dart`** — `MigrationBatch` + `GoogleMigrationCollector`: çok QR'lı bir dışa aktarımı
+  sırasız taramaya rağmen birleştirir (ilk kodun `batch_id`/`batch_size` değerlerine sabitlenir); başka bir
+  dışa aktarımın kodu asla karıştırılmaz, kısmi içe aktarma meşru bir sonuçtur.
+- **`features/scan/presentation/migration_scan_controller.dart`** — akışın kamerasız beyni (collector +
+  `ImportService.previewParsed`); `ScanPage` yalnızca döneni render eder, kural kümesi bu sayede kamerasız test
+  edilir. `ScanPage` migration moduna şema algılamayla geçer (**yeni rota yok, guard/DI değişmez**) ve artık
+  `SecureScreenScope` ile sarılıdır.
+- **`presentation/widgets/import_preview_view.dart`** — onay önizlemesi; dosyadan ve QR'dan içe aktarma aynı
+  widget'ı ve aynı metinleri paylaşır.
 
 ## 9. Document Map
 - This file: client UI/state architecture.

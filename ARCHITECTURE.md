@@ -118,7 +118,11 @@ Data (Repository impl + DataSource + DTO) ── Supabase, secure storage, crypt
 ```
 
 - The **View** never calls the Repository/Supabase directly; it only talks to the Bloc/Cubit.
-- **Bloc/Cubit** = the ViewModel in MVVM. State is immutable — hand-written classes with `equatable` (**no `freezed` / no codegen**; the unused codegen packages were removed on 2026-09-01).
+- **Bloc/Cubit** = the ViewModel in MVVM. State is immutable — hand-written classes with `equatable` (**no `freezed` / no codegen**; the unused codegen packages were removed on 2026-09-01). The same rule decided the Google Authenticator importer: its
+  `MigrationPayload` protobuf is decoded by a **hand-written wire reader** (`data/protobuf_wire.dart`) rather than
+  by the `protobuf` package plus a `build_runner` step — and the hand-written reader is also the only one that can
+  see proto3 **field presence**, which is what distinguishes "counter is 0" from "there is no counter" and keeps a
+  counter-less HOTP entry from being imported with a guessed value.
 - **Domain** is pure Dart, testable, imports no packages (even the crypto interface is abstract here).
 - **Data** holds the Supabase + secure storage + libsodium implementations.
 - Dependency injection: a **hand-written `get_it` composition root** (`lib/core/di/locator.dart`, `configureDependencies()`). `injectable` codegen was evaluated and dropped — it was never used.
@@ -148,10 +152,13 @@ lib/
 │   │   ├── domain/ (Token entity, GenerateCode, AddToken, SyncTokens)
 │   │   └── presentation/ (VaultBloc, code cards, search, folders)
 │   ├── scanner/                 # QR scanning + manual entry
-│   ├── import_export/           # Aegis / 2FAS import + encrypted backup (Phase 5 Patch 1)
-│   │   ├── domain/  (ImportService, BackupService, BackupEnvelope, detectSource, dedupeKey, DocumentPort)
-│   │   ├── data/    (AegisParser, TwoFasParser, FilePickerDocumentPort)
-│   │   └── presentation/ (ImportPage, ExportPage)
+│   │   └── presentation/ (ScanPage, MigrationScanController — camera-free migration brain)
+│   ├── import_export/           # Aegis / 2FAS / Google Authenticator import + encrypted backup (Phase 5 Patches 1–2)
+│   │   ├── domain/  (ImportService, BackupService, BackupEnvelope, detectSource, dedupeKey, DocumentPort,
+│   │   │            google_migration.dart — MigrationBatch + GoogleMigrationCollector)
+│   │   ├── data/    (AegisParser, TwoFasParser, FilePickerDocumentPort,
+│   │   │            protobuf_wire.dart — ProtobufReader, google_auth_parser.dart — GoogleAuthParser)
+│   │   └── presentation/ (ImportPage, ExportPage, widgets/ImportPreviewView)
 │   ├── lock/                    # biometric/PIN app lock
 │   └── settings/                # theme, language, account, change password
 └── shared/                      # shared widgets
@@ -159,7 +166,7 @@ lib/
 
 The `otp/` core (TOTP/HOTP/Steam algorithms) is isolated as a separate `core/otp/` module and validated against the RFC 6238/4226 test vectors with unit tests.
 
-### 4.1 Import / Export (Phase 5 Patch 1)
+### 4.1 Import / Export (Phase 5 Patches 1–2)
 
 `features/import_export/` follows the same domain/data/presentation split. `domain/` is pure Dart — parsers are
 reached through the `ImportParser` interface and the file system through `DocumentPort`
@@ -177,6 +184,25 @@ The concrete adapters live in `data/`.
   `VaultLockCubit.beginSystemFileFlow()` / `endSystemFileFlow()` — a budgeted, deliberate threat-model concession
   documented in [docs/CRYPTO.md §17](docs/CRYPTO.md).
 - Supabase schema is **unchanged**: imported tokens travel the existing encrypted-blob path.
+
+**Patch 2 — Google Authenticator transfer QR.** The export is a base64 protobuf in
+`otpauth-migration://offline?data=…`, not an `otpauth://` URI, so it enters through the camera rather than the
+file picker:
+
+- **`data/protobuf_wire.dart`** — `ProtobufReader` (tag / varint / length-delimited / skip) plus the hard limits
+  (8 KiB URI, 64 KiB payload, 256 entries per code, 1024 accounts, 10-byte varints). No codegen; see §3.
+- **`data/google_auth_parser.dart`** — `GoogleAuthParser.looksLikeMigrationUri` / `parseUri`: manual query
+  splitting (`Uri.queryParameters` would turn base64 `+` into a space), then the field mapping onto `OtpAccount`,
+  with every unmappable entry recorded as a `SkippedEntry` instead of failing the code.
+- **`domain/google_migration.dart`** — `MigrationBatch` + `GoogleMigrationCollector`: stitches a multi-QR export
+  back together in any scan order, pinned to the first code's `batch_id`/`batch_size`; a code from another export
+  is never merged, and a partial import is a legitimate result.
+- **`features/scan/presentation/migration_scan_controller.dart`** — the camera-free brain of the flow (collector +
+  `ImportService.previewParsed`); `ScanPage` only renders what it returns, which is what makes the whole rule set
+  testable without a camera. `ScanPage` switches into migration mode by schema detection — **no new route, no
+  guard or DI change** — and is now wrapped in `SecureScreenScope`.
+- **`presentation/widgets/import_preview_view.dart`** — the confirm-preview block, shared by the file import and
+  the QR import so both show one set of strings.
 
 ---
 

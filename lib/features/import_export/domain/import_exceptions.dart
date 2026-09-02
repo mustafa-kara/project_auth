@@ -68,3 +68,18 @@ class UnsupportedBackupVersionException implements Exception {
   @override
   String toString() => 'UnsupportedBackupVersionException: version $version';
 }
+
+/// The scanned QR is not a usable `otpauth-migration://` export: wrong scheme or
+/// host, missing/empty `data`, undecodable base64, or a payload past the decoder
+/// limits (plan §2). Raised by `GoogleAuthParser.parseUri`.
+///
+/// SECURITY: [message] is a fixed developer-facing string. It must NEVER embed
+/// the raw URI, the base64 blob or any decoded byte — the payload is a bundle of
+/// secrets, and this message reaches logs and (mapped to Turkish) the UI.
+class MalformedMigrationUriException implements Exception {
+  final String message;
+  const MalformedMigrationUriException(
+      [this.message = 'not a Google Authenticator export QR']);
+  @override
+  String toString() => 'MalformedMigrationUriException: $message';
+}

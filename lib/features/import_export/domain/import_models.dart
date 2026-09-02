@@ -9,9 +9,14 @@ import 'package:equatable/equatable.dart';
 
 import '../../../core/otp/otp_account.dart';
 
-/// Backup file kinds this app can read. [unknown] means the root JSON matched no
-/// known fingerprint, which is a user-facing error rather than a silent no-op.
-enum ImportSource { aegis, twofas, projectauthBackup, unknown }
+/// Sources this app can read. [unknown] means the root JSON matched no known
+/// fingerprint, which is a user-facing error rather than a silent no-op.
+///
+/// [googleAuth] is the odd one out: it never comes from a file. Google
+/// Authenticator only exports `otpauth-migration://` QR codes, so that source is
+/// produced by `GoogleAuthParser`/`GoogleMigrationCollector` from scanned URIs
+/// and `detectSource` (JSON fingerprinting) deliberately never returns it.
+enum ImportSource { aegis, twofas, googleAuth, projectauthBackup, unknown }
 
 /// Why a single entry was dropped. A single bad entry must never fail the whole
 /// import, so every drop is recorded instead of thrown.

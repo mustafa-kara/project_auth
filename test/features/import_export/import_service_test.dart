@@ -412,4 +412,89 @@ void main() {
       );
     });
   });
+
+  // Phase 5 Patch 2. The Google Authenticator path has no file and no JSON: the
+  // scan screen assembles a `ParsedImport` from QR batches and enters the
+  // pipeline here, so `previewParsed` must apply exactly the dedupe contract
+  // `preview` applies — synchronously, with no isolate and no parser wired.
+  group('previewParsed — the QR entry point', () {
+    ParsedImport parsed(List<OtpAccount> accounts,
+            {List<SkippedEntry> skipped = const []}) =>
+        ParsedImport(
+          source: ImportSource.googleAuth,
+          accounts: accounts,
+          skipped: skipped,
+        );
+
+    test('dedupes against the vault and keeps the source', () {
+      final preview = service().previewParsed(
+        parsed([_acc('a', issuer: 'GitHub'), _acc('b', issuer: 'GitLab')]),
+        existing: [_acc('a', issuer: 'GitHub')],
+      );
+      expect(preview.source, ImportSource.googleAuth);
+      expect(preview.addCount, 1);
+      expect(preview.toAdd.single.accountName, 'b');
+      expect(preview.duplicateCount, 1);
+      expect(preview.skipped.single.reason, SkipReason.alreadyInVault);
+    });
+
+    test('repeats across the scanned codes → duplicateInFile, first wins', () {
+      // Google splits an export across QR codes; a token can legitimately be
+      // rescanned when the user restarts a partial run.
+      final preview = service().previewParsed(
+        parsed([_acc('a'), _acc('a'), _acc('b')]),
+        existing: const [],
+      );
+      expect(preview.addCount, 2);
+      expect(preview.skipped.single.reason, SkipReason.duplicateInFile);
+    });
+
+    test('the parser\'s skipped entries survive into the preview', () {
+      final preview = service().previewParsed(
+        parsed([_acc('a')], skipped: const [
+          SkippedEntry(
+              reason: SkipReason.unsupportedType,
+              label: 'Mystery',
+              detail: 'algorithm=MD5'),
+        ]),
+        existing: const [],
+      );
+      expect(preview.addCount, 1);
+      expect(preview.skippedCount, 1);
+      expect(preview.skipped.single.detail, 'algorithm=MD5');
+    });
+
+    test('nothing scanned at all → EmptyImportException', () {
+      expect(() => service().previewParsed(parsed(const []), existing: const []),
+          throwsA(isA<EmptyImportException>()));
+    });
+
+    test('all entries skipped is NOT empty — the user still sees why', () {
+      final preview = service().previewParsed(
+        parsed(const [], skipped: const [
+          SkippedEntry(reason: SkipReason.invalidFields, label: 'Broken'),
+        ]),
+        existing: const [],
+      );
+      expect(preview.toAdd, isEmpty);
+      expect(preview.skippedCount, 1);
+    });
+
+    test('ids are NOT matched — only our own backups preserve them', () {
+      // A scanned token carries a freshly generated id, so an id collision with
+      // a vault entry would be pure coincidence and must not drop the token.
+      final preview = service().previewParsed(
+        parsed([_acc('a', id: 'shared-id')]),
+        existing: [_acc('b', id: 'shared-id', secret: _secretB)],
+      );
+      expect(preview.addCount, 1);
+    });
+
+    test('needs no parser wired and runs synchronously', () {
+      final bare = ImportService(backup: backup, keyOf: _testKey);
+      final preview =
+          bare.previewParsed(parsed([_acc('a')]), existing: const []);
+      expect(preview.addCount, 1);
+    });
+  });
 }
