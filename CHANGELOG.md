@@ -5,9 +5,10 @@ Project progress log. Newest at the top.
 ## 2026-09-02 (Audit follow-ups)
 
 A post-merge audit of Phase 5 (Patches 1–2) produced 23 findings across data integrity, parser fidelity,
-platform hygiene and documentation. All of them are addressed here. **No Supabase schema change, no new crypto
+platform hygiene and documentation, plus two follow-ups uncovered while fixing them. All of them are addressed
+here. **No Supabase schema change, no new crypto
 primitive, no sync-protocol change**; one document *is* touched — docs/CRYPTO.md §15/§16/§17, which had drifted
-from the code. host **909/909 → 986/986**, integration unchanged (**50**, not run on a device this round),
+from the code. host **909/909 → 992/992**, integration unchanged (**50**, not run on a device this round),
 `flutter analyze --fatal-infos` clean.
 
 ### Data integrity — vault, sync, dedupe (A1–A6)
@@ -47,6 +48,23 @@ from the code. host **909/909 → 986/986**, integration unchanged (**50**, not 
   catch-up `syncOnce` in the same subscribe-then-pull order as `start`.
 - **[P3] Final dedupe before `addAll` (A6)** — a token pulled in between preview and confirm no longer slips in
   twice.
+- **[P1] On the FIRST sync, a dirty local record now beats a colliding remote row (A2 follow-up).** With
+  `pullCursorIso == null` this device has never completed a pull, so there is no reference point that could prove
+  a server row arrived *after* our unpushed record — yet the old rule handed the win to the server anyway. That
+  turned the A1 resurrection into a silent deletion in the exact case A1 exists for: restore an id-preserving
+  backup, resurrect a deleted token (live, `sv == null`), sync for the first time, and the server's tombstone
+  wiped it again. Ids with no local record are still always accepted, so a first pull still brings the whole
+  vault down; only records waiting to be pushed are left alone, and the collision is settled by server-side LWW
+  once the push lands. **Behaviour change**, deliberately: local wins that one race.
+- **[P1] `exportRaw` and `_pushDirty` return at most one record per id (A2 follow-up).** `_corruptedRaw` holds
+  records that are schema-valid but undecryptable, so one id could legitimately sit in both `_corruptedRaw` and
+  `_lastById` and reach the disk twice — and `pushUpsert(onConflict: 'id')` answers a batch carrying the same id
+  twice with Postgres 21000, which wedges **every** later push, not just that one. Both the store and the sync
+  service now collapse duplicates with the same rule used everywhere else: a live record beats its own tombstone
+  (deliberate resurrection), and between two of the same kind the first on disk wins. "Last wins" was not an
+  option — it could turn a resurrection back into a tombstone and lose the token silently. The service-side pass
+  is defence in depth: `RawTokenStore` is a port, and another implementation (or a hand-edited file) can hand it
+  duplicates.
 
 ### Parser fidelity — Aegis / 2FAS (B1–B6)
 
@@ -129,7 +147,7 @@ from the code. host **909/909 → 986/986**, integration unchanged (**50**, not 
   eight screens; all now say 11 and point at the grep.
 - **Test counts** were stale everywhere they claimed to be current: README's `flutter test` line said 713,
   PLAN.md's CI line said 454 host / 38 integration, README's Phase 2 row said the integration suite was 38
-  "today". Measured and corrected to **986 host / 50 integration**. The Patch 2 row's 899 was also inconsistent
+  "today". Measured and corrected to **992 host / 50 integration**. The Patch 2 row's 899 was also inconsistent
   with that patch's own changelog entry (909) and is fixed.
 - **`file_picker` pin rationale (pubspec.yaml, ARCHITECTURE.md §4.1, docs/architecture.md §8.1)** — the comment
   explained the win32 conflict but neither cost of staying: `file_picker 12` cannot move without

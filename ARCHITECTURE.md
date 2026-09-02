@@ -484,6 +484,19 @@ opaque `ciphertext`/`nonce` (+ `version`, `deleted`) go to the server; AAD is `t
   so the next push flips the server row to `deleted = false`. Keeping both instead would lose the token silently
   at the next `importRemote` (the tombstone wins the merge) and would break push permanently, because
   `pushUpsert(onConflict: 'id')` rejects two rows with the same id (Postgres 21000).
+- **One record per id leaves the store.** `exportRaw` (and, defensively, `TokenSyncService._pushDirty`) collapses
+  duplicates before anything is pushed, by the same rule: live beats its own tombstone, and between two of the
+  same kind the first on disk wins — never the last, which could turn a resurrection back into a tombstone. The
+  duplicate is reachable without any file corruption: `_corruptedRaw` keeps records that are schema-valid but
+  undecryptable, so one id can sit there *and* in `_lastById` and be written twice. `_pushDirty` repeats the
+  collapse because `RawTokenStore` is a port — another implementation, or a hand-edited file, can hand it a
+  duplicate the repository never saw.
+- **Null pull-cursor: the dirty local record wins.** `pullCursorIso == null` means this device has never
+  completed a pull, so nothing can prove a server row is *newer* than an unpushed local record — and assuming the
+  server wins undid the resurrection rule above in exactly the case it exists for (restore a backup, resurrect a
+  deleted token, first sync, server tombstone deletes it again). Ids with no local record are still always
+  applied, so a first pull still brings the whole remote vault down; only records awaiting push are protected,
+  and the collision is resolved by server-side LWW once that push lands.
 - **Push and merge are serialized inside `TokenSyncService`** by an async mutex covering `exportRaw + pushUpsert`
   on one side and the merge write on the other. Otherwise a long import push and an arriving merge interleave: the
   merge writes a newer blob to disk while the push is still uploading the snapshot it read beforehand, so the

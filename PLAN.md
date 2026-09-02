@@ -16,7 +16,7 @@
 - [x] `core/`: theme (Material 3 light/dark), go_router, DI composition root (`lib/core/di/locator.dart` — hand-written `get_it`; the injectable codegen option was dropped in 2026-09-01, it was never used). ✅
   - [ ] l10n skeleton, Failure types, Supabase client wrapper *(before Phase 3)*.
 - [x] go_router base routes (`/`, `/scan`) + screens + redirect guard comment-skeleton. ✅
-- [x] CI: `.github/workflows/ci.yml` (2026-09-01) — `push` on `main` + `pull_request`, ubuntu-latest, Flutter 3.38.6 pinned, `flutter analyze --fatal-infos` + `flutter test`. Currently **host 986/986**, analyze clean; **integration 50/50** runs locally only (needs a device/simulator) — measured 2026-09-02 on the audit-follow-ups branch. ✅
+- [x] CI: `.github/workflows/ci.yml` (2026-09-01) — `push` on `main` + `pull_request`, ubuntu-latest, Flutter 3.38.6 pinned, `flutter analyze --fatal-infos` + `flutter test`. Currently **host 992/992**, analyze clean; **integration 50/50** runs locally only (needs a device/simulator) — measured 2026-09-02 on the audit-follow-ups branch. ✅
   - [ ] A `dart format` gate is deliberately NOT in CI yet — **known debt:** most of the tree is not format-clean, so enabling it means a repo-wide reformat commit first.
 
 ## Phase 1 — Core OTP engine (serverless, fully working) (weeks 1–2) — COMPLETE
