@@ -24,6 +24,7 @@ End-to-end (E2E) encrypted, multi-device synchronized **TOTP/HOTP authenticator*
 | [docs/architecture.md](docs/architecture.md) | Runtime view: feature→screen→state map, the two state layers, route/guard matrix, dependency list |
 | [docs/CRYPTO.md](docs/CRYPTO.md) | Crypto design: primitives, key hierarchy, AAD scheme, password policy, biometrics, sync envelopes, screen-capture protection |
 | [docs/OTP_ENGINE.md](docs/OTP_ENGINE.md) | OTP core (TOTP/HOTP/Steam/Base32) technical note + RFC test status |
+| [admin/README.md](admin/README.md) | Admin panel (Phase 6): setup, the three access paths, module contract, routes, security invariants, smoke checklist |
 | [CHANGELOG.md](CHANGELOG.md) | Version/progress log |
 
 ---
@@ -52,7 +53,7 @@ on the push path and a dirty-local-wins rule on the first pull (no cursor = noth
 newer); **Steam issuer heuristic removed from Aegis/2FAS** (the declared type is the only authority), official 2FAS `reference` encryption predicate, SHA224/SHA384/MD5 → `unsupportedType`, 512-byte string caps, fixtures aligned with real exports; **iOS export leftover in Documents shredded** (file_picker wrote the backup there and never removed it → it rode into the iCloud backup), camera action guards, bounded skip list, `SecureScreen` retry-on-failure, 10-minute absolute cap on the file-picker lock exemption; docs/CRYPTO.md §15/§16/§17 resynced with the code. **Server schema unchanged.** · **host 992/992** |
 | Flutter — deps: file_picker 12 + device_info_plus 13 | ✅ (2026-09-02) One coupled major upgrade (`file_picker` 11.0.3 → 12.1.3, `device_info_plus` 12.4.0 → 13.2.0 — neither resolved alone, `win32 ^6` vs `^5`). **iOS drops the `DKImagePickerController`/`DKPhotoGallery`/`SDWebImage`/`SwiftyGif` pod chain** (12.x moves Apple platforms into the federated `file_picker_darwin`), which closes the `NSPhotoLibraryUsageDescription` release-review item; **minimum iOS deployment target 13.0 → 14.0** (same device set — iPhone 6s and later). `DocumentPort` migrated to `pickFile()` + `PlatformFile.readAsBytes()` + `saveFile() → Uri?`; behaviour unchanged, and the size ceiling now rejects an oversized file before it is read into memory. The iOS `saveFile` leftover moved upstream to `NSTemporaryDirectory()` (out of the iCloud backup) — the shredder is kept as defence in depth. **Server schema unchanged.** · **host 996/996** |
 | Flutter — Phase 5 Patch 3 (tags, pasted links, QR from image) — **Phase 5 DONE** | ✅ (2026-09-02) **Tags:** `OtpAccount.tags` (≤8 labels, ≤32 runes) inside the encrypted blob — **no record-version bump, no AAD change, no backup-envelope change**, and the key is omitted when empty so an untagged vault serializes byte-identically to before (no re-encrypt/re-push wave on upgrade). Aegis `db.groups` + the legacy singular `group`, and 2FAS `groups`/`groupId`, are mapped onto tags on import; tags are deliberately NOT part of `dedupeKey`. Vault-wide rename/delete with one persist + one push each, session-scoped single-selection filter strip, metadata-only edit sheet (the cubit does not even accept a secret). **Behaviour change:** a long press no longer deletes outright — it opens an action sheet, and every delete path is confirmed. **Pasted migration link** in the add sheet (the clipboard is never read programmatically) and **"Görüntüden oku"** in `ScanPage` (`analyzeImage`, no camera and no camera permission; the picker's plaintext copy is zero-filled and unlinked *before* the general cache sweep, and the user's original image is never touched). **Server schema unchanged.** · **host 1165/1165** |
-| Admin panel (Next.js) | ⏳ Phase 6 |
+| Admin panel — Phase 6 MVP (Next.js) | ✅ (2026-09-02) Standalone npm package under `admin/` (own lockfile, own CI workflow, **not** in the Flutter pipeline). Next.js 16.3.4 App Router + `@supabase/ssr` + shadcn/ui; auth in `src/proxy.ts` (Next 16 renamed `middleware` → `proxy`) **plus** a `requireAdmin()` re-check inside every privileged handler (JWKS-verified `app_metadata.admin === true`). Pages: `/login`, `/` (global counts + last-10 audit tail), `/users` (list/ban/unban/delete, page-local search), `/announcements`, `/catalog`, `/flags`, `/audit`, `/forbidden`. **Three access paths, never mixed:** (a) direct Postgres → `private.admin_global_stats()` as `admin_backend`, (b) secret key → `auth.admin` + all writes, (c) the admin's own session → reads under RLS. **The panel decrypts nothing**: `tokens.ciphertext`/`key_attributes` are read on no path; the only cross-user read is a count. Every privileged operation writes one `audit_logs` row, and a failed audit write is reported as such rather than as a failed operation. **Review follow-ups landed the same day (no P1):** a zero-row UPDATE/DELETE is now an error instead of a success + a false audit row (`.select('<pk>')` before revalidate/audit); `requireAdmin()` adds a fail-closed `admin_users` freshness lookup so demotion is immediate rather than waiting out the token TTL; the Postgres connection uses verified TLS (`rejectUnauthorized: true` + optional `SUPABASE_CA_CERT`) instead of `ssl: 'require'`, which does not verify; the flag payload editor warns and blocks Save rather than erasing a non-object payload; plus a `(dashboard)` error boundary, a `server-only` env split, prototype-key rejection in flag payloads, `/audit` next-page/clamp fixes and `.env.example` placeholders. **Operator prerequisites still open:** `supabase/migrations/20260902120000_admin_backend_role.sql` is committed but **NOT applied**, and `SUPABASE_CA_CERT` must be set — until then the dashboard's stats cards show an error card. **No Dart/crypto/schema change.** · **admin 231/231**, Flutter host 1188/1188 unchanged |
 
 **Live backend project:** `authenticator-dev` (Supabase, eu-central-1, PG17). Details: [PROJECT_INFO.md](supabase/PROJECT_INFO.md).
 
@@ -92,7 +93,7 @@ image file** (Patch 3). Reading from an image is not available on the iOS Simula
    - **Phase 3.5 — CI, deps, hardening (2026-09-01) — DONE:** GitHub Actions (`analyze --fatal-infos` + `test`), unused-dependency cleanup, ref-counted screen-capture protection, Supabase config fail-fast
 4. **Social sign-in + push** — Google/Apple Sign-In, FCM *(developer accounts required)*
 5. **Import/Export + catalog** — **DONE 2026-09-02:** Patch 1 (Aegis + 2FAS import, encrypted backup export) ✅ + Patch 2 (Google Authenticator transfer QR) ✅ + Patch 3 (tags — including Aegis/2FAS groups, migration import from a pasted link and from a saved QR image) ✅; the `catalog_services` issuer matching landed back in Phase 3 Patch 4 ✅
-6. **Admin panel** — Next.js, analytics, announcements/push, feature flags
+6. **Admin panel** — **MVP DONE 2026-09-02:** Next.js 16 panel under `admin/` — global counts, user ban/unban/delete, announcements/catalog/feature-flag CRUD, audit log viewer, every privileged operation audited. FCM push triggering stays in Phase 4 (needs the Firebase project + device push tokens); the `admin_backend`/`admin_app` DB role migration is committed but not yet applied to the live project
 7. **Hardening & release** — security review, store
 
 Detailed task list: [PLAN.md](PLAN.md).
@@ -102,16 +103,22 @@ Detailed task list: [PLAN.md](PLAN.md).
 ## Development
 
 ### Backend (Supabase)
-Migrations live under `supabase/migrations/` (3 files, ordered by timestamp — see
+Migrations live under `supabase/migrations/` (4 files, ordered by timestamp — see
 [supabase/migrations/README.md](supabase/migrations/README.md)).
 
-> ⚠️ **These migrations have ALREADY been applied to the existing live project (`authenticator-dev`).**
-> Do not run `db push` again — you will get a "relation already exists" error.
+> ⚠️ **The first three migrations have ALREADY been applied to the existing live project
+> (`authenticator-dev`).** Do not push them again — you will get a "relation already exists" error.
+>
+> ⏳ **The fourth, `20260902120000_admin_backend_role.sql` (Phase 6 — `admin_backend` DB role), has NOT been
+> applied yet.** Apply it, then create the login role by hand
+> (`create role admin_app login password '…'; grant admin_backend to admin_app;`) — see
+> [PROJECT_INFO.md](supabase/PROJECT_INFO.md) → Deployment Checklist and
+> [admin/README.md](admin/README.md) §1.
 
 To apply to a **new/clean project**:
 ```bash
 supabase link --project-ref <NEW_REF>
-supabase db push          # applies the three migrations in order
+supabase db push          # applies all four migrations in order
 # or run the migration files one by one in the Supabase SQL editor / via MCP
 ```
 To run the security tests: [supabase/tests/security_rls_tests.sql](supabase/tests/security_rls_tests.sql).
@@ -191,6 +198,38 @@ test/
 > **OTP core details:** [docs/OTP_ENGINE.md](docs/OTP_ENGINE.md).
 >
 > 🔐 **Crypto package decision (implemented in Phase 2):** `sodium: ^3.4.6` + `sodium_libs: ^3.4.6+4`. `sodium 4.x` requires Dart SDK `^3.11.0`; the project is on Dart `3.10.7` (Flutter 3.38.6 stable) → **4.x cannot be resolved**, so 3.x is a deliberate and correct decision. `sodium_libs` is tagged "discontinued" on pub but it installs pre-built libsodium binaries and does NOT REQUIRE the native-assets/experiment flag; the 3.x line works. Later, once Flutter moves to Dart 3.11+, migrating to 4.x native assets will be a separate small migration. The XChaCha20-Poly1305 IETF + Argon2id algorithm decision does not change. Details: [docs/CRYPTO.md](docs/CRYPTO.md).
+
+
+### Admin panel (Next.js)
+The panel lives in `admin/` and is a **separate npm package**: its own `package-lock.json`, its own CI workflow
+(`.github/workflows/admin-ci.yml`, paths-filtered to `admin/**`), and no involvement in `flutter analyze` /
+`flutter test`. Node 22+ (`engines.node: >=22`).
+
+```bash
+cd admin
+cp .env.example .env.local   # .env.local is git-ignored — fill in the four values below
+npm ci
+npm run dev                  # http://localhost:3000
+
+npm run lint                 # ESLint (flat config, eslint-config-next)
+npm run typecheck            # tsc --noEmit
+npm run test                 # vitest — 231/231
+npm run build                # next build — needs NO real secrets (env validation is request-time)
+```
+
+**Environment** (`admin/.env.local`): `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+(public by definition, though today read only on the server — the panel has no browser Supabase client), plus
+the **server-only** `SUPABASE_SECRET_KEY` (`sb_secret_…`), `DATABASE_URL` (the `admin_app` login role) and
+`SUPABASE_CA_CERT` (the Postgres CA, PEM). The schema rejects legacy `eyJ…` JWT anon/service_role keys
+outright. Full table, the operator SQL for the DB role, the three access paths and the module contract:
+[admin/README.md](admin/README.md).
+
+> ⏳ **Before the dashboard shows numbers:** apply `supabase/migrations/20260902120000_admin_backend_role.sql`,
+> create the `admin_app` login role (the migration carries no password on purpose) and set `SUPABASE_CA_CERT`
+> — the connection verifies the server certificate, and the Supavisor pooler chain is rooted at Supabase's own
+> private CA (Dashboard → Database → SSL Configuration). Until all three are done the stats cards render an
+> error card and every other page works normally. You also need at least one row in `public.admin_users`, or
+> nobody can get past `/login`.
 
 ---
 

@@ -2,6 +2,284 @@
 
 Project progress log. Newest at the top.
 
+## 2026-09-02 (Phase 6 — admin panel MVP)
+
+The first working version of the **Next.js admin panel**, landed as a **standalone npm package** under `admin/`:
+its own `package-lock.json`, its own CI workflow, and deliberately **no** place in the Flutter `analyze`/`test`
+pipeline — a Dart change must not be able to break the panel's build and vice versa. Stack: Next.js **16.3.4**
+(App Router) + React 19.2.8, `@supabase/ssr` 0.12.5, `@supabase/supabase-js` 2.114.0, the porsager `postgres`
+3.4.9 driver, Tailwind 4 + shadcn/ui primitives, zod 4, vitest 4. Every dependency is **pinned to an exact
+version** (no `^`/`~`). Full module contract: [admin/README.md](admin/README.md).
+
+**Why now:** the tables the panel administers (`announcements`, `catalog_services`, `feature_flags`,
+`audit_logs`, `admin_users`) and the admin claim hook have existed since Phase 3, and Phase 5 closed the
+client-side work. Until this entry they could only be operated from the Dashboard SQL editor — i.e. every
+announcement, catalog row and kill-switch flip was an unaudited hand-written statement by whoever held the
+`postgres` password.
+
+**The E2E boundary is what shapes the panel, not a footnote to it.** The panel cannot decrypt a single TOTP
+secret, and it does not read `tokens.ciphertext` or `key_attributes` on **any** path — not even to count
+columns. The only cross-user read in the product is an aggregate.
+
+### The three access paths and which module implements each (ARCHITECTURE §6)
+
+They are never mixed; each one exists because the other two cannot do its job.
+
+| Path | Identity | What it is for | Module |
+|---|---|---|---|
+| **(a)** direct Postgres | `DATABASE_URL` → login role `admin_app`, then `set local role admin_backend` | `select private.admin_global_stats()` — the cross-user **counts** on the dashboard | `admin/src/lib/db.ts` (`getGlobalStats`), wrapped by `src/lib/stats.ts` |
+| **(b)** secret key (`sb_secret_…`) | REST/Auth API identity, RLS bypass | `auth.admin.listUsers`/`updateUserById`/`deleteUser`, all writes to `announcements`/`catalog_services`/`feature_flags`, and every `audit_logs` insert | `admin/src/lib/supabase/admin.ts` (`createAdminClient`), `src/lib/audit.ts` (`writeAudit`), the four `actions.ts` files, `users/data.ts` |
+| **(c)** the admin's own session | publishable key + `@supabase/ssr` cookies | login/logout, reading the admin-public tables, reading `audit_logs` under the RLS policy `to authenticated using (public.is_admin())` | `admin/src/lib/supabase/server.ts`, `src/lib/supabase/browser.ts`, `src/proxy.ts` |
+
+Path (a) is not a preference: the `private` schema is **not** exposed to the Data API, so
+`private.admin_global_stats()` cannot be reached through `.rpc()` at all. Path (c) is used for *reading*
+`audit_logs` on purpose — the read needs no RLS bypass, so the secret key stays reserved for writes.
+
+**`src/proxy.ts`, not `middleware.ts`.** Next.js 16 renamed the file convention (`middleware` is deprecated as
+of v16.0.0); the exported function must be named `proxy`, and it runs on the Node.js runtime by default.
+
+### Pages
+
+- **`/login`** — email + password, then an immediate claim check: a valid session that is not an admin is
+  **signed out on the spot** and told "Bu hesap yönetici değil". The credential error is generic
+  ("E-posta veya parola hatalı") so the form never reveals whether an address exists.
+- **`/`** — global stats cards from path (a) plus the **last 10** audit rows read over path (c). A failure of
+  (a) is turned into an error card rather than an exception, so a missing `DATABASE_URL` or an ungranted role
+  cannot take the authenticated shell down with it.
+- **`/users`** — `auth.admin.listUsers` at 50 rows/page, ban (`ban_duration: '876600h'`), unban
+  (`ban_duration: 'none'`) and delete. `banned_until` is read as a **timestamp, not a flag** (a past instant is
+  not a ban). The delete dialog states the FK cascade — deleting the auth user removes their `tokens`,
+  `key_attributes` and `devices` rows, which for an E2E product means the data is gone, full stop, because no
+  one else ever held the key.
+- **`/announcements`** — CRUD over `audience ∈ {all, flutter, android, ios}`. The enum is not decoration: the
+  Flutter client filters `audience` **client-side** and silently drops anything else, so a typo'd audience
+  would produce an announcement nobody ever sees. Title ≤ 120, body ≤ 4000 characters.
+- **`/catalog`** — issuer-canonicalization CRUD. `logo_url` is validated as an **absolute `https://` URL**
+  even though the app deliberately never fetches it (offline/privacy decision from Phase 3 Patch 4): the
+  column is publicly readable, so a `http://`, `javascript:` or `data:` value would be a stored payload the
+  day any future client starts rendering it.
+- **`/flags`** — create/enable/disable/payload/delete. `token_sync_enabled` is **delete-proof** (a missing row
+  makes clients assume sync is *on*, so deleting it is the opposite of disabling it) and disabling it requires
+  a confirmation carrying the warning that it stops token sync on every client. `payload` must be a JSON
+  **object** or null (the client drops arrays and scalars) and is capped at **8 KiB**, checked *before*
+  `JSON.parse`.
+- **`/audit`** — read-only, 50 rows/page, newest first with `id` as tiebreaker so a row cannot vanish between
+  pages. The action filter is **whitelisted against the `AUDIT_ACTIONS` union** rather than passed through, and
+  the `?q=` needle is LIKE-escaped (`%`/`_` backslash-escaped; `*` dropped, because PostgREST rewrites it to
+  `%` before PostgreSQL sees the pattern and escaping therefore cannot neutralise it).
+- **`/forbidden`** — signed in, not an admin; offers sign-out and nothing else.
+
+### Security invariants (admin/README.md §6 is the authoritative list)
+
+1. **`SUPABASE_SECRET_KEY` and `DATABASE_URL` are server-only.** Every module that reads them starts with
+   `import 'server-only'` (`lib/supabase/admin.ts`, `lib/db.ts`, `lib/audit.ts`) and `getServerEnv()` adds a
+   `typeof window` guard. Neither value is ever given a `NEXT_PUBLIC_` prefix.
+2. **`tokens` / `key_attributes` are read on no path.** The single cross-user read is
+   `private.admin_global_stats()`, which returns counts.
+3. **The panel never connects to Postgres as `postgres`.** It connects as `admin_app` and does
+   `set local role admin_backend` **inside a transaction** — `SET LOCAL` is transaction-scoped, so it is
+   correct under Supavisor transaction-mode pooling as well as session mode. Prepared statements are disabled
+   (`prepare: false`) for the same reason.
+4. **Authorization is two-layered.** `src/proxy.ts` is the first line only; every privileged handler calls
+   `requireAdmin()` again, because a Server Action is a POST to the page route and a matcher edit could
+   silently narrow proxy coverage. `requireAdmin()` uses `auth.getClaims()` (JWKS **signature verification**,
+   local for asymmetric keys) and demands a literal boolean `app_metadata.admin === true` — never `'true'`,
+   never truthiness. `getSession()` is not trusted (cookies are shared storage).
+5. **Every privileged operation writes exactly one `audit_logs` row**, in the same handler that performed it,
+   with the `actor` taken from `requireAdmin()` and **never** from the request body.
+6. **A failed audit write is reported as a failed audit write, not as a failed operation.** The operation has
+   already happened at that point; conflating the two would either hide a real mutation behind an error or
+   claim a clean success while the log has a hole in it. The user sees "…yapıldı. Ancak denetim kaydı
+   yazılamadı: …".
+7. **Guards on `/users` are server-side and fail closed:** you cannot act on your own account, and you cannot
+   ban/delete another admin (removing admin rights stays a deliberate SQL step against `public.admin_users`).
+   The admin-id set comes from `public.admin_users` over the secret-key client and an **unreadable** admin list
+   **throws** rather than defaulting to empty — the alternative would silently permit banning an admin.
+8. **Env validation is lazy and rejects legacy keys.** `sb_publishable_…` / `sb_secret_…` prefixes are
+   required, so an old `eyJ…` JWT anon/service_role key is refused; validation runs at request time, which is
+   what lets `next build` (and the CI build step) succeed with no secrets at all.
+
+### Operator prerequisites — required before the dashboard shows numbers
+
+The migration `supabase/migrations/20260902120000_admin_backend_role.sql` **is in the repo but has NOT been
+applied to the live project** (`authenticator-dev`). It creates only the NOLOGIN privilege carrier
+`admin_backend` and grants it `usage` on `private` + `execute` on `private.admin_global_stats()`, and it
+re-revokes both from `public`/`anon`/`authenticated`. It contains **no password**.
+
+1. Apply it: `supabase db push` (or paste the file into Dashboard → SQL Editor).
+2. Create the login role by hand — the password is never written into a migration, a transcript or this repo:
+   ```sql
+   create role admin_app login password '<güçlü-parola>';
+   grant admin_backend to admin_app;
+   ```
+3. Put that role into `admin/.env.local` as `DATABASE_URL`, alongside `NEXT_PUBLIC_SUPABASE_URL`,
+   `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` and `SUPABASE_SECRET_KEY`.
+4. Make sure at least one real admin exists: `insert into public.admin_users (user_id) values ('<uuid>');`
+   Without it nobody can get past `/login`.
+
+**Verified live (2026-09-02, before the migration):** `service_role` holds full grants on `admin_users`,
+`audit_logs`, `announcements`, `catalog_services` and `feature_flags` — so path (b) works today. `execute` on
+`private.admin_global_stats()` is currently held by `postgres` **only**, which is exactly why the dashboard's
+stats cards render an error card until step 1+2 are done.
+
+### Documentation findings (W1) — recorded in full in admin/README.md §5
+
+Library APIs were verified against current documentation **and the installed package source**, not from
+memory:
+
+- **Next.js 16 proxy** — the `middleware` file convention is deprecated and renamed `proxy` (v16.0.0); the file
+  lives at the project root or in `src/`, the export is named `proxy`, and it runs on the Node.js runtime by
+  default. `next build` prints it as `ƒ Proxy (Middleware)`.
+- **`@supabase/ssr` cookie contract** — `getAll`/`setAll(cookiesToSet, headers)`; the second `setAll` parameter
+  (the `Cache-Control: private, no-cache, no-store…` headers, so a CDN can never cache a response that sets
+  auth cookies) was confirmed in the installed package's `types.d.ts` (`SetAllCookies`).
+- **`getClaims()` over `getUser()`** — `getClaims()` verifies the token against the project's JWKS, needs no
+  network round trip with asymmetric signing keys, and refreshes an about-to-expire session, so it doubles as
+  the proxy's session refresh.
+- **New API keys are not JWTs** — they travel in the `apikey` header, never `Authorization: Bearer`. The
+  installed `supabase-js` 2.114.0 already handles this (`isNewApiKey()` recognises the prefixes and always sets
+  `apikey`), so `createAdminClient()` hands the key straight to `createClient()` with no manual headers.
+- **Pooler mode vs `SET LOCAL ROLE`** — Supavisor transaction mode (6543) does not support prepared statements
+  and resets session state between transactions, so `SET ROLE` without `LOCAL` would be unreliable there;
+  `set local role` inside an explicit transaction plus `prepare: false` is correct on **both** ports.
+
+### CI and tests
+
+`.github/workflows/admin-ci.yml` (new): paths-filtered to `admin/**` + the workflow file itself, so it stays
+off Dart-only changes and `ci.yml` stays off admin-only ones. `permissions: contents: read`, a concurrency
+group namespaced by workflow (it can never cancel the Flutter run for the same ref), Node 22 matching
+`engines.node`, actions SHA-pinned (`setup-node` v7.0.0). Steps: `npm ci` → lint → typecheck → test → build.
+**No Supabase secrets are supplied on purpose** — a build that starts requiring real credentials fails the
+step.
+
+- **admin: 231 vitest tests** across 13 files, all pure/unit (153/10 at the first merge; the review follow-ups
+  below added `requireAdmin()` coverage and action-level suites for announcements/catalog/flags): env schemas,
+  `isAdminClaims` and `requireAdmin`, the users guard and row mapping, every server action's ordering and its
+  zero-row handling, announcements/catalog/flags schemas and row mappers, the audit query parser (page
+  clamping, action whitelist, LIKE escaping, `range()` bounds, next-page derivation), `parseGlobalStats`, the
+  TLS options builder, and the nav component.
+- **Flutter: 1188 host tests, unchanged** — this phase touches no Dart file, no crypto routine, no server
+  schema and no sync protocol.
+
+### Known limitations (deliberate, and to be closed later)
+
+- **User search is page-local.** `auth.admin.listUsers` takes only `page`/`perPage` — there is no server-side
+  email filter — so the search box narrows the 50 rows currently on screen, and the UI says so rather than
+  pretending otherwise.
+- **No pagination on `/announcements`, `/catalog`, `/flags`.** All three fetch the whole table. That is fine at
+  the current row counts (all three are effectively empty) and will need `.range()` before they are not.
+- **The dashboard shows an error card until `DATABASE_URL` + `admin_app` exist** (see the operator steps).
+  Everything else on the panel works without them.
+- **No FCM push.** Announcement CRUD is here; triggering a push from an announcement stays in **Phase 4**,
+  where the Firebase project and the device push-token registration live.
+- **No Playwright/e2e suite.** The pure logic is unit-tested and the flows are covered by the manual smoke
+  checklist in admin/README.md §7; there is no browser-driven regression test yet.
+- The users table case-folds **invariantly** (`toLowerCase`, not Turkish): `'ALI'.toLocaleLowerCase('tr-TR')`
+  is `'alı'`, which would never match the ASCII address `ali@…`.
+
+### Deliberately NOT built
+
+- **No growth charts / date histograms** (ARCHITECTURE §6 lists them as a capability). `admin_global_stats()`
+  returns three totals plus `generated_at`; a histogram means a new `security definer` function and a new
+  migration, so it is not smuggled in with the MVP.
+- **No admin management UI.** Granting or revoking admin is a SQL insert/delete on `public.admin_users`, on
+  purpose: a panel that can promote its own users is a privilege-escalation surface, and the ban/delete guard
+  is built on that table.
+- **No Edge Function.** Every privileged operation is a Next.js Server Action; adding a second server-side
+  execution environment would have doubled the places the secret key lives.
+- **No user-detail page.** There is nothing to show that the list does not already show — the panel cannot read
+  a user's tokens, so a detail view would be an empty page with a heading.
+- **No TanStack Table / recharts** (both named in ARCHITECTURE §6): with page-local search, no sorting and no
+  charts in this MVP, both would have been dependencies carrying no weight.
+- **No `pg` driver or Prisma** — one query, over one connection, once per dashboard render; the porsager
+  `postgres` driver (already the ARCHITECTURE §6 preference) covers it with a memoised 2-connection pool.
+
+### Review follow-ups (same day)
+
+A security/correctness review of the panel found **no P1** — no path reaches a privileged operation without a
+JWKS-verified `app_metadata.admin === true`, and neither `SUPABASE_SECRET_KEY` nor `DATABASE_URL` appears
+anywhere in `.next` under a canary build. The four P2s and the P3 hardening items below were fixed the same
+day, before the branch merged. **No Dart, no crypto, no schema, no sync-protocol change.**
+
+**P2-1 — a zero-row UPDATE/DELETE was reported as a success *and* wrote a false audit row.** PostgREST answers
+a `PATCH`/`DELETE` that matched no rows with `204 No Content` and **no error**, which postgrest-js hands back
+as `{ data: null, error: null }`. Seven call sites (announcements update/delete, catalog update/delete, flag
+toggle/payload/delete) took that as success, revalidated, and wrote `announcement.delete` / `catalog.update` /
+`flag.update` rows for operations that never happened. Two admins on one page produced a duplicate delete
+entry; and because a server action is a POST with an arbitrary body, any admin could mint `flag.update`
+entries for keys that do not exist. All seven now append `.select('<pk>')` and turn an empty result into a
+"bulunamadı" error **before** `revalidatePath` and **before** `writeAudit`. For a log whose whole job is
+after-the-fact attribution, fictional entries are worse than missing ones.
+
+**P2-2 — admin revocation did not take effect until the token rotated.** `app_metadata.admin` is stamped into
+the access token at issue time by `public.custom_access_token_hook`, so deleting the `public.admin_users` row
+left a demoted admin with **full** panel powers — including the cascading `auth.admin.deleteUser` — for the
+remaining token lifetime (Supabase default: 1 hour). `requireAdmin()` now adds a fail-closed freshness check:
+after the claim passes (kept first, as the cheap reject), one indexed PK lookup on `admin_users` over the
+secret-key client, with a missing row **or a read error** producing `ForbiddenError`. The cost is one extra
+indexed lookup per dashboard request — the layout, every page and every action call `requireAdmin()` — and
+that trade is stated in admin/README.md §6.12. A demotion runbook (delete the row, then end the user's
+sessions through the Admin API `…/logout`, plus the JWT-expiry note) is now admin/README.md §9.
+
+**P2-3 — `ssl: 'require'` disabled certificate verification.** In the installed `postgres@3.4.9`
+(`src/connection.js:283`) the strings `'require' | 'allow' | 'prefer'` **all** set
+`options.rejectUnauthorized = false`: encrypted, but unauthenticated — libpq `sslmode=require` semantics.
+Anyone able to intercept the path to `*.pooler.supabase.com` could terminate the session and capture the
+`admin_app` login password. It is now `{ rejectUnauthorized: true, ...(ca ? { ca } : {}) }`, with `ca` from a
+new optional server env `SUPABASE_CA_CERT` (literal `\n` sequences normalised to real newlines).
+**Verified, because the docs do not say:** an `openssl s_client -starttls postgres` handshake against the
+pooler on 2026-09-02 returns `*.pooler.supabase.com` ← `Supabase Intermediate 2021 CA` ←
+`Supabase Root 2021 CA`, self-signed, `verify error:num=19`. That root is Supabase's **private** CA and is in
+no public trust store, so `SUPABASE_CA_CERT` is optional in the schema (the panel must still build and boot
+without access path (a)) but **required in practice** — download it from Dashboard → Database → SSL
+Configuration. Full finding, chain dump and doc URLs: admin/README.md §5 note 5.
+
+**P2-4 — the payload editor silently destroyed a non-object `feature_flags.payload`.** `mapFlagRow` coerces an
+array or a scalar to `null` (correct — it mirrors the Flutter client), but that coerced `null` was also what
+the dialog *edited*: an untouched empty textarea wrote `payload: null` back, erasing the stored value with a
+success toast and an audit row. `FeatureFlag` now carries `payloadUnusable`, the row shows a "JSON nesnesi
+değil" badge, and the dialog shows a warning and keeps **Save disabled until the admin edits the field**.
+
+**P3s fixed in the same pass:**
+
+- **P3-1 — server actions were untested.** Deleting `const admin = await requireAdmin()` from
+  `deleteAnnouncementAction` used to leave the whole suite green. There are now table-driven tests over
+  **every** exported action in announcements/catalog/flags/users asserting `requireAdmin` is called and that a
+  rejected `requireAdmin` reaches no Supabase call, no audit write and no revalidate — plus direct coverage of
+  `requireAdmin()` itself (row present → identity, row missing → forbidden, read error → forbidden, no session
+  → `/login`, claims without `sub` → forbidden).
+- **P3-2 — no error boundary for `ForbiddenError`.** `src/app/(dashboard)/error.tsx` (new) recognises it by
+  `name` **or** `digest` and links to `/forbidden`; anything else gets a generic message. The digest is the
+  load-bearing half: production strips an error's message and stack but preserves a digest the error already
+  carried (`next/dist/server/app-render/create-error-handler.js:79-91`), so `ForbiddenError` now stamps a
+  stable `ADMIN_FORBIDDEN`. Nothing from the error object is rendered.
+- **P3-3 — `src/lib/supabase/browser.ts` was dead code**, imported by nothing, and the README documented it as
+  part of access path (c). Deleted; the README now says path (c) is server-side only and explains why the
+  `NEXT_PUBLIC_` prefix is kept on values that are, today, read only on the server.
+- **P3-4 — `getServerEnv`/`serverEnvSchema` moved to `src/lib/env.server.ts` with `import 'server-only'`**, so
+  the marker enforces the boundary instead of a runtime `typeof window` guard, and `supabase/admin.ts` now
+  takes the project URL from `getPublicEnv()` rather than raw `process.env` (a malformed URL fails at the zod
+  boundary, not deep inside the SDK).
+- **P3-5 — `parseFlagPayload` rejects `__proto__` / `constructor` / `prototype` at any depth.** `JSON.parse`
+  makes `__proto__` an *own* enumerable key and `JSON.stringify` round-trips it, so it would land verbatim in
+  an anon-readable column. Hardening, not a live exploit.
+- **P3-6 — `/audit` pagination.** When PostgREST omits the total from `content-range`, `hasNext` is now derived
+  from `rows.length === AUDIT_PAGE_SIZE` (`auditHasNextPage`) instead of collapsing to a single page, and
+  `parseAuditPage` is clamped to `AUDIT_MAX_PAGE = 10_000` so `?page=1e21` cannot become `offset=5e22` and a
+  5xx.
+- **P3-9 / P3-10 — deployment and example env.** `admin/next.config.ts` documents the Server Action origin
+  check and its escape hatch, `experimental.serverActions.allowedOrigins`, whose key name was read from the
+  installed Next 16.3.4 `config-shared.d.ts`; admin/README.md §8 carries it. `.env.example` no longer embeds
+  the live project ref or the pooler host — both are `<PROJECT_REF>` / `<REGION>` placeholders now.
+- **P3-7, P3-8, P3-11 — recorded, not changed.** The `/audit` index + `count: 'exact'` cost at scale, CI's
+  missing dependency-audit step and its `paths:` filter (which stops `admin-ci.yml` from being a *required*
+  check without a companion always-run job), and `escapeLikePattern` dropping `*` rather than escaping it are
+  now a "Bilinen sınırlar" list in admin/README.md §10.
+
+Test count: **admin 231/231 across 13 files** (was 153/10), all still pure — no network, no real Supabase
+client. Flutter host suite untouched.
+
+
 ## 2026-09-02 (chore: repo-wide `dart format` + CI format gate + repository/DI tests)
 
 Phase 0's last open infrastructure item, and the one Phase 3.5 left as known debt: the tree was never
