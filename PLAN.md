@@ -132,18 +132,65 @@
   `DKPhotoGallery` / `SDWebImage` / `SwiftyGif` from `ios/Podfile.lock`; costs iOS deployment target 13.0 → 14.0
   (same device set).
 
-## Phase 6 — Admin panel (Next.js) (can start in parallel, once the tables are ready in Phase 3)
-- [ ] Next.js + Supabase SDK + shadcn/ui + admin claim middleware (`app_metadata.admin`).
-- [ ] **Reading:**
-  - Admin-public tables (`announcements`, `catalog_services`, `feature_flags`) → normal `authenticated` client.
-  - **Two access paths (do not mix):** (a) cross-user **reading** → a `security definer` aggregate function in a private schema via a server-side **direct Postgres connection** (`DATABASE_URL`/pooler + DB role) (returns counts/metadata, not raw rows). (b) `auth.admin`/REST operations → **secret key** (REST API identity, not a DB connection). The secret key does not call the DB function directly.
-  - **Cross-user reading** cannot be done from the client because of RLS `user_id=auth.uid()`, and since the private schema is not exposed to the Data API it cannot be called via `supabase-js .rpc()` either → path (a). Guardrails: private schema + `set search_path=''` + `revoke execute from public/anon/authenticated` + `grant execute` only to the backend DB role. See ARCHITECTURE §6.
-- [ ] **Writes/privileged operations server-side via route handler / Edge Function + secret key** (the secret key is not embedded in the browser):
-  - User suspension/deletion (`auth.admin` API).
-  - `audit_logs` insert; every privileged operation is logged.
-  - Announcement CRUD + FCM push triggering.
-- [ ] **Key terminology:** in a new project, client → publishable key, backend → secret key (legacy `anon`/`service_role` are being deprecated by the end of 2026 — use the new ones from the start). The new secret key in Edge Functions/HTTP uses the **`apikey` header**, NOT `Bearer` (otherwise `Invalid JWT` 401); set `verify_jwt=false` on the relevant function. See ARCHITECTURE §6.
-- [ ] Service catalog CRUD; `feature_flags` management; audit log viewing.
+## Phase 6 — Admin panel (Next.js) (can start in parallel, once the tables are ready in Phase 3) — MVP DONE (2026-09-02)
+> Standalone npm package under `admin/`: own lockfile, own CI workflow (`.github/workflows/admin-ci.yml`), **not**
+> part of the Flutter `analyze`/`test` pipeline. **NO Dart change, NO crypto change, NO server schema change** —
+> the one SQL file added (`20260902120000_admin_backend_role.sql`) only creates a DB role and its grants.
+> admin **153/153** (vitest), Flutter host **1188/1188** unchanged. Details:
+> [CHANGELOG 2026-09-02](CHANGELOG.md) and [admin/README.md](admin/README.md).
+- [x] **Next.js + Supabase SDK + shadcn/ui + admin claim middleware (`app_metadata.admin`)** ✅ (2026-09-02) —
+  Next.js 16.3.4 App Router, `@supabase/ssr` 0.12.5, supabase-js 2.114.0, Tailwind 4 + shadcn/ui, zod 4, exact
+  version pins. The claim check lives in **`src/proxy.ts`** — Next.js 16 renamed the `middleware` file convention
+  to `proxy` — and is a **first line only**: every privileged handler re-checks with `requireAdmin()`, which
+  verifies the JWT against the project's JWKS via `auth.getClaims()` and demands a literal
+  `app_metadata.admin === true`.
+- [x] **Prerequisite — backend DB role** ✅ **in the repo, ⏳ NOT yet applied to the live project.**
+  `supabase/migrations/20260902120000_admin_backend_role.sql` creates the NOLOGIN privilege carrier
+  `admin_backend` with `usage` on `private` + `execute` on `private.admin_global_stats()` (Pattern B), and
+  re-revokes both from `public`/`anon`/`authenticated`. It contains **no password**: the operator applies it
+  (`supabase db push` or Dashboard SQL) and then creates the login role by hand —
+  `create role admin_app login password '…'; grant admin_backend to admin_app;` — which becomes `DATABASE_URL`.
+  Until that is done the dashboard's stats cards render an error card and everything else works.
+- [x] **Reading** ✅ (2026-09-02)
+  - Admin-public tables (`announcements`, `catalog_services`, `feature_flags`) and `audit_logs` are read with the
+    admin's **own session** (path (c)) — `audit_logs` under the RLS policy `to authenticated using (public.is_admin())`.
+    The secret key is deliberately not used for reads.
+  - **Two access paths, never mixed:** (a) cross-user aggregate read → `private.admin_global_stats()` over a
+    **direct Postgres connection** (`src/lib/db.ts`: `begin; set local role admin_backend; select …; commit`,
+    `prepare: false` so both pooler ports work). (b) `auth.admin`/REST operations → **secret key**
+    (`src/lib/supabase/admin.ts`). The `private` schema is not exposed to the Data API, so (a) cannot be an `.rpc()`.
+  - Guardrails as designed: private schema + `set search_path=''` + `revoke execute from public/anon/authenticated`
+    + `grant execute` only to `admin_backend`. See ARCHITECTURE §6.
+- [x] **Writes/privileged operations server-side + secret key** ✅ (2026-09-02) — implemented as Next.js **Server
+  Actions** (no Edge Function: one server-side execution environment, one place the secret key lives).
+  - [x] User suspension/deletion (`auth.admin.updateUserById` with `ban_duration` / `deleteUser`) — server-side
+    guards that fail closed: not yourself, not another admin, and an unreadable `admin_users` list **throws**
+    instead of defaulting to empty. The delete dialog states the FK cascade (tokens/key_attributes/devices go
+    with the account, unrecoverably — nobody else ever held the key).
+  - [x] `audit_logs` insert; **every** privileged operation writes exactly one row in the handler that performed
+    it, with `actor` from `requireAdmin()` and never from the request body. A failed audit write is reported as
+    a failed **audit write**, not as a failed operation.
+  - [x] Announcement CRUD (`audience ∈ {all, flutter, android, ios}` — the enum the Flutter client filters on;
+    anything else would be silently invisible on every device).
+  - [ ] **FCM push triggering — NOT done, moved to Phase 4 by dependency.** Sending a push needs the Firebase
+    project, the APNs certificate and the `devices` push-token registration, all of which are Phase 4 items
+    blocked on the developer accounts. The announcement rows the push would carry already exist.
+- [x] **Key terminology** ✅ — the panel accepts **only** the new keys: `src/lib/env.ts` requires the
+  `sb_publishable_…` / `sb_secret_…` prefixes and rejects a legacy `eyJ…` JWT anon/service_role key outright.
+  Validation is lazy (request-time), so `next build` and CI need no secrets. The `apikey`-not-`Bearer` rule is
+  handled inside supabase-js 2.114.0 (`isNewApiKey()`), so no header is set by hand; no Edge Function, so no
+  `verify_jwt=false` to set. See ARCHITECTURE §6.
+- [x] **Service catalog CRUD; `feature_flags` management; audit log viewing** ✅ (2026-09-02) — catalog with
+  `https://`-only `logo_url` validation (the column is publicly readable, so a `javascript:`/`data:` value would
+  be a stored payload for any future client that renders it); flags with a **delete-proof** `token_sync_enabled`
+  (a missing row makes clients assume sync is ON, so deleting it is the opposite of disabling it) plus a
+  confirmation on disable and an 8 KiB JSON-object payload cap; `/audit` read-only, 50/page, action whitelist
+  and a LIKE-escaped `?q=`.
+- [ ] **Open (deliberate MVP limits):** user search is page-local (`auth.admin.listUsers` has no server-side
+  email filter); `/announcements`, `/catalog`, `/flags` fetch the whole table with no pagination; no growth
+  charts (a histogram needs a new `security definer` function); no admin-management UI (granting admin stays a
+  SQL step on `public.admin_users`, on purpose); no Playwright/e2e suite — the flows are covered by the manual
+  smoke checklist in admin/README.md §7.
 
 ## Phase 7 — Hardening & release
 - [~] Security review (key lifecycle, memory wiping, screenshot blocking) — **screenshot blocking partially done 2026-09-01** (see [CHANGELOG](CHANGELOG.md)): ref-counted `SecureScreen` on **11** sensitive screens — vault, unlock, setup_password, recovery_show/verify/unlock, login, register (the last two added in the review follow-ups), scan (Phase 5 Patch 2) and import/export (Phase 5 Patch 1). `grep -rn "SecureScreenScope(" lib/` is the authoritative list. **Still open:** iOS has no FLAG_SECURE equivalent → screenshots/recording are NOT blocked there (only the recents/background snapshot is hidden). Key lifecycle + memory wiping review not yet done.
@@ -158,7 +205,7 @@
 ## Dependency timeline (critical path)
 ```
 Phase 0 → Phase 1 → Phase 2 → Phase 3 ─┬─► Phase 5 ─► Phase 7
-                                        └─► Phase 6 (admin, parallel)
+                                        └─► Phase 6 (admin, parallel) — MVP DONE 2026-09-02; FCM push waits on Phase 4
 Phase 4 (social+push) ── plugs in at any point once developer accounts are ready
 ```
 
@@ -166,7 +213,7 @@ Phase 4 (social+push) ── plugs in at any point once developer accounts are r
 - [x] **Open a Supabase project** ✅ — `authenticator-dev` created, migration applied, hook enabled.
 - [ ] Google Play + Apple Developer accounts (for Phase 4 and release — Phases 0–3 progress while waiting).
 - [ ] Firebase project (for Phase 4 push).
-- [ ] (Before Phase 6) Backend DB role + `private` schema grant (for the admin aggregate call).
+- [~] (Before Phase 6) Backend DB role + `private` schema grant (for the admin aggregate call) — **migration written and committed** (`supabase/migrations/20260902120000_admin_backend_role.sql`, 2026-09-02) but **NOT yet applied to `authenticator-dev`**. Operator: apply it, then `create role admin_app login password '…'; grant admin_backend to admin_app;` and set `DATABASE_URL`. Until then the admin dashboard's stats cards show an error card.
 
 ## Open design decisions (to be clarified later)
 - Conflict resolution starts with **arrival-order LWW** (the last to reach the server wins; see ARCHITECTURE §5); for heavy multi-device usage a move to CRDT/true-modified-time can be evaluated.

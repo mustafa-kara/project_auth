@@ -450,6 +450,26 @@ create policy "admin reads audit_logs" on public.audit_logs
   - Feature flags + audit log viewing.
 - **Important boundary:** because of E2E, the panel cannot decrypt/see any TOTP secret — only metadata and counts.
 
+### Implemented (2026-09-02) — Phase 6 MVP
+
+The design above is unchanged; this subsection only says **where each bullet lives** in the shipped code. The
+panel is a standalone npm package under `admin/` (Next.js 16.3.4 App Router). Details:
+[admin/README.md](admin/README.md), [CHANGELOG 2026-09-02](CHANGELOG.md).
+
+| Design bullet | File |
+|---|---|
+| **Path (a)** — direct Postgres connection, private aggregate function | `admin/src/lib/db.ts` — `getGlobalStats()` runs `begin; set local role admin_backend; select private.admin_global_stats(); commit` over the porsager `postgres` driver with `prepare: false` (Supavisor transaction mode supports neither prepared statements nor a session-scoped `SET ROLE`). Wrapped by `admin/src/lib/stats.ts`, which turns an operational failure into a dashboard error card |
+| **Path (b)** — secret key, `auth.admin` / REST | `admin/src/lib/supabase/admin.ts` — `createAdminClient()`, `import 'server-only'`. Used by `users/data.ts`, the four `actions.ts` files and `writeAudit` |
+| **Path (c)** — the admin's own session (publishable key + cookies) | `admin/src/lib/supabase/server.ts` (server components/actions), `admin/src/lib/supabase/browser.ts` (client), and `admin/src/proxy.ts` — **Next.js 16 renamed the `middleware` file convention to `proxy`**; it refreshes the session cookie and redirects unauthenticated → `/login`, non-admin → `/forbidden` |
+| **Admin claim check** | `admin/src/lib/auth.ts` — `requireAdmin()` reads `auth.getClaims()` (JWKS signature verification, no network round trip with asymmetric keys) and requires a literal `app_metadata.admin === true`; the pure predicate `isAdminClaims()` is shared with the proxy. The proxy is a first line only: a Server Action is a POST to the page route, so **every** privileged handler calls `requireAdmin()` itself |
+| **"every privileged operation is logged"** | `admin/src/lib/audit.ts` — `writeAudit({actor, action, target})` over path (b) (`audit_logs` has no INSERT policy). `actor` always comes from `requireAdmin()`, never from the request body; a failed audit write is surfaced as a failed **audit write**, not as a failed operation |
+| **DB role + grants for path (a)** | `supabase/migrations/20260902120000_admin_backend_role.sql` — `admin_backend` NOLOGIN privilege carrier (Pattern B): `usage` on `private` + `execute` on `private.admin_global_stats()`, re-revoked from `public`/`anon`/`authenticated`. **Committed but not yet applied**; the login role `admin_app` is created by the operator and never written into a migration |
+
+Deferred on purpose: **FCM push** from an announcement (Phase 4 — needs the Firebase project and the `devices`
+push tokens), **growth charts / date histograms** (would need a second `security definer` function), and an
+**admin-management UI** (granting admin stays a SQL step on `public.admin_users` — a panel that can promote its
+own users is a privilege-escalation surface, and the ban/delete guard reads that table).
+
 ---
 
 ## 7. Authentication Flow
