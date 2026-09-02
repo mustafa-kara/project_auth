@@ -1,9 +1,8 @@
 /// Google Authenticator migration batches and the collector that stitches a
 /// multi-QR export back together (plan §3).
 ///
-/// Filled by W1 ([GoogleMigrationCollector] logic); W2 drives it from the scan
-/// screen through `MigrationScanController`, so the shapes here are frozen for
-/// both workers.
+/// W2 drives [GoogleMigrationCollector] from the scan screen through
+/// `MigrationScanController`, so the shapes here are frozen for both workers.
 ///
 /// Pure Dart: no Flutter, no plugins — the whole merge rule set is unit
 /// testable on the host VM without a camera.
@@ -80,32 +79,98 @@ class GoogleMigrationCollector {
   /// Ceiling on accounts collected across all batches of one export.
   static const int maxAccounts = 1024;
 
+  /// Accepted batches keyed by `batchIndex`. A map rather than a fixed-length
+  /// list because `batchSize` is only known after the first accepted QR and the
+  /// user may scan the codes in any order.
+  final Map<int, MigrationBatch> _batches = <int, MigrationBatch>{};
+
+  /// Null until the first batch is accepted. Nullable rather than
+  /// sentinel-valued because 0 is a legitimate `batch_id`; emptiness is decided
+  /// by [_batches], never by comparing this against a magic number.
+  int? _batchId;
+
+  int _batchSize = 0;
+
   /// The pinned export id, or null while nothing has been collected. Nullable
   /// rather than sentinel-valued because 0 is a legitimate `batch_id`.
-  int? get batchId => throw UnimplementedError('W1 fills this');
+  int? get batchId => _batchId;
 
   /// The pinned `batch_size`, or 0 while nothing has been collected.
-  int get batchSize => throw UnimplementedError('W1 fills this');
+  int get batchSize => _batchSize;
 
   /// How many distinct batch indices have been collected.
-  int get scannedCount => throw UnimplementedError('W1 fills this');
+  int get scannedCount => _batches.length;
 
   /// Whether every index of the export has been scanned.
-  bool get isComplete => throw UnimplementedError('W1 fills this');
+  bool get isComplete => _batchSize > 0 && _batches.length >= _batchSize;
 
   /// Whether nothing has been collected yet.
-  bool get isEmpty => throw UnimplementedError('W1 fills this');
+  bool get isEmpty => _batches.isEmpty;
 
   /// Merges [batch]; see [MigrationAddOutcome] for every way this can decline.
-  MigrationAddOutcome add(MigrationBatch batch) =>
-      throw UnimplementedError('W1 fills this');
+  ///
+  /// Every check runs before a single field is written, so a declined batch
+  /// leaves the collector byte-for-byte as it was.
+  MigrationAddOutcome add(MigrationBatch batch) {
+    // 1. Self-consistency, judged without any reference to prior state: a QR
+    //    claiming index 3 of 2 is malformed no matter what came before.
+    if (batch.batchSize < 1 || batch.batchSize > maxBatchSize) {
+      return MigrationAddOutcome.invalidBatch;
+    }
+    if (batch.batchIndex < 0 || batch.batchIndex >= batch.batchSize) {
+      return MigrationAddOutcome.invalidBatch;
+    }
+
+    // 2. Agreement with the pinned export. Checked before the duplicate test so
+    //    a foreign QR that happens to reuse an index reads as "other export"
+    //    (which offers "start over") rather than "already scanned".
+    if (_batches.isNotEmpty &&
+        (batch.batchId != _batchId || batch.batchSize != _batchSize)) {
+      return MigrationAddOutcome.differentBatch;
+    }
+
+    if (_batches.containsKey(batch.batchIndex)) {
+      return MigrationAddOutcome.duplicateIndex;
+    }
+
+    var collected = 0;
+    for (final stored in _batches.values) {
+      collected += stored.accounts.length;
+    }
+    if (collected + batch.accounts.length > maxAccounts) {
+      return MigrationAddOutcome.full;
+    }
+
+    _batchId = batch.batchId;
+    _batchSize = batch.batchSize;
+    _batches[batch.batchIndex] = batch;
+    return MigrationAddOutcome.added;
+  }
 
   /// Flattens what has been collected into a [ParsedImport] with
   /// [ImportSource.googleAuth]: accounts and skipped entries concatenated in
   /// ascending `batchIndex` order, so the preview is stable across scan orders.
-  ParsedImport toParsedImport() => throw UnimplementedError('W1 fills this');
+  ParsedImport toParsedImport() {
+    final indices = _batches.keys.toList()..sort();
+    final accounts = <OtpAccount>[];
+    final skipped = <SkippedEntry>[];
+    for (final index in indices) {
+      final batch = _batches[index]!;
+      accounts.addAll(batch.accounts);
+      skipped.addAll(batch.skipped);
+    }
+    return ParsedImport(
+      source: ImportSource.googleAuth,
+      accounts: accounts,
+      skipped: skipped,
+    );
+  }
 
   /// Drops all collected state, including the pinned [batchId]/[batchSize].
   /// Called when the user starts over and from the scan screen's `dispose`.
-  void reset() => throw UnimplementedError('W1 fills this');
+  void reset() {
+    _batches.clear();
+    _batchId = null;
+    _batchSize = 0;
+  }
 }
