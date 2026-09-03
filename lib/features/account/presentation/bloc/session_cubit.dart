@@ -1,7 +1,16 @@
 /// Supabase oturum durum makinesi (Faz 3 Patch 1) — kimlik kapısı.
 ///
-/// **Vault'a dokunmaz** (ayrı kapı) — yalnız signOut'ta `onAuthSignedOut` callback'i
-/// ile VaultLockCubit'in volatile state'ini temizletir. İki parola birbirini türetmez.
+/// **Vault'a dokunmaz** (ayrı kapı) — yalnız kimlik kapısı KAPANIRKEN
+/// `onAuthSignedOut` callback'i ile VaultLockCubit'in volatile state'ini
+/// temizletir. İki parola birbirini türetmez.
+///
+/// **Invariant (güvenlik denetimi P1-1):** `signedIn` DIŞINA yapılan HER geçiş
+/// callback'i çağırır — yalnız butonla yapılan `signOut()` değil. `gotrue`
+/// stream'i refresh-token hatası, sunucu tarafı iptal, süre dolması ve başka bir
+/// cihazdan global çıkışta da `signedOut` üretir; bunlar çalınmış bir cihazın
+/// gerçekten izlediği yollardır. Callback çağrılmazsa masterKey bellekte canlı
+/// kalır ve aynı uid ile yeniden giriş, master parola SORULMADAN açık vault'a
+/// düşer (ARCHITECTURE §2.3: E2E kapısı kimlik kapısının ALTINDADIR).
 library;
 
 import 'dart:async';
@@ -34,7 +43,10 @@ class SessionCubit extends Cubit<SessionState> {
   final PendingConfirmationStore _pending;
   final LinkRequiredResolver? _linkRequiredResolver;
 
-  /// signOut'ta VaultLockCubit'i temizleten gevşek bağ (main.dart `_lock.onAuthSignedOut`).
+  /// Kimlik kapısı kapanınca VaultLockCubit'i temizleten gevşek bağ
+  /// (main.dart `_lock.onAuthSignedOut`). `signedIn` dışına giden HER yol çağırır
+  /// — bkz. sınıf doc'undaki P1-1 invariant'ı. Idempotent olmalıdır (aynı
+  /// geçişte hem cubit hem `main.dart` sınırı çağırabilir).
   final void Function()? onAuthSignedOut;
 
   /// Geçerli oturumun uid'i (account-link ekranı için).
@@ -49,6 +61,10 @@ class SessionCubit extends Cubit<SessionState> {
       await _pending.clear();
       await _emitSignedIn();
     } else {
+      // signedIn DEĞİL → E2E kapısı da kapalı olmalı (P1-1). Açılışta kilit
+      // cubit'i zaten `uninitialized`'dır, ama bootstrap oturum SONRADAN
+      // düştüğünde de (retry/hesap değişimi) çağrılabilir → no-op garantili.
+      onAuthSignedOut?.call();
       final pendingEmail = await _pending.read();
       if (pendingEmail != null && pendingEmail.isNotEmpty) {
         emit(
@@ -70,6 +86,10 @@ class SessionCubit extends Cubit<SessionState> {
           await _pending.clear();
           await _emitSignedIn();
         } else {
+          // KRİTİK (P1-1): gotrue null-session'ı (refresh hatası / sunucu iptali /
+          // başka cihazdan global çıkış) buraya düşer. Vault volatile temizliği
+          // emit'ten ÖNCE — interaktif `signOut()` ile aynı sıra.
+          onAuthSignedOut?.call();
           emit(
             state.copyWith(
               status: SessionStatus.signedOut,
@@ -145,6 +165,8 @@ class SessionCubit extends Cubit<SessionState> {
   /// "Farklı e-posta kullan" (reviewer [P2] — confirm trap çıkışı): pending'i
   /// temizle + signedOut → kullanıcı `/auth/login`'e döner.
   Future<void> cancelPendingConfirmation() async {
+    // signedIn dışına geçiş → E2E kapısı da kapanır (P1-1).
+    onAuthSignedOut?.call();
     await _pending.clear();
     emit(const SessionState(status: SessionStatus.signedOut));
   }

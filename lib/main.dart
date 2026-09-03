@@ -185,7 +185,19 @@ class _AuthenticatorAppState extends State<AuthenticatorApp>
   /// fail ederse kullanıcı YİNE doğru uid namespace'inde kalır (legacy `''` stack'inde
   /// sessizce KALMAZ — yanlış vault sızıntısı önlenir); persist sonraki event'te yeniden denenir.
   Future<void> _onSession(SessionState s) async {
-    if (s.status != SessionStatus.signedIn || s.linkRequired) return;
+    // Güvenlik denetimi P1-1 — SINIRDA zorlama: kimlik kapısı kapandığı ANDA
+    // (hangi yoldan olursa olsun: buton, gotrue refresh hatası, sunucu iptali,
+    // başka cihazdan global çıkış) E2E kapısı da kapanır. `SessionCubit` bunu
+    // zaten çağırır; burası tek çağrı yerine bağımlılığı ortadan kaldırır
+    // (`onAuthSignedOut` idempotent → çift çağrı zararsız). Aksi halde bu erken
+    // `return` masterKey'i bellekte canlı bırakır ve aynı uid ile yeniden giriş
+    // (prefix değişmediği için stack yeniden kurulmaz) master parola SORULMADAN
+    // açık vault'a düşerdi.
+    if (s.status != SessionStatus.signedIn) {
+      _lock.onAuthSignedOut();
+      return;
+    }
+    if (s.linkRequired) return;
     final uid = _session.currentUid;
     if (uid == null) return;
 

@@ -289,6 +289,79 @@ void main() {
     },
   );
 
+  // --- Güvenlik denetimi P1-1: E2E kapısı HER çıkış yolunda kapanır ---
+  group('onAuthSignedOut — signedIn dışına giden HER yol (P1-1)', () {
+    test('stream signedOut (refresh hatası / sunucu iptali) callback\'i '
+        'çağırır', () async {
+      var calls = 0;
+      final cubit = build(onSignedOut: () => calls++);
+      auth.signedInAtStart = true;
+      await cubit.bootstrap();
+      expect(calls, 0); // signedIn açılış → temizlik yok
+      auth.emitSignedOut();
+      await Future<void>.delayed(Duration.zero);
+      expect(cubit.state.status, SessionStatus.signedOut);
+      expect(
+        calls,
+        1,
+        reason: 'gotrue null-session akışı da E2E kapısını kapatmalı',
+      );
+      await cubit.close();
+    });
+
+    test('stream signedOut sonrası AYNI uid ile yeniden giriş kapıyı yeniden '
+        'AÇMAZ (master parola gerekir)', () async {
+      // `unlocked` = VaultLockCubit'in kapısı; yalnız master parola/recovery/
+      // biyometri onu tekrar açabilir — hesap parolası ASLA.
+      var unlocked = true;
+      final cubit = build(onSignedOut: () => unlocked = false);
+      auth.signedInAtStart = true;
+      await cubit.bootstrap();
+
+      auth.emitSignedOut(); // oturum düştü (kullanıcı butona basmadı)
+      await Future<void>.delayed(Duration.zero);
+      expect(unlocked, isFalse);
+
+      auth.emitSignedIn(); // aynı uid ile yeniden giriş
+      await Future<void>.delayed(Duration.zero);
+      expect(cubit.state.status, SessionStatus.signedIn);
+      expect(
+        unlocked,
+        isFalse,
+        reason: 'hesap parolası tek başına açık vault\'a düşürmemeli',
+      );
+      await cubit.close();
+    });
+
+    test('cancelPendingConfirmation callback\'i çağırır', () async {
+      seedPending('a@b.com');
+      var calls = 0;
+      final cubit = build(onSignedOut: () => calls++);
+      await cubit.bootstrap();
+      calls = 0; // bootstrap'ın (signedIn değil) çağrısını yok say
+      await cubit.cancelPendingConfirmation();
+      expect(calls, 1);
+      await cubit.close();
+    });
+
+    test('bootstrap signedIn DEĞİLKEN callback\'i çağırır', () async {
+      var calls = 0;
+      final cubit = build(onSignedOut: () => calls++);
+      await cubit.bootstrap(); // oturum yok → signedOut
+      expect(calls, 1);
+      await cubit.close();
+    });
+
+    test('bootstrap signedIn iken callback ÇAĞRILMAZ', () async {
+      var calls = 0;
+      auth.signedInAtStart = true;
+      final cubit = build(onSignedOut: () => calls++);
+      await cubit.bootstrap();
+      expect(calls, 0);
+      await cubit.close();
+    });
+  });
+
   group('linkRequired hydrate köprüsü (reviewer [P3])', () {
     test('bootstrap signedIn + resolver true → linkRequired:true', () async {
       auth.signedInAtStart = true;
