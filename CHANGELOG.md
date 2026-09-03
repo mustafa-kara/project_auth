@@ -135,9 +135,13 @@ the current state of `authenticator-dev` (`vfyqokvgtdxxurroqbtj`), all of it mea
   `admin_backend`, no `bypassrls`/`superuser`/`createrole`. For both roles
   `has_table_privilege(…, 'public.tokens', 'select')` and the same on `public.key_attributes` return
   **false**: the panel's direct-Postgres path can read the aggregate and nothing else.
-- **`admin_app` has no password yet — on purpose.** It is the one step that stays with the operator, in the
-  Dashboard SQL editor (`alter role admin_app password '<güçlü-parola>';`), so the password never passes
-  through a migration, this repo or an agent transcript. Until it is set the role cannot connect.
+- **`admin_app` password — set by the operator, and path (a) proven.** The password stayed with the operator
+  by design (Dashboard SQL editor, `alter role admin_app password '<güçlü-parola>';`, never through a
+  migration, this repo or an agent transcript) and was **set on 2026-09-02**; connecting as `admin_app` to
+  `aws-1-eu-central-1.pooler.supabase.com` on both 6543 (transaction) and 5432 (session) with verified TLS
+  against the bundled CA, `set local role admin_backend` + `select private.admin_global_stats()` returned the
+  counts while `select count(*) from public.tokens` was refused with `42501 permission denied` — access path
+  (a) works end to end, and a later rotation is recommended because the password was transmitted in a chat.
 - **CA bundled.** The Supabase Root 2021 CA (a public root certificate, not a secret) now lives at
   `admin/certs/supabase-prod-ca-2021.crt` with `admin/certs/README.txt` carrying the source URL, the SHA-256
   fingerprint and the one-liner that loads it into `SUPABASE_CA_CERT`. The pooler handshake against it
@@ -151,11 +155,13 @@ the current state of `authenticator-dev` (`vfyqokvgtdxxurroqbtj`), all of it mea
 - **Advisors re-run after the DDL: nothing new.** The only security finding is the pre-existing WARN
   *"Leaked Password Protection Disabled"*, a Dashboard Auth setting that cannot be changed over SQL or MCP
   (already a Phase 7 item).
-- **Still open, operator-only:** the `admin_app` password above; the `sb_secret_…` key, which must be pasted
-  into the git-ignored `admin/.env.local` (created locally with the URL, the publishable key, the CA cert and
-  placeholders for the secret key and the `DATABASE_URL` password); and the **first real admin row** —
-  `auth.users` today holds only a UI-test account (`uitest…@gmail.com`), so a real account has to be
-  registered in the mobile app before `insert into public.admin_users (user_id) values ('<uuid>');`.
+- **Still open, operator-only:** the `sb_secret_…` key, which must be pasted into the git-ignored
+  `admin/.env.local` (created locally with the URL, the publishable key, the CA cert and the now-complete
+  `DATABASE_URL`); and the **first real admin row** — `auth.users` today holds only a UI-test account
+  (`uitest…@gmail.com`), so a real account has to be registered in the mobile app before
+  `insert into public.admin_users (user_id) values ('<uuid>');`. Both, plus the recommended `admin_app`
+  password rotation and the pre-existing Dashboard items, live in one canonical list:
+  [supabase/PROJECT_INFO.md → Bekleyen operatör adımları](supabase/PROJECT_INFO.md#bekleyen-operatör-adımları-operator-todo).
 
 ### Documentation findings (W1) — recorded in full in admin/README.md §5
 

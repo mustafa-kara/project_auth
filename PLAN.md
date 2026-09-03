@@ -152,10 +152,12 @@
   `list_migrations` matching the repo's four files), `admin_backend` exists NOLOGIN + NOINHERIT with exactly
   those two grants and **no table privileges**, and the login role `admin_app` exists as a member of it with
   no `bypassrls`/`superuser`/`createrole`; `has_table_privilege` for `select` on `public.tokens` and
-  `public.key_attributes` is **false** for both roles. **`admin_app` has no password yet** — the operator sets
-  it in the Dashboard SQL editor (`alter role admin_app password '<güçlü-parola>';`, deliberately never done
-  by an agent or written into a transcript) and only then can the role connect and become `DATABASE_URL`.
-  Until that is done the dashboard's stats cards render an error card and everything else works.
+  `public.key_attributes` is **false** for both roles. **`admin_app`'s password was set by the operator on 2026-09-02** in the
+  Dashboard SQL editor (`alter role admin_app password '<güçlü-parola>';`, deliberately never done by an agent
+  or written into a migration), and the role is now `DATABASE_URL`. Path (a) was smoke-tested live the same
+  day: pooler 6543 + 5432 with verified TLS, `set local role admin_backend` → `private.admin_global_stats()`
+  returned counts, `select count(*) from public.tokens` → `42501 permission denied`. A password **rotation is
+  recommended** (it was transmitted in a chat).
 - [x] **Reading** ✅ (2026-09-02)
   - Admin-public tables (`announcements`, `catalog_services`, `feature_flags`) and `audit_logs` are read with the
     admin's **own session** (path (c)) — `audit_logs` under the RLS policy `to authenticated using (public.is_admin())`.
@@ -218,8 +220,8 @@ Phase 4 (social+push) ── plugs in at any point once developer accounts are r
 - [x] **Open a Supabase project** ✅ — `authenticator-dev` created, migration applied, hook enabled.
 - [ ] Google Play + Apple Developer accounts (for Phase 4 and release — Phases 0–3 progress while waiting).
 - [ ] Firebase project (for Phase 4 push).
-- [~] (Before Phase 6) Backend DB role + `private` schema grant (for the admin aggregate call) — **migration applied to `authenticator-dev` on 2026-09-02** (`supabase/migrations/20260902201638_admin_backend_role.sql`, live DB version `20260902201638`), and **both roles now exist**: `admin_backend` (NOLOGIN, NOINHERIT, `private` USAGE + `admin_global_stats()` EXECUTE, no table privileges) and `admin_app` (LOGIN, member of `admin_backend`), with `select` on `public.tokens`/`public.key_attributes` false for both. The **Postgres CA is bundled** at `admin/certs/supabase-prod-ca-2021.crt` (+ `admin/certs/README.txt`), and the pooler handshake against it verifies (`Verify return code: 0 (ok)`, 2026-09-02). **Left for the operator:** (1) `alter role admin_app password '<güçlü-parola>';` in the Dashboard SQL editor — the role has none yet, so it cannot connect — and put it into `DATABASE_URL`; (2) paste the `sb_secret_…` key into `admin/.env.local`. Until then the admin dashboard's stats cards show an error card.
-- [ ] (Before Phase 6) First **real** admin row — still open as of 2026-09-02: `auth.users` holds only a UI-test account (`uitest…@gmail.com`), so no real account exists to promote. Register one in the mobile app, then `insert into public.admin_users (user_id) values ('<uuid>');` — without a row nobody gets past the panel's `/login`.
+- [~] (Before Phase 6) Backend DB role + `private` schema grant (for the admin aggregate call) — **migration applied to `authenticator-dev` on 2026-09-02** (`supabase/migrations/20260902201638_admin_backend_role.sql`, live DB version `20260902201638`), and **both roles now exist**: `admin_backend` (NOLOGIN, NOINHERIT, `private` USAGE + `admin_global_stats()` EXECUTE, no table privileges) and `admin_app` (LOGIN, member of `admin_backend`), with `select` on `public.tokens`/`public.key_attributes` false for both. The **Postgres CA is bundled** at `admin/certs/supabase-prod-ca-2021.crt` (+ `admin/certs/README.txt`), and the pooler handshake against it verifies (`Verify return code: 0 (ok)`, 2026-09-02). The **`admin_app` password was set on 2026-09-02** and that role is in `DATABASE_URL`; path (a) was smoke-tested live the same day (pooler 6543 + 5432, verified TLS, `set local role admin_backend` → `admin_global_stats()` returned counts, `select count(*) from public.tokens` → `42501`). **Left for the operator:** paste the `sb_secret_…` key into `admin/.env.local` (and, recommended, rotate the `admin_app` password — it was transmitted in a chat). One canonical list of everything still pending: [supabase/PROJECT_INFO.md → Bekleyen operatör adımları](supabase/PROJECT_INFO.md#bekleyen-operatör-adımları-operator-todo).
+- [ ] (Before Phase 6) First **real** admin row — still open as of 2026-09-02: `auth.users` holds only a UI-test account (`uitest…@gmail.com`), so no real account exists to promote. Register one in the mobile app, then `insert into public.admin_users (user_id) values ('<uuid>');` — without a row nobody gets past the panel's `/login`. See the canonical list: [supabase/PROJECT_INFO.md → Bekleyen operatör adımları](supabase/PROJECT_INFO.md#bekleyen-operatör-adımları-operator-todo).
 
 ## Open design decisions (to be clarified later)
 - Conflict resolution starts with **arrival-order LWW** (the last to reach the server wins; see ARCHITECTURE §5); for heavy multi-device usage a move to CRDT/true-modified-time can be evaluated.

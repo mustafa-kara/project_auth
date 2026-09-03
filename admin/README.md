@@ -63,7 +63,7 @@ satırını taşır. **Doğrulandı (2026-09-02):**
 *Alternatif (aynı dosya, elle indirme):* Dashboard → Database → SSL Configuration.
 Parmak izi eşleşmiyorsa dosyayı kullanmayın.
 
-### Operatör adımı — `admin_app` login rolünün parolası (bir kez, Dashboard SQL Editor'da)
+### Operatör adımı — `admin_app` login rolünün parolası (bir kez, Dashboard SQL Editor'da) — ✅ YAPILDI (2026-09-02)
 
 > ✅ **Durum (2026-09-02):** migration **canlı projeye uygulandı** (`authenticator-dev`, DB sürümü
 > `20260902201638`) ve **iki rol de mevcut**: `admin_backend` (NOLOGIN, NOINHERIT; `private` USAGE +
@@ -71,21 +71,33 @@ Parmak izi eşleşmiyorsa dosyayı kullanmayın.
 > `bypassrls`/`superuser`/`createrole` yok). Her iki rol için `public.tokens` ve `public.key_attributes`
 > üzerinde `select` yetkisi **false** olarak ölçüldü.
 >
-> ⏳ **Geriye kalan operatör işleri:** (1) `admin_app` rolünün **parolası henüz yok** — parola atanana kadar
-> rol bağlanamaz; (2) `sb_secret_…` anahtarı `admin/.env.local`'e yapıştırılmalı; (3) `public.admin_users`
-> içinde en az bir satır olmalı — bugün **yok** (`auth.users` yalnızca bir UI-test hesabı içeriyor), yoksa
-> kimse `/login`'i geçemez. Bunlar tamamlanana kadar `/` sayfasındaki sayım kartları hata kartı gösterir;
-> panelin geri kalanı (secret key yolu) çalışır.
+> ✅ **`admin_app` parolası 2026-09-02'de operatör tarafından atandı** ve rol `DATABASE_URL` içine kondu.
+> (a) yolu aynı gün uçtan uca denendi: pooler üzerinden hem 6543 hem 5432'de doğrulanmış TLS ile bağlanıldı,
+> `set local role admin_backend` içinde `private.admin_global_stats()` sayımları döndürdü,
+> `select count(*) from public.tokens` ise `42501 permission denied` ile reddedildi. **Öneri:** parola bir
+> sohbet kanalından geçtiği için **rotasyon** önerilir — `alter role admin_app password '<yeni-parola>';` +
+> `DATABASE_URL` güncellemesi.
+>
+> ⏳ **Geriye kalan operatör işleri:** (1) `sb_secret_…` anahtarı `admin/.env.local`'e yapıştırılmalı —
+> **bu anahtar olmadan giriş yapılabilir ama panele girilemez**, çünkü `requireAdmin()`'in `admin_users`
+> tazelik araması secret-key istemcisini kullanır (ayrıntı aşağıda); (2) `public.admin_users` içinde en az
+> bir satır olmalı — bugün **yok** (`auth.users` yalnızca bir UI-test hesabı içeriyor), yoksa kimse
+> `/login`'i geçemez.
+>
+> 📋 **Tek kanonik bekleyen-adım listesi** (nerede, nasıl, neyi açar):
+> [supabase/PROJECT_INFO.md → Bekleyen operatör adımları](../supabase/PROJECT_INFO.md#bekleyen-operatör-adımları-operator-todo).
+> Bu dosyada ikinci bir liste tutulmaz.
 
 `supabase/migrations/20260902201638_admin_backend_role.sql` migration'ı **yalnızca**
 NOLOGIN yetki taşıyıcı rolü (`admin_backend`) oluşturur ve ona `private` şemasında
 `usage` + `private.admin_global_stats()` üzerinde `execute` verir (Desen B —
 init migration'daki yorum bloğu). Login rolü ve parolası **migration'a/transcript'e
-yazılmaz**; parolayı operatör elle atar:
+yazılmaz**; parolayı operatör elle atar. Bu projede adım **2026-09-02'de tamamlandı**; aşağıdaki SQL temiz
+bir projede (ya da rotasyonda) aynen kullanılır:
 
 ```sql
 -- Dashboard > SQL Editor (parolayı güvenli bir üreticiden alın, hiçbir yere yapıştırmayın)
-alter role admin_app password '<güçlü-parola>';
+alter role admin_app password '<güçlü-parola>';   -- rotasyon da aynı komut
 
 -- Rol yoksa (temiz proje) önce:
 --   create role admin_app login password '<güçlü-parola>';

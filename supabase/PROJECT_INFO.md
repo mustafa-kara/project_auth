@@ -2,8 +2,10 @@
 
 > Development project. **All four migrations are applied**: the three 2026-06-06 ones (security scan CLEAN,
 > 2026-06-06) and the Phase 6 `20260902201638_admin_backend_role.sql`, applied on **2026-09-02**.
-> ⏳ What is still operator-only: the `admin_app` password, the `sb_secret_…` key in `admin/.env.local`, and
-> the first `public.admin_users` row — see the deployment checklist below.
+> ⏳ What is still operator-only: the `sb_secret_…` key in `admin/.env.local` and the first
+> `public.admin_users` row. The `admin_app` password **was set on 2026-09-02** and access path (a) was
+> smoke-tested live the same day. The single canonical pending list is
+> [Bekleyen operatör adımları (operator TODO)](#bekleyen-operatör-adımları-operator-todo) right below.
 
 | Field | Value |
 |---|---|
@@ -13,6 +15,56 @@
 | Region | `eu-central-1` |
 | Postgres | 17.6 |
 | Publishable key (client) | `sb_publishable_rxrL2mVbh1XgojMexy1cMw_Og8wE3xI` |
+
+---
+
+## Bekleyen operatör adımları (operator TODO)
+
+The **single canonical list** of steps that still wait on a human. Every other document (`README.md`,
+`admin/README.md`, `PLAN.md`, `CHANGELOG.md`) points here instead of keeping its own copy. State as of
+**2026-09-02**.
+
+- [ ] **`SUPABASE_SECRET_KEY` → `admin/.env.local`**
+  *Where/how:* Dashboard → Settings → API Keys → copy the `sb_secret_…` key and paste it into the
+  `SUPABASE_SECRET_KEY=` line of the git-ignored `admin/.env.local` (the file already exists locally with
+  every other value filled in; this is the only placeholder left).
+  *Unblocks:* the whole of access path (b) — `/users` (`auth.admin.listUsers` / ban / unban / delete), every
+  write to `announcements` / `catalog_services` / `feature_flags`, and every `audit_logs` insert.
+  *And the part that is easy to miss:* `requireAdmin()`'s fail-closed `admin_users` freshness lookup runs
+  through that same secret-key client, so without this key **no signed-in page of the panel renders at all**.
+  Precisely (read off `admin/src/lib/auth.ts`): submitting `/login` **succeeds** — `signInAction`
+  (`admin/src/app/login/actions.ts`) only uses the publishable-key session client plus `isAdminClaims()` — but
+  the redirect to `/` then hits the first `requireAdmin()` in the `(dashboard)` layout, whose
+  `assertStillAdmin()` calls `createAdminClient()` → `getServerEnv()`, and that zod check throws a plain
+  `Error` (`Geçersiz ortam değişkenleri (server): SUPABASE_SECRET_KEY: …`), **not** a `ForbiddenError`. So the
+  user is not sent to `/forbidden`; they land on the `(dashboard)/error.tsx` boundary. Net effect: **you can
+  sign in, but you cannot get into the panel.**
+- [ ] **First real admin row**
+  *Where/how:* register a real account in the mobile app (`auth.users` today holds only the UI-test account
+  `uitest…@gmail.com`), take its uuid, then in Dashboard → SQL Editor:
+  ```sql
+  insert into public.admin_users (user_id) values ('<auth-user-uuid>');
+  ```
+  *Unblocks:* `/login`. Without a row here `public.custom_access_token_hook` never stamps
+  `app_metadata.admin = true`, so every login is refused with "Bu hesap yönetici değil" — and the panel
+  deliberately offers no UI for granting admin ([admin/README.md](../admin/README.md) §6).
+- [ ] **Leaked password protection**
+  *Where/how:* Dashboard → Authentication → Policies → turn on the HaveIBeenPwned check. Dashboard-only: it
+  cannot be flipped over SQL or MCP.
+  *Unblocks:* nothing in the panel — but the Supabase security advisor keeps returning the WARN *"Leaked
+  Password Protection Disabled"* until it is on, so a clean advisor run needs it (Phase 7 item).
+- [ ] **Rotate the `admin_app` password — recommended, not blocking**
+  *Where/how:* the password in use today was transmitted in a chat, so treat it as burned. Dashboard → SQL
+  Editor: `alter role admin_app password '<yeni-güçlü-parola>';`, then update the password inside
+  `DATABASE_URL` in `admin/.env.local`. Nothing else in the repo references it.
+  *Unblocks:* nothing — it closes a disclosure risk on a credential that already works.
+- [ ] **The three pre-existing Dashboard items** — not repeated here, so there is only ever one wording: keep
+  the `private` schema **out of** "Exposed schemas", turn email confirmation **ON** (Phase 3 Patch 1), and add
+  the `dev.mustafakara.projectauth://login-callback` redirect URL (Phase 3 Patch 1). See the corresponding
+  entries in the deployment checklist below.
+
+**Already done, for contrast:** the migration, both DB roles, the bundled Postgres CA, and — since
+**2026-09-02** — the `admin_app` password plus a live end-to-end smoke test of access path (a).
 
 ## How to run the Flutter app (credentials are NOT in the source)
 
@@ -89,14 +141,15 @@ Write/privileged operations are reserved for `service_role` only (backend secret
 **Verified live (2026-09-02, for the Phase 6 admin panel):** `service_role` holds full grants on
 `admin_users`, `audit_logs`, `announcements`, `catalog_services` and `feature_flags` — so the panel's
 secret-key path (`auth.admin` + all writes + the `audit_logs` insert) works against this project **today**,
-with no migration needed. The direct-Postgres aggregate path is no longer blocked on the migration — it was
-applied on 2026-09-02 — but it still waits on the `admin_app` password (see the checklist below).
+with no migration needed. The direct-Postgres aggregate path is no longer blocked either: the migration was
+applied on 2026-09-02, the `admin_app` password was set the same day and the path was smoke-tested live (see
+the checklist below).
 
 **Verified live (2026-09-02, after applying `20260902201638_admin_backend_role`):**
 | Role | Attributes | `private` USAGE | `admin_global_stats()` EXECUTE | `select` on `tokens` / `key_attributes` |
 |---|---|---|---|---|
 | `admin_backend` | NOLOGIN, NOINHERIT | ✅ | ✅ | **false** / **false** |
-| `admin_app` | LOGIN (no password yet), member of `admin_backend`, no `bypassrls`/`superuser`/`createrole` | via membership | via membership | **false** / **false** |
+| `admin_app` | LOGIN (password set 2026-09-02), member of `admin_backend`, no `bypassrls`/`superuser`/`createrole` | via membership | via membership | **false** / **false** |
 
 `admin_backend` holds **no table privileges at all** — it is a pure privilege carrier for the one aggregate
 function, exactly as designed (ARCHITECTURE §6, Pattern B).
@@ -117,15 +170,19 @@ admin_users · key_attributes · tokens · devices · announcements · catalog_s
   no `bypassrls`/`superuser`/`createrole`; `has_table_privilege(… , 'select')` on `public.tokens` and
   `public.key_attributes` **false** for both. `execute` on `private.admin_global_stats()` remains denied to
   `anon`/`authenticated`, as designed.
-- [ ] **`admin_app` password — the one SQL step left, and it must be the operator's.** The role currently has
-  **no password**, so it cannot connect. In Dashboard → SQL Editor (password from a secure generator; never
-  pasted into a migration, this repo or an agent transcript):
-  ```sql
-  alter role admin_app password '<güçlü-parola>';
-  ```
-  Then that role becomes `DATABASE_URL` in `admin/.env.local`. **The panel never connects as `postgres`**; it
-  does `set local role admin_backend` inside the transaction ([admin/README.md](../admin/README.md) §1).
-  Until this is done the admin dashboard's global-stats cards render an error card; every other page works.
+- [x] **`admin_app` password — SET on 2026-09-02 by the operator**, in Dashboard → SQL Editor
+  (`alter role admin_app password '<güçlü-parola>';`), never through a migration or this repo. That role is
+  now `DATABASE_URL` in `admin/.env.local`. **The panel never connects as `postgres`**; it does
+  `set local role admin_backend` inside the transaction ([admin/README.md](../admin/README.md) §1).
+  **Access path (a) smoke-tested live the same day:** connected as `admin_app` to
+  `aws-1-eu-central-1.pooler.supabase.com` on **both 6543 (transaction) and 5432 (session)** with verified TLS
+  (the bundled CA below); inside `set local role admin_backend`, `select private.admin_global_stats()`
+  returned the counts, while `select count(*) from public.tokens` was refused with **42501 permission
+  denied** — exactly the designed shape.
+- [ ] **Rotate the `admin_app` password (recommended).** The password set on 2026-09-02 was transmitted in a
+  chat, so it should be treated as disclosed: `alter role admin_app password '<yeni-güçlü-parola>';` in
+  Dashboard → SQL Editor, then update the password inside `DATABASE_URL` in `admin/.env.local`. Not blocking
+  — see [Bekleyen operatör adımları](#bekleyen-operatör-adımları-operator-todo).
 - [x] **Postgres CA for the panel's verified-TLS connection** — the Supabase Root 2021 CA (a public root
   certificate, not a secret) is bundled in the repo at `admin/certs/supabase-prod-ca-2021.crt`, with source
   URL, SHA-256 fingerprint and the shell one-liner that loads it into `SUPABASE_CA_CERT` in
@@ -136,8 +193,9 @@ admin_users · key_attributes · tokens · devices · announcements · catalog_s
   validity 2021-04-28 → 2031-04-26.
 - [ ] **`SUPABASE_SECRET_KEY` in `admin/.env.local`** — the `sb_secret_…` key is operator-only and is not
   written anywhere in this repo. `admin/.env.local` (git-ignored) already exists locally with the project URL,
-  the publishable key and the CA cert filled in, and placeholders for the secret key and the `DATABASE_URL`
-  password.
+  the publishable key, the CA cert and the now-complete `DATABASE_URL` filled in; the secret key is the only
+  placeholder left. Without it you can submit `/login` successfully but **no signed-in page renders** — see
+  [Bekleyen operatör adımları](#bekleyen-operatör-adımları-operator-todo) for the exact failure path.
 - [ ] First **real** admin: `insert into public.admin_users (user_id) values ('<auth-user-uuid>');` (secure channel) — **still open as of 2026-09-02: no real account exists yet.** `auth.users` currently holds a single UI-test account (`uitest…@gmail.com`), so the step is: register a real account in the mobile app, take its uuid, then run the insert. **Required for the Phase 6 admin panel:** without a row here nobody gets past `/login`, and the panel deliberately offers no UI for granting admin (see [admin/README.md](../admin/README.md) §6).
 - [ ] **Phase 3 Patch 1 — Email confirmation:** Dashboard > Auth > Providers > Email → "Confirm email" ON (confirmation email after signup).
 - [ ] **Phase 3 Patch 1 — Redirect URL:** Dashboard > Auth > URL Configuration > Redirect URLs → add `dev.mustafakara.projectauth://login-callback` (PKCE deep-link callback; matches the native intent-filter/URL scheme).
