@@ -326,8 +326,8 @@ class EncryptedVaultRepository
     await _storage.write(key: _vaultStorageKey, value: jsonEncode(records));
   }
 
-  /// Bellekteki tüm çözülmüş/ham kayıt önbelleğini bırakır (güvenlik denetimi
-  /// P2-1). **Diske DOKUNMAZ** — yalnız referansları düşürür.
+  /// Bellekteki ÇÖZÜLMÜŞ kayıt önbelleğini (`_lastById`) bırakır (güvenlik
+  /// denetimi P2-1). **Diske DOKUNMAZ** — yalnız referansları düşürür.
   ///
   /// `VaultLockCubit._disposeKey()` bunu masterKey serbest bırakılmadan HEMEN
   /// ÖNCE çağırır. Gerekçe: `lock(immediate: true)` anahtarı senkron dispose eder
@@ -341,15 +341,22 @@ class EncryptedVaultRepository
   /// sırların artık nesne grafiğinde KÖKLÜ olmaması — "saldırgan cubit'ten
   /// yürüyerek bulur" ile "serbest bırakılmış yığını taramak zorunda" farkı.
   ///
+  /// **Kapsam — YALNIZ `_lastById` (doğrulama NEW-1):** plaintext `OtpAccount`
+  /// tutan TEK alan odur. `_tombstones` yalnız `EncryptedBlob` (ciphertext),
+  /// `_corruptedRaw` ise zaten çözülemeyen opak ham JSON tutar — temizlenmeleri
+  /// güvenlik açısından HİÇBİR ŞEY kazandırmaz, buna karşılık `_writeRecords`
+  /// ikisini de yazdığı dosyaya geri koyduğu için (bkz. `_writeRecords`) wipe
+  /// sonrası ulaşan bir `save()` bekleyen tombstone'ları ve korunan bozuk
+  /// kayıtları DİSKTEN düşürürdü — sınıfın önlemekle görevli olduğu sessiz veri
+  /// kaybı. Bu yüzden ikisi de BİLİNÇLİ olarak KORUNUR.
+  ///
   /// Sonrasında bu instance ile yazma güvenlidir: `save()` her kaydı yeniden
   /// şifrelemeye çalışır (dispose edilmiş key → istisna, TEK bir `_storage.write`
   /// hepsinden SONRA geldiği için yarım yazma yok), `markDeleted` no-op'a düşer,
   /// `importRemote`/`exportRaw`/`purgeCorrupted` zaten diskten okur.
   @override
   void forgetPlaintext() {
-    _lastById.clear();
-    _tombstones.clear();
-    _corruptedRaw.clear();
+    _lastById.clear(); // çözülmüş OtpAccount tutan TEK alan
   }
 
   @override
