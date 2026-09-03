@@ -46,6 +46,7 @@ import '../../features/vault/data/view_mode_store.dart';
 import '../../features/vault/domain/catalog_repository.dart';
 import '../../features/vault/domain/issuer_catalog_holder.dart';
 import '../../features/vault/domain/remote_token_repository.dart';
+import '../config/secure_gotrue_storage.dart';
 import '../crypto/crypto_service.dart';
 import '../crypto/sodium_crypto_service.dart';
 import '../otp/otp_generator.dart';
@@ -59,38 +60,27 @@ Future<void> configureDependencies() async {
   // Tüm vault/auth depoları aynı secure_storage instance'ını paylaşır.
   //
   // **Options AÇIKÇA verilir — plugin varsayılanları vault verisi için YANLIŞ
-  // (güvenlik denetimi P1-2 / P3-1):**
+  // (güvenlik denetimi P1-2 / P3-1).** Gerekçelerin tamamı ve TEK TANIMI
+  // [secureStorageOptions]'tadır (`core/config/secure_gotrue_storage.dart`);
+  // burada kopyalanmaz, çünkü Supabase oturum/PKCE adaptörleri DI'dan ÖNCE
+  // kurulduğu için kendi örneklerini aynı fabrikadan alır — iki taraf ayrışırsa
+  // aynı Keystore'da farklı davranan iki depo doğardı.
   //
-  // • `resetOnError: false` — `AndroidOptions.resetOnError` varsayılanı `true`'dur
-  //   (flutter_secure_storage 10.3.1, `options/android_options.dart`; kendi
-  //   doc'u: "it will PERMANENTLY erase the data when an error occurs"). Java
-  //   tarafı bunu gerçekten uygular: `FlutterSecureStorage.read()` bir hata
-  //   yakalayınca `handleStorageError` → `delete(key)` → ikinci `readUnsafe`
-  //   **null** döner (istisna YOK). O null `KeyAttributesStore`'un tüm savunmasını
-  //   atlar: `bootstrap()` `attrs == null` görür → `uninitialized` → kullanıcıya
-  //   SETUP gösterilir ve `commitSetup` var olan vault'un üzerine yazar (emk+remk
-  //   gider; recovery mnemonic artık hiçbir şeyi açmaz). `false` ile Keystore
-  //   hatası bir istisna olarak yüzeye çıkar → `keyAttributesCorrupted`
-  //   (`/auth-integrity`, "Yeniden dene") — CRYPTO.md §9 "sessiz veri kaybı yok".
-  // • `migrateWithBackup: true` — varsayılan `false`. v9→v10 algoritma
-  //   migration'ı mevcut kurulumlarda ilk erişimde çalışır; ortasında bir çökme
-  //   `resetOnError` dalına düşerdi. Backup'lı migration bunu kurtarılabilir yapar.
-  // • `accessibility: unlocked_this_device` — `AppleOptions` varsayılanı
-  //   `unlocked` (= `kSecAttrAccessibleWhenUnlocked`), yani **cihaza bağlı
-  //   değil**: şifreli iTunes/Finder yedeğine girer ve yeni cihaza geri yüklenir.
-  //   Belgelenen yeni-cihaz hikâyesi sunucudan restore'dur (CRYPTO.md §12), bir
-  //   keychain göçü değil. NOT: accessibility YAZMA anında uygulanır → mevcut
-  //   item'lar bir sonraki yazımda göç eder (eski kullanıcı mahsur KALMAZ).
+  // Özet: `resetOnError: false` (Keystore hatası artık sessizce `null` dönüp
+  // `vault_key_attributes_v1`'i SİLMEZ → `keyAttributesCorrupted`),
+  // `migrateWithBackup: true` (v9→v10 göçü çökmeye dayanıklı),
+  // `accessibility: unlocked_this_device` (öge şifreli cihaz yedeğiyle YENİ
+  // CİHAZA taşınmaz; accessibility YAZMA anında uygulanır → mevcut item'lar bir
+  // sonraki yazımda göç eder, eski kullanıcı mahsur KALMAZ).
   //
   // Biyometrik anahtar bu instance'ı KULLANMAZ — `BiometricServiceImpl` kendi
   // namespace'i + OS-geçitli options'ıyla çalışır (orada auto-delete kabul
   // edilebilir: `BiometricKeyMissing` ele alınan, kurtarılabilir bir durumdur).
+  final storageOptions = secureStorageOptions();
   locator.registerLazySingleton<FlutterSecureStorage>(
-    () => const FlutterSecureStorage(
-      aOptions: AndroidOptions(resetOnError: false, migrateWithBackup: true),
-      iOptions: IOSOptions(
-        accessibility: KeychainAccessibility.unlocked_this_device,
-      ),
+    () => FlutterSecureStorage(
+      aOptions: storageOptions.android,
+      iOptions: storageOptions.ios,
     ),
   );
 
