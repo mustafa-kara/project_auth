@@ -15,6 +15,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/platform/secure_screen.dart';
+import '../../../../core/platform/sensitive_clipboard.dart';
 import '../../../../core/ui/tokens.dart';
 import '../../../../core/ui/widgets/auth_scaffold.dart';
 import '../../../../core/ui/widgets/mnemonic_grid.dart';
@@ -55,7 +56,11 @@ class _RecoveryShowPageState extends State<RecoveryShowPage> {
     final numbered = [
       for (var i = 0; i < words.length; i++) '${i + 1}. ${words[i]}',
     ].join('\n');
-    await Clipboard.setData(ClipboardData(text: numbered));
+    // Düz `Clipboard.setData` DEĞİL: recovery key master-key eşdeğeri olduğu
+    // için pano yazımı cihaz-yerel (iOS Universal Clipboard KAPALI) ve OS
+    // düzeyinde süreli olmalı — süreç öldürülürse alttaki Dart timer'ı hiç
+    // çalışmaz, `expiresIn` ise yine de geçerlidir (review [P2-4]).
+    await SensitiveClipboard.setText(numbered, expiresIn: _clearAfter);
     _copiedValue = numbered;
     _clearTimer?.cancel();
     _clearTimer = Timer(_clearAfter, _clearClipboardIfUnchanged);
@@ -65,8 +70,8 @@ class _RecoveryShowPageState extends State<RecoveryShowPage> {
       ..showSnackBar(
         const SnackBar(
           content: Text(
-            'Recovery key panoya kopyalandı — '
-            'güvenlik için panoyu 60 sn sonra temizleyeceğiz',
+            'Recovery key panoya kopyalandı — yalnız bu cihazda kalır '
+            '(diğer cihazlarına geçmez) ve 60 sn sonra silinir',
           ),
         ),
       );

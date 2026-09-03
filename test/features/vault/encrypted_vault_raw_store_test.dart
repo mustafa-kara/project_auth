@@ -169,6 +169,75 @@ void main() {
     });
   });
 
+  // --- Doğrulama NEW-1: forgetPlaintext YALNIZ _lastById'yi boşaltır ---
+  group('forgetPlaintext — kapsam', () {
+    test(
+      'wipe sonrası save() bekleyen tombstone\'u ve bozuk kaydı diskte KORUR',
+      () async {
+        // Diskte: iki canlı token + decrypt edilemeyen bir kayıt (korunmalı).
+        // Birini sil → tombstone. Sonra plaintext wipe (kilit) → save().
+        // forgetPlaintext _tombstones/_corruptedRaw'ı da boşaltsaydı bu save
+        // ikisini de diskten düşürürdü (sessiz veri kaybı).
+        final storage = FakeSecureStorage();
+        final crypto = FakeCrypto();
+        final repo = _repo(storage, crypto: crypto);
+        await repo.load();
+        await repo.save([_acc('a'), _acc('b')]);
+
+        // Çözülemeyen kayıt: BAŞKA bir id'ye bağlı AAD taşır (tamper/yanlış key).
+        final bad = crypto.encrypt(
+          plaintext: Uint8List.fromList(utf8.encode('{}')),
+          key: FakeKeyHandle(),
+          aad: Uint8List.fromList('token|1|baska'.codeUnits),
+        );
+        storage.data[EncryptedVaultRepository.vaultKey] = jsonEncode([
+          ..._records(storage),
+          {
+            'id': 'bozuk',
+            'v': 1,
+            'n': base64Encode(bad.nonce),
+            'c': base64Encode(bad.ciphertext),
+            'updatedAt': 1,
+            'deleted': false,
+          },
+        ]);
+
+        final reloaded = await repo.load();
+        expect(reloaded.corruptedCount, 1);
+        final delId = reloaded.accounts.first.id;
+        await repo.markDeleted(delId);
+
+        // Kilit: masterKey dispose edilmeden ÖNCE plaintext bırakılır.
+        repo.forgetPlaintext();
+
+        // Anahtar HÂLÂ canlı → bu save gerçekten diske yazar.
+        await repo.save([_acc('c')]);
+
+        final records = _records(storage);
+        final ids = records.map((e) => e['id']).toList();
+        expect(
+          ids,
+          contains(delId),
+          reason: 'bekleyen tombstone push edilmeden diskten düşmemeli',
+        );
+        expect(
+          ids,
+          contains('bozuk'),
+          reason: 'çözülemeyen kayıt AYNEN korunur (banner\'a rağmen)',
+        );
+        expect(
+          records,
+          hasLength(3),
+          reason: 'yeni token + tombstone + bozuk kayıt',
+        );
+
+        // Yeniden okunduğunda tombstone hâlâ deleted=true olarak push edilebilir.
+        final raw = await repo.exportRaw();
+        expect(raw.firstWhere((r) => r.id == delId).deleted, isTrue);
+      },
+    );
+  });
+
   // --- Denetim A1: tombstone diriltme (id koruyan yedek geri yüklemesi) ---
   group('A1 — canlı kayıt kendi tombstone\'unu düşürür', () {
     test(

@@ -9,6 +9,8 @@ library;
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:flutter/services.dart'
+    show MissingPluginException, PlatformException;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:project_auth/core/crypto/crypto_exceptions.dart';
@@ -41,6 +43,10 @@ class FakeSecureStorage implements FlutterSecureStorage {
   /// kesişim testi: write askıdayken `onAppBackgrounded(paused: true)` tetikle, sonra throw.
   Future<void>? writeGate;
 
+  /// Verilirse `read` bunu FIRLATIR (P1-2: `resetOnError: false` ile Keystore/
+  /// Keychain hatası artık sessiz null yerine `PlatformException` olarak gelir).
+  Object? readError;
+
   @override
   Future<String?> read({
     required String key,
@@ -50,7 +56,11 @@ class FakeSecureStorage implements FlutterSecureStorage {
     dynamic webOptions,
     dynamic mOptions,
     dynamic wOptions,
-  }) async => data[key];
+  }) async {
+    if (readError != null) throw readError!;
+    return data[key];
+  }
+
   @override
   Future<void> write({
     required String key,
@@ -244,6 +254,7 @@ VaultLockCubit _build(
   List<String>? migrated,
   List<String>? deletedSink,
   bool migrationFails = false,
+  Object? migrationError,
   Future<void>? migrateGate,
   BiometricService? biometric,
   KeyAttributesRepository? remoteRepo,
@@ -262,6 +273,7 @@ VaultLockCubit _build(
       // migrateGate verildiyse migration burada askıya alınır (P1 yarış testleri:
       // işlem _migrate'te beklerken onAppBackgrounded tetiklenir).
       if (migrateGate != null) await migrateGate;
+      if (migrationError != null) throw migrationError;
       if (migrationFails) throw StateError('migration patladı');
       mig.add('migrated');
     },
@@ -391,6 +403,120 @@ void main() {
       await cubit.bootstrap();
       expect(cubit.state.status, VaultLockStatus.keyAttributesCorrupted);
     });
+
+    test('attrs okuması PlatformException atarsa → keyAttributesCorrupted '
+        '(ASLA sessiz uninitialized — P1-2)', () async {
+      // `resetOnError: false` (locator.dart) ile Keystore unwrap hatası artık
+      // silme + null yerine bu istisnayı üretir. Yakalanmazsa bootstrap
+      // future'ından kabarır ve kullanıcı SETUP ekranı görürdü.
+      storage.readError = PlatformException(code: 'Keystore', message: 'test');
+      final cubit = _build(FakeKeyManager(), store);
+      await cubit.bootstrap();
+      expect(cubit.state.status, VaultLockStatus.keyAttributesCorrupted);
+      expect(cubit.state.status, isNot(VaultLockStatus.uninitialized));
+    });
+
+    test('retryBootstrap: platform hatası geçince locked\'a döner', () async {
+      await store.write(_fakeAttrs());
+      storage.readError = PlatformException(code: 'Keystore', message: 'test');
+      final cubit = _build(FakeKeyManager(), store);
+      await cubit.bootstrap();
+      expect(cubit.state.status, VaultLockStatus.keyAttributesCorrupted);
+      storage.readError = null; // geçici hataydı
+      await cubit.retryBootstrap();
+      expect(cubit.state.status, VaultLockStatus.locked);
+    });
+
+    test(
+      'ard arda başarısız retryBootstrap → İKİ FARKLI state (NEW-3)',
+      () async {
+        // Bloc mevcut state'e EŞİT bir emit'i düşürür; sayaç olmadan "Yeniden dene"
+        // hiçbir gözlemlenebilir değişiklik üretmezdi (buton ölü görünürdü).
+        await store.write(_fakeAttrs());
+        storage.readError = PlatformException(
+          code: 'Keystore',
+          message: 'test',
+        );
+        final cubit = _build(FakeKeyManager(), store);
+        final seen = <VaultLockState>[];
+        final sub = cubit.stream.listen(seen.add);
+
+        await cubit.bootstrap();
+        await cubit.retryBootstrap();
+        await cubit.retryBootstrap();
+        await Future<void>.delayed(Duration.zero); // stream teslimi
+        await sub.cancel();
+
+        expect(seen, hasLength(3));
+        expect(
+          seen.map((s) => s.status),
+          everyElement(VaultLockStatus.keyAttributesCorrupted),
+        );
+        expect(seen.map((s) => s.attempt), [1, 2, 3]);
+        expect(seen[1], isNot(seen[0]), reason: 'her deneme ayırt edilebilir');
+      },
+    );
+  });
+
+  // --- Doğrulama NEW-2: unlock ailesinde depo hatası → integrity ekranı ---
+  group('unlock yolları: attrs okuması PlatformException (NEW-2)', () {
+    setUp(() async => store.write(_fakeAttrs()));
+
+    void failReads() => storage.readError = PlatformException(
+      code: 'Keystore',
+      message: 'test',
+    );
+
+    test(
+      'unlock → keyAttributesCorrupted (sessiz unhandled hata YOK)',
+      () async {
+        final cubit = _build(FakeKeyManager(), store);
+        await cubit.bootstrap();
+        failReads();
+        await cubit.unlock('parola123');
+        expect(cubit.state.status, VaultLockStatus.keyAttributesCorrupted);
+      },
+    );
+
+    test('recoverWithNewPassword → keyAttributesCorrupted', () async {
+      final cubit = _build(FakeKeyManager(), store);
+      await cubit.bootstrap();
+      failReads();
+      await cubit.recoverWithNewPassword(
+        List.generate(24, (i) => 'word$i'),
+        'yeniParola123',
+      );
+      expect(cubit.state.status, VaultLockStatus.keyAttributesCorrupted);
+    });
+
+    test('biometricUnlock → keyAttributesCorrupted', () async {
+      final cubit = _build(FakeKeyManager(), store);
+      await cubit.bootstrap();
+      failReads();
+      await cubit.biometricUnlock();
+      expect(cubit.state.status, VaultLockStatus.keyAttributesCorrupted);
+    });
+
+    test(
+      'migration marker okuması patlarsa → keyAttributesCorrupted + key sızmaz',
+      () async {
+        // VaultMigration marker'ları AYNI FlutterSecureStorage'ı kullanır.
+        final km = FakeKeyManager();
+        final cubit = _build(
+          km,
+          store,
+          migrationError: PlatformException(code: 'Keystore', message: 'test'),
+        );
+        await cubit.bootstrap();
+        await cubit.unlock('parola123');
+        expect(cubit.state.status, VaultLockStatus.keyAttributesCorrupted);
+        expect(
+          km.issued.single.disposed,
+          isTrue,
+          reason: 'sahiplenilmemiş key dispose edilir (locked invariant)',
+        );
+      },
+    );
   });
 
   group('setup commit (recovery doğrulanmadan persist YOK)', () {
@@ -793,6 +919,97 @@ void main() {
     });
   });
 
+  // Güvenlik denetimi P2-1 — plaintext tutucuları masterKey ile AYNI anda temizlenir.
+  group('registerPlaintextHolder (P2-1)', () {
+    Future<VaultLockCubit> unlocked(FakeKeyManager km) async {
+      await store.write(_fakeAttrs());
+      final cubit = _build(km, store);
+      await cubit.bootstrap();
+      await cubit.unlock('parola123');
+      expect(cubit.state.status, VaultLockStatus.unlocked);
+      return cubit;
+    }
+
+    test(
+      'lock(immediate: true) tutucuyu ANAHTAR DISPOSE EDİLMEDEN ÖNCE çalıştırır',
+      () async {
+        final km = FakeKeyManager();
+        final cubit = await unlocked(km);
+        bool? keyAliveAtWipe;
+        var calls = 0;
+        cubit.registerPlaintextHolder(() {
+          calls++;
+          // Sıra kanıtı: temizlik çalışırken anahtar HÂLÂ canlı olmalı.
+          keyAliveAtWipe = !km.issued.single.disposed;
+        });
+
+        cubit.lock(immediate: true); // arka plan yolu: frame BEKLENMEZ
+
+        expect(calls, 1);
+        expect(keyAliveAtWipe, isTrue);
+        expect(km.issued.single.disposed, isTrue); // sonra anahtar gitti
+        expect(cubit.state.status, VaultLockStatus.locked);
+      },
+    );
+
+    test('arka plana geçiş (paused) tutucuyu çalıştırır', () async {
+      final cubit = await unlocked(FakeKeyManager());
+      var calls = 0;
+      cubit.registerPlaintextHolder(() => calls++);
+      cubit.onAppBackgrounded(paused: true);
+      expect(calls, 1);
+    });
+
+    test('onAuthSignedOut tutucuyu çalıştırır', () async {
+      final cubit = await unlocked(FakeKeyManager());
+      var calls = 0;
+      cubit.registerPlaintextHolder(() => calls++);
+      cubit.onAuthSignedOut();
+      expect(calls, 1);
+    });
+
+    test('resetVault tutucuyu çalıştırır', () async {
+      final cubit = await unlocked(FakeKeyManager());
+      var calls = 0;
+      cubit.registerPlaintextHolder(() => calls++);
+      await cubit.resetVault();
+      expect(calls, greaterThanOrEqualTo(1));
+    });
+
+    test('close() tutucuyu çalıştırır', () async {
+      final cubit = await unlocked(FakeKeyManager());
+      var calls = 0;
+      cubit.registerPlaintextHolder(() => calls++);
+      await cubit.close();
+      expect(calls, 1);
+    });
+
+    test('kayıt geri alınınca ARTIK çağrılmaz', () async {
+      final cubit = await unlocked(FakeKeyManager());
+      var calls = 0;
+      final unregister = cubit.registerPlaintextHolder(() => calls++);
+      unregister();
+      cubit.lock(immediate: true);
+      expect(calls, 0);
+    });
+
+    test(
+      'bir tutucu FIRLATIRSA diğerleri + key dispose YİNE çalışır',
+      () async {
+        final km = FakeKeyManager();
+        final cubit = await unlocked(km);
+        var second = 0;
+        cubit
+          ..registerPlaintextHolder(() => throw StateError('tutucu patladı'))
+          ..registerPlaintextHolder(() => second++);
+        cubit.lock(immediate: true);
+        expect(second, 1);
+        expect(km.issued.single.disposed, isTrue);
+        expect(cubit.state.status, VaultLockStatus.locked);
+      },
+    );
+  });
+
   group('reset', () {
     test('resetVault → tüm anahtarlar silinir, biometric.disable çağrılır, '
         'uninitialized', () async {
@@ -816,6 +1033,32 @@ void main() {
       // Kırılgan length==N yerine biometric key dahil mi (reviewer 5.tur notu).
       expect(VaultStorageKeys.all, contains(VaultStorageKeys.biometricKey));
     });
+
+    test(
+      'unlocked iken reset ÖNCE lock(immediate) yolundan geçer (P3-2)',
+      () async {
+        await store.write(_fakeAttrs());
+        final km = FakeKeyManager();
+        final cubit = _build(km, store);
+        await cubit.bootstrap();
+        await cubit.unlock('parola123');
+        expect(cubit.state.status, VaultLockStatus.unlocked);
+
+        final seen = <VaultLockStatus>[];
+        final sub = cubit.stream.listen((s) => seen.add(s.status));
+        await cubit.resetVault();
+        await Future<void>.delayed(Duration.zero); // stream teslimi
+        await sub.cancel();
+
+        // Durum makinesi ATLANMADI: locking → locked → uninitialized.
+        expect(seen, [
+          VaultLockStatus.locking,
+          VaultLockStatus.locked,
+          VaultLockStatus.uninitialized,
+        ]);
+        expect(km.issued.single.disposed, isTrue);
+      },
+    );
 
     test('signed-in reset tombstones the server token rows', () async {
       final tokenRepo = FakeRemoteTokenRepository();
@@ -1182,6 +1425,32 @@ void main() {
       await cubit.biometricUnlock();
       expect(cubit.state.status, VaultLockStatus.locked);
       expect(cubit.state.error, VaultLockError.biometricFailed);
+    });
+
+    test('retrieve EŞLENMEMİŞ bir tip fırlatırsa prompt-in-flight bayrağı '
+        'ASILI KALMAZ → sonraki inactive YİNE kilitler (P2-2)', () async {
+      // `MissingPluginException` `PlatformException`'dan TÜREMEZ, dolayısıyla
+      // `BiometricServiceImpl.retrieve`'in eşlemesine takılmaz ve domain
+      // tiplerinden hiçbirine dönüşmeden yukarı çıkar. `UnlockPage` de
+      // yakalamaz → eskiden bayrak sonsuza dek true kalır, `inactive` kilidi
+      // cubit'in kalan ömrü boyunca devre dışı olurdu.
+      final cubit = await lockedEnrolled(
+        FakeBiometricService(
+          retrieveError: MissingPluginException('kanal yok (test)'),
+        ),
+      );
+      await expectLater(
+        cubit.biometricUnlock(),
+        throwsA(isA<MissingPluginException>()),
+      );
+
+      // Kullanıcı parolayla açar...
+      await cubit.unlock('parola123');
+      expect(cubit.state.status, VaultLockStatus.unlocked);
+
+      // ...ve `inactive` (app switcher / bildirim gölgesi) YİNE kilitlemeli.
+      cubit.onAppBackgrounded(paused: false);
+      expect(cubit.state.status, VaultLockStatus.locked);
     });
 
     test('biometricUnlock unwrap fail → locked + biometricFailed', () async {

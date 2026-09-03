@@ -72,6 +72,25 @@ class _FakeLock extends Cubit<VaultLockState> implements VaultLockCubit {
     _active = false;
   }
 
+  /// Kayıtlı plaintext temizleyicileri (güvenlik denetimi P2-1). Sayfa
+  /// `didChangeDependencies`'te kaydolur, `dispose`'ta kaydı geri alır;
+  /// `noSuchMethod` null döndüğü için burada GERÇEKLENMESİ ZORUNLU (dönüş tipi
+  /// `VoidCallback`).
+  final List<void Function()> plaintextHolders = [];
+
+  @override
+  VoidCallback registerPlaintextHolder(void Function() wipe) {
+    plaintextHolders.add(wipe);
+    return () => plaintextHolders.remove(wipe);
+  }
+
+  /// Testte "masterKey dispose edildi" anını taklit eder.
+  void firePlaintextWipe() {
+    for (final w in List<void Function()>.of(plaintextHolders)) {
+      w();
+    }
+  }
+
   @override
   noSuchMethod(Invocation i) {}
 }
@@ -780,6 +799,53 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(repo.stored, hasLength(1));
+    expect(find.text('1 token içe aktarılacak'), findsNothing);
+    expect(find.text('Yedek dosyası seç'), findsOneWidget);
+  });
+
+  testWidgets('masterKey dispose → yüklü yedeğin düz metni bırakılır (NEW-4b)', (
+    tester,
+  ) async {
+    // `_raw` içe aktarılan dosyanın TAMAMIDIR (her tohum içinde). Kilit
+    // kapandığında (arka plan, signOut, reset) masterKey ile AYNI anda düşmeli;
+    // bir frame'e (dispose'a) bağlı kalmamalı — bkz. P2-1.
+    final service = _FakeImportService(
+      result: ImportPreview(source: ImportSource.aegis, toAdd: [_acc('a')]),
+    );
+    final documents = _FakeDocuments(document: _doc());
+    final vault = VaultCubit(_FakeRepo());
+    await vault.load();
+    addTearDown(vault.close);
+    // Ağaç iki kez pump edilir: temizleyici bilinçli olarak `setState`
+    // ÇAĞIRMAZ (dispose sonrası da gelebilir), bu yüzden yeniden çizimi test
+    // tetikler — gerçekte kilit redirect'i getirir.
+    Widget tree() => MultiBlocProvider(
+      providers: [
+        BlocProvider<VaultLockCubit>.value(value: lock),
+        BlocProvider<VaultCubit>.value(value: vault),
+      ],
+      child: MaterialApp(
+        home: ImportPage(service: service, documents: documents),
+      ),
+    );
+
+    await tester.pumpWidget(tree());
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Dosya seç'));
+    await tester.pumpAndSettle();
+    expect(find.text('1 token içe aktarılacak'), findsOneWidget);
+    expect(
+      lock.plaintextHolders,
+      hasLength(1),
+      reason: 'sayfa temizleyicisini kaydetmiş olmalı',
+    );
+
+    lock.firePlaintextWipe(); // = VaultLockCubit._disposeKey()
+
+    await tester.pumpWidget(tree());
+    await tester.pumpAndSettle();
+    // `_preview` null'landığı için sayfa dosya seçme adımına düşer — düz metnin
+    // (`_raw`, her tohumu içeren TÜM yedek dosyası) gerçekten bırakıldığı budur.
     expect(find.text('1 token içe aktarılacak'), findsNothing);
     expect(find.text('Yedek dosyası seç'), findsOneWidget);
   });

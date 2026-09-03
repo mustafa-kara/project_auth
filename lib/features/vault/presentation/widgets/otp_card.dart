@@ -15,6 +15,7 @@ import 'package:flutter/services.dart';
 import '../../../../core/di/locator.dart';
 import '../../../../core/otp/otp_account.dart';
 import '../../../../core/otp/otp_generator.dart';
+import '../../../../core/platform/sensitive_clipboard.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/ui/tokens.dart';
 import '../../../../core/ui/widgets/countdown_ring.dart';
@@ -73,14 +74,37 @@ class _OtpCardState extends State<OtpCard> {
   /// OTP rotates with its period and the user pastes immediately.
   /// (Same pattern as recovery_show_page — there 60s; OTP is shorter-lived.)
   static const Duration _clearAfter = Duration(seconds: 30);
+
+  /// OS düzeyinde pano süre sonu (iOS `UIPasteboard.expirationDate`), review
+  /// [P2-4]. [_clearAfter]'dan KASITLI olarak uzun: normal akışta koşullu Dart
+  /// temizliği kazanmalı (kullanıcı arada başka bir şey kopyaladıysa panosuna
+  /// DOKUNMAZ — OS süre sonu bu ayrımı yapamaz, kendi ögesini düşürür). OS süre
+  /// sonu yalnız Dart timer'ının HİÇ çalışmadığı durumun (süreç öldürüldü /
+  /// donduruldu) emniyet ağıdır.
+  static const Duration _clipboardExpiry = Duration(seconds: 45);
+
   Timer? _clearTimer;
   String? _copiedValue;
+
+  /// Base32 tohumun ÇÖZÜLMÜŞ hâli — kart başına BİR KEZ (güvenlik denetimi P3-3).
+  ///
+  /// `OtpAccount.secretBytes` bir getter'dır ve her çağrıda `Base32.decode`
+  /// çalıştırıp hem büyüyebilir bir `List<int>` hem de bir `Uint8List` kopyası
+  /// üretir — hiçbiri sıfırlanmadan. `_recompute` saniyede bir tetiklendiği için
+  /// 20 token'lık açık bir vault on dakikada ham TOTP tohumlarının ~24.000
+  /// temizlenmemiş kopyasını genç kuşağa saçıyordu. Burada bir kez çözülür,
+  /// hesap değişince yenilenir ve `dispose`'ta sıfırlanır.
+  ///
+  /// **Dürüst sınır:** `OtpAccount.secret` `String`'i oturum boyunca zaten
+  /// bellektedir; bu, tohumu kaldırmaz — ÇOĞALMASINI durdurur.
+  Uint8List? _secretBytes;
 
   bool get _isTimeBased => widget.account.type != OtpType.hotp;
 
   @override
   void initState() {
     super.initState();
+    _decodeSecret();
     _recompute();
     _syncTimer();
   }
@@ -89,9 +113,24 @@ class _OtpCardState extends State<OtpCard> {
   void didUpdateWidget(covariant OtpCard old) {
     super.didUpdateWidget(old);
     if (old.account != widget.account) {
+      _decodeSecret(); // yeni hesap → eski tampon sıfırlanır, yenisi çözülür
       _recompute();
       _syncTimer();
     }
+  }
+
+  /// Önceki tamponu sıfırlayıp güncel hesabın tohumunu çözer.
+  void _decodeSecret() {
+    _zeroSecret();
+    // Geçersiz Base32 burada fırlatır — eskiden `_recompute` içinde, yani AYNI
+    // çağrı ağacında (initState/didUpdateWidget) fırlıyordu; davranış değişmez.
+    _secretBytes = widget.account.secretBytes;
+  }
+
+  void _zeroSecret() {
+    final b = _secretBytes;
+    if (b != null) b.fillRange(0, b.length, 0);
+    _secretBytes = null;
   }
 
   void _syncTimer() {
@@ -109,21 +148,24 @@ class _OtpCardState extends State<OtpCard> {
   void _recompute() {
     final a = widget.account;
     final now = DateTime.now();
+    // initState/didUpdateWidget `_decodeSecret`'i HER ZAMAN `_recompute`'tan önce
+    // çağırır; timer da yalnız o ikisinden sonra kurulur (P3-3).
+    final secret = _secretBytes!;
     String code;
     switch (a.type) {
       case OtpType.totp:
         code = _gen.totp(
-          secret: a.secretBytes,
+          secret: secret,
           time: now,
           period: a.period,
           digits: a.digits,
           algorithm: a.algorithm,
         );
       case OtpType.steam:
-        code = _gen.steam(secret: a.secretBytes, time: now, period: a.period);
+        code = _gen.steam(secret: secret, time: now, period: a.period);
       case OtpType.hotp:
         code = _gen.hotp(
-          secret: a.secretBytes,
+          secret: secret,
           counter: a.counter,
           digits: a.digits,
           algorithm: a.algorithm,
@@ -148,7 +190,10 @@ class _OtpCardState extends State<OtpCard> {
 
   Future<void> _copy() async {
     final code = _code;
-    await Clipboard.setData(ClipboardData(text: code));
+    // Düz `Clipboard.setData` DEĞİL: kod cihaz-yerel kalsın (iOS Universal
+    // Clipboard ile diğer cihazlara geçmesin), Android 13+ pano önizlemesinde
+    // görünmesin ve OS'un kendi süre sonu emniyet ağı olsun (review [P2-4]).
+    await SensitiveClipboard.setText(code, expiresIn: _clipboardExpiry);
     _copiedValue = code;
     _clearTimer?.cancel();
     _clearTimer = Timer(_clearAfter, _clearClipboardIfUnchanged);
@@ -182,6 +227,7 @@ class _OtpCardState extends State<OtpCard> {
   @override
   void dispose() {
     _timer?.cancel();
+    _zeroSecret(); // çözülmüş tohum tamponunu sıfırla (P3-3)
     // NOTE: _clearTimer is intentionally NOT cancelled here — the conditional
     // clipboard wipe must still fire after the card is disposed (e.g. scrolled
     // out of view). Its callback is disposed-safe (no context/setState).

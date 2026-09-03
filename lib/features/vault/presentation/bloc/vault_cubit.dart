@@ -610,6 +610,29 @@ class VaultCubit extends Cubit<VaultState> {
     return List<String>.unmodifiable(tags);
   }
 
+  /// Çözülmüş TÜM plaintext'i SENKRON bırakır (güvenlik denetimi P2-1).
+  ///
+  /// `VaultLockCubit` bunu `_disposeKey()` içinde, masterKey serbest bırakılmadan
+  /// HEMEN ÖNCE çağırır (kayıt: `registerPlaintextHolder`, bağlantı yeri
+  /// `app_router.dart` ShellRoute'u). Neden gerekli: `lock(immediate: true)`
+  /// anahtarı senkron dispose eder çünkü arka planda frame GARANTİ DEĞİLDİR —
+  /// ama `state.accounts` (her `OtpAccount`, Base32 `secret`'ıyla) ve repo'nun
+  /// `_lastById`'si yalnız subtree teardown ile (yani bir frame ile) düşüyordu.
+  /// Anahtar gidiyor, korumakla görevli olduğu tohumlar kalıyordu.
+  ///
+  /// Subtree teardown OLDUĞU GİBİ korunur; artık mekanizma değil, temizlik.
+  ///
+  /// **Dürüst sınır:** `String` silinemez → bu bir "wipe" değil, KÖKSÜZLEŞTİRME
+  /// (bkz. `EncryptedVaultRepository.forgetPlaintext`, CRYPTO.md §16.5).
+  void wipe() {
+    // `Object` üzerinden: `VaultRepository` ile [PlaintextCache] AKRABA TİPLER
+    // DEĞİL → Dart `is` ile doğrudan promote etmez (test edilen tip, statik tipin
+    // alt tipi olmalı). Cache tutmayan depolar (Faz 1 plaintext repo) no-op.
+    final Object repo = _repository;
+    if (repo is PlaintextCache) repo.forgetPlaintext();
+    if (!isClosed) emit(const VaultState());
+  }
+
   /// Bütünlük hatası state'inde mutasyonu reddeder (review P1 — kritik).
   void _guardIntegrity() {
     if (state.error != null) {

@@ -32,6 +32,20 @@ abstract interface class VaultRepository {
   Future<void> purgeCorrupted();
 }
 
+/// Bellekte ÇÖZÜLMÜŞ plaintext tutan depoların "unut" portu (güvenlik denetimi
+/// P2-1).
+///
+/// `VaultRepository`'ye EKLENMEZ, ayrı tutulur: her depo cache tutmaz (Faz 1
+/// [SecureStorageVaultRepository] tutmuyor) ve arayüze zorunlu üye eklemek tüm
+/// test sahtelerini kırardı. `VaultCubit.wipe()` runtime'da bu tipi kontrol eder.
+///
+/// **Sözleşme:** senkron olmalı ve ASLA fırlatmamalı — çağıran `masterKey`
+/// dispose edilmeden hemen ÖNCE, bir frame'e bel bağlamadan çalıştırır.
+abstract interface class PlaintextCache {
+  /// Bellekte tutulan çözülmüş kayıtları bırakır. Diske DOKUNMAZ.
+  void forgetPlaintext();
+}
+
 /// `flutter_secure_storage` tabanlı kalıcılık.
 class SecureStorageVaultRepository implements VaultRepository {
   /// Tüm vault'un tutulduğu tek depo anahtarı.

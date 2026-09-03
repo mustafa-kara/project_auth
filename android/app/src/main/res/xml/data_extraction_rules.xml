@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Güvenlik denetimi P1-2 — `flutter_secure_storage`'ın SharedPreferences
+  dosyaları ne buluta yedeklenir ne de cihazdan cihaza (D2D) taşınır.
+
+  NEDEN: bu dosyalar YALNIZCA ciphertext tutar; onu açan sarmalayıcı anahtar
+  Android Keystore'dadır ve Keystore, tasarımı gereği cihazı TERK ETMEZ. Yedek/
+  transfer ciphertext'i yeni cihaza taşırsa ilk okuma unwrap hatası verir. Bu
+  proje `resetOnError: false` kullandığı için (locator.dart) o hata sessiz bir
+  veri silme yerine `keyAttributesCorrupted` ekranına döner — ama en iyisi
+  senaryonun hiç oluşmaması: kullanıcının yeni cihaz yolu sunucudan restore'dur
+  (CRYPTO.md §12), taşınan bir SharedPreferences dosyası değil.
+
+  `android:allowBackup="false"` YALNIZ bulut yedeğini güvenilir biçimde kapatır:
+  Android 12+ (API 31) hedefleyen uygulamalarda bazı üreticilerin cihazlarında
+  D2D göçü kapatılamaz (developer.android.com/guide/topics/manifest/application-element
+  → allowBackup). Bu yüzden `<device-transfer>` bloğu ayrıca gereklidir.
+
+  DOSYA ADLARI kurulu plugin'in Java kaynağından alınmıştır
+  (~/.pub-cache/hosted/pub.dev/flutter_secure_storage-10.3.1/android/src/main/java/
+   com/it_nomads/fluttersecurestorage/):
+    • FlutterSecureStorageConfig.java:15  DEFAULT_PREF_NAME = "FlutterSecureStorage"
+      (veri prefs'i; getEffectiveDataPrefsName() :175 — storageNamespace verilmezse budur)
+    • FlutterSecureStorageConfig.java:184 getEffectiveKeyStoragePrefsName() →
+      "FlutterSecureKeyStorage" (sarmalanmış anahtar prefs'i), namespace varsa
+      "FlutterSecureKeyStorage:<namespace>"
+    • NamespacedConfigSource.java:15 LEGACY_GLOBAL_CONFIG_NAME =
+      "FlutterSecureStorageConfiguration"; :33 namespace'li hâli
+      "FlutterSecureStorageConfiguration:<sharedPreferencesName>"
+    • "vault_biometric" namespace'i uygulamanın kendi seçimi
+      (lib/features/auth/data/biometric_service_impl.dart, AndroidOptions.biometric
+      storageNamespace) → kendi veri/anahtar/config prefs üçlüsünü üretir.
+
+  Plugin sürümü yükseltilirken bu adların değişmediği yukarıdaki kaynaklardan
+  YENİDEN doğrulanmalıdır (hatalı bir path sessizce eşleşmez = koruma yok).
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="FlutterSecureStorage.xml" />
+        <exclude domain="sharedpref" path="FlutterSecureKeyStorage.xml" />
+        <exclude domain="sharedpref" path="FlutterSecureStorageConfiguration.xml" />
+        <exclude domain="sharedpref" path="FlutterSecureStorageConfiguration:FlutterSecureStorage.xml" />
+        <exclude domain="sharedpref" path="vault_biometric.xml" />
+        <exclude domain="sharedpref" path="FlutterSecureKeyStorage:vault_biometric.xml" />
+        <exclude domain="sharedpref" path="FlutterSecureStorageConfiguration:vault_biometric.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="FlutterSecureStorage.xml" />
+        <exclude domain="sharedpref" path="FlutterSecureKeyStorage.xml" />
+        <exclude domain="sharedpref" path="FlutterSecureStorageConfiguration.xml" />
+        <exclude domain="sharedpref" path="FlutterSecureStorageConfiguration:FlutterSecureStorage.xml" />
+        <exclude domain="sharedpref" path="vault_biometric.xml" />
+        <exclude domain="sharedpref" path="FlutterSecureKeyStorage:vault_biometric.xml" />
+        <exclude domain="sharedpref" path="FlutterSecureStorageConfiguration:vault_biometric.xml" />
+    </device-transfer>
+</data-extraction-rules>

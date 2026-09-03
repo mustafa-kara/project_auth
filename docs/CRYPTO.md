@@ -7,6 +7,9 @@
 > redesign** (the design system is kept local); **Patch 5: biometric unlock
 > shortcut (3rd wrap + OS-keystore access control)** — see §11. Phase 3 sync envelopes: §12–14.
 > Screen-capture protection (`SecureScreenScope`, ref-counted): §15.
+> **Phase 7 — key-lifecycle & memory-wiping review (2026-09-02):** the secure-storage options, the
+> sign-out rule and the plaintext-drop rule are folded into §3, §9.1–§9.3 and §11; the sensitive
+> clipboard is in §16.5; **§18 states, in one place, what "wiping" can and cannot mean in Dart.**
 
 ## 1. Package decision — `sodium 3.4.6` + `sodium_libs 3.4.6+4`
 
@@ -33,7 +36,13 @@
 - The nonce is **random** on every encryption (`randombytes.buf(nonceBytes)`); the XChaCha 24-byte
   nonce → safe to randomize, and is stored alongside the ciphertext.
 - **Argon2id is mandatory in a separate isolate** (`runIsolated`): pwhash takes seconds and would block
-  the UI. Inside the isolate the password is converted to an `Int8List`, then zero-filled after the operation.
+  the UI. Inside the isolate the password is converted to an `Int8List`, then zero-filled after the operation,
+  and the derived KEK comes back as a **native handle** (`copy().detach()`), so the key bytes never round-trip
+  through the Dart heap.
+  **Half the story, said plainly (Phase 7 review):** `Isolate.run` captures the password *`String`*, so it is
+  **deep-copied** into the worker isolate's heap — and a Dart `String` cannot be zeroed by anyone. The
+  `Int8List` wipe clears the copy we can reach; the copied `String` is freed unscrubbed when the worker shuts
+  down. Same class of exposure as every other password/secret `String` in the app — see §18.
 
 ## 3. Key hierarchy (Ente model)
 
@@ -54,6 +63,43 @@ biometricKey (32-byte random, OS-gated) ─────wrap──▶ biometricEn
 - `KeyHandle` is an opaque wrapper → sodium's `SecureKey` type does not leak into the domain/public API.
   Raw key bytes exist only inside the wrap/unwrap helpers, immediately followed by `fillRange(0)`.
 
+**Key lifetime rules (Phase 7 key-lifecycle review, 2026-09-02).** Three invariants that used to be
+implicit are now enforced in code:
+
+- **The key's disposal is also the plaintext's disposal.** `VaultLockCubit._disposeKey()` runs every
+  registered *plaintext holder* **synchronously, before** `_masterKey.dispose()`. Holders register through
+  `registerPlaintextHolder(void Function() wipe)`, which returns an unregister callback: today the vault
+  shell registers `VaultCubit.wipe()` (which clears `VaultState` and calls
+  `EncryptedVaultRepository.forgetPlaintext()`) and `ImportPage` registers the drop of its raw file text.
+  A holder that throws cannot stop the other holders or the key's disposal.
+  **Why it had to be synchronous:** `lock(immediate: true)` disposes the key without waiting for a frame
+  precisely because a backgrounded app is not guaranteed one — but dropping the decrypted secrets still
+  depended on that frame (`emit` → router redirect → subtree teardown → `VaultCubit.close()`). The key went,
+  and every `OtpAccount.secret` it existed to protect stayed. Subtree teardown is unchanged; it is now
+  cleanup rather than the mechanism.
+  **What this achieves, stated honestly: unrooting, not erasing.** Dart cannot zero a `String`, and the GC
+  does not scrub what it reclaims. The gain is that the secrets stop being reachable from the object graph —
+  the difference between "walk the graph from the cubit" and "trawl freed heap". Do not call it wiping (§18).
+- **Every path out of `signedIn` closes the E2E gate**, not just the sign-out button. The identity gate is
+  *above* the E2E gate (ARCHITECTURE §7), so `onAuthSignedOut()` now fires on the `authStateChanges` stream's
+  `signedOut` (gotrue emits that on refresh-token failure, server-side revocation, expiry and a global
+  sign-out from another device — the paths a **stolen device** actually takes), on
+  `cancelPendingConfirmation()`, on `bootstrap()`'s non-`signedIn` branches, and once more at the boundary in
+  `main.dart._onSession` (the callback is idempotent, so the double call is harmless). Before this, a
+  non-interactive sign-out left the master key resident for as long as the user sat on `/auth/login`, and
+  signing back in as the **same uid** reused the still-`unlocked` cubit — i.e. the *account* password alone
+  re-opened the plaintext vault, inverting the premise that the two passwords do not derive each other.
+- **`resetVault()` goes through the state machine.** When the vault is `unlocked` it now calls
+  `lock(immediate: true)` first (which disposes the key *and* runs the plaintext holders) instead of reaching
+  past the machine to `_disposeKey()` and then `await`ing the remote tombstone, `biometric.disable()` and
+  `_deleteKeys()` with the unlocked subtree still mounted around a freed `KeyHandle`. That window was a latent
+  use-after-free (`sodium_mprotect_readonly` on freed memory), unreachable through today's only in-vault
+  caller but exactly what the `locking` → dispose ordering exists to prevent. The deliberate cosmetic cost:
+  a reset from an unlocked vault now flashes through `/unlock` for the duration of those awaits (and the
+  integrity screen disappears, since `VaultCubit.wipe()` clears `state.error`) before landing on `/setup` —
+  the reset itself always completes, and a dedicated `resetting` status is the fix should the flash ever
+  confuse anyone on a slow network.
+
 ## 4. AAD (Additional Authenticated Data) scheme
 
 The AEAD additionalData field cryptographically binds the context → a blob cannot be decrypted in another
@@ -66,6 +112,17 @@ context (e.g. a masterKey-wrap blob cannot be opened as a token).
 | masterKey ← biometricKey (Patch 5) | `masterkey-biometric\|1` |
 | Token record (Patch 3) | `token\|1\|<id>` |
 | Encrypted backup (Phase 5) | `backup\|<v>\|<kdf.alg>\|<opslimit>\|<memlimit>\|<base64 salt>\|<cipher.alg>` |
+
+**Encoding (Phase 7 review, P3-6) — the AAD strings themselves are UNCHANGED.** `KeyManager._aad` and
+`EncryptedVaultRepository._aad` build the bytes with **`utf8.encode`**, not `String.codeUnits`. `codeUnits`
+truncates UTF-16 units to 8 bits, so a single non-ASCII character would have produced a silently *wrong*
+AAD; the column header above reads "UTF-8/codeUnits" because for these strings the two are byte-identical,
+and that is now **pinned by a test** (`test/features/auth/aad_encoding_test.dart`) instead of assumed. Every
+AAD this app produces is ASCII: the three `KeyManager` constants are literals, and a token AAD is the ASCII
+prefix plus a uuid v4 id (locally only `OtpAccount`'s `Uuid().v4()` mints ids — the import parsers
+deliberately mint fresh ones — and `tokens.id` is a Postgres `uuid` column, so a non-ASCII id cannot arrive
+through sync either). **No blob, no record `v`, no envelope changed**; existing vaults and backups open
+exactly as before.
 
 ## 5. Recovery key — our own BIP-39 implementation
 
@@ -185,6 +242,78 @@ an integer-valued double (`3.0`) is accepted.
   in encrypted) it runs again, and thanks to **upsert** it does not overwrite what exists + no duplicates.
   If load throws an integrity error, it performs no destructive step (no plaintext deletion / no marker).
 
+### 9.1 Shared secure-storage options (Phase 7 review, P1-2/P3-1)
+
+Every vault store — `KeyAttributesStore`, `VaultMigration`, `EncryptedVaultRepository`, the marker stores —
+shares one `FlutterSecureStorage` instance, and its options are now **passed explicitly**, because two plugin
+defaults were wrong for irreplaceable key material. The single definition is `secureStorageOptions()` in
+`lib/core/config/secure_gotrue_storage.dart`; the DI registration and the Supabase session adapters (§9.2)
+both call it so the two sides cannot drift apart against the same Keystore.
+
+| Option | Value | Why the default was wrong |
+|---|---|---|
+| `AndroidOptions.resetOnError` | **`false`** (plugin default `true`) | fss 10.x deletes the entry and retries on **any** read error, so the second read returns **`null` with no exception** — the "silent null = uninitialized" case `KeyAttributesStore` exists to prevent. `bootstrap()` would see `attrs == null`, show **setup**, and `commitSetup` would overwrite the only two wraps of the master key. Recovery mnemonic included: gone. |
+| `AndroidOptions.migrateWithBackup` | **`true`** (default `false`) | makes the v9→v10 algorithm migration crash-recoverable; a crash mid-migration otherwise lands in the `resetOnError` branch above. |
+| `IOSOptions.accessibility` | **`unlocked_this_device`** (default `unlocked`) | the default is not a `ThisDeviceOnly` variant, so the item rides an encrypted iTunes/Finder backup onto a **new device**. The documented new-device story is a server restore (§12), not a keychain migration. Accessibility applies at **write** time, so existing items migrate on their next write — no user is stranded. |
+
+Two consequences follow, and both are implemented:
+
+- **A storage failure is now a screen, never a silent setup.** With `resetOnError: false` a Keystore/Keychain
+  failure surfaces as a `PlatformException`. `VaultLockCubit.bootstrap()` maps it to
+  `keyAttributesCorrupted` exactly as it already mapped `FormatException` → `/auth-integrity`, which offers
+  **"Yeniden dene"** (`retryBootstrap`) and, as a last resort, reset. Unmapped, the exception would have
+  escaped the `bootstrap` future as an unhandled async error and left the state at `uninitialized` — i.e. the
+  router would still have shown setup, which is precisely the outcome being defended against. The same
+  mapping now covers the unlock family (`unlock`, `recoverWithNewPassword`, `biometricUnlock` and the
+  migration marker reads they run), where the exception used to become an unhandled async error — no state
+  change, no message, a button that appeared to do nothing; and the corrupted state carries an `attempt`
+  counter so a repeated failure is a *new* state, letting `/auth-integrity` show a spinner and "Hâlâ
+  okunamıyor" instead of bloc silently dropping an emit equal to the current one.
+- **The ciphertext must not travel without its wrapping key.** `android:allowBackup="false"` +
+  `fullBackupContent="false"` reliably disable only **cloud** backup; per the Android manifest documentation,
+  apps targeting API 31+ cannot always disable **device-to-device** migration. A D2D transfer would move the
+  plugin's SharedPreferences *ciphertext* to a new phone while the wrapping key stays in the Android Keystore
+  by construction → first read fails to unwrap. `android/app/src/main/res/xml/data_extraction_rules.xml`
+  (referenced from the manifest as `android:dataExtractionRules`) therefore excludes the plugin's prefs files
+  from **both** `<cloud-backup>` and `<device-transfer>` — the data, key and config prefs for the default
+  namespace *and* for the separate `vault_biometric` namespace (§11). The file names come from the installed
+  plugin's Java source and are cited there; **re-verify them on every plugin upgrade**, because a path that no
+  longer matches fails silently, which means no protection at all.
+
+### 9.2 The Supabase session and the PKCE verifier live in the same secure storage (P2-5)
+
+`supabase_flutter` defaults both `localStorage` and `pkceAsyncStorage` to **SharedPreferences**, so the
+long-lived refresh token and the PKCE code verifier sat in a plain XML/plist file while everything else in the
+app was behind Keychain/Keystore. `SecureLocalStorage` and `SecureGotrueAsyncStorage`
+(`lib/core/config/secure_gotrue_storage.dart`) replace them, built on `FlutterSecureStorage` with the §9.1
+options. They are constructed in `main()` **before** `configureDependencies()` — `Supabase.initialize` runs
+first — so they hold their own storage instance rather than the locator's; the shared options factory is what
+keeps the two identical.
+
+- **The E2E boundary was never at risk** — a stolen refresh token yields only ciphertext (§12/§13). What it
+  did yield is the Argon2id-wrapped master key for an offline attack at whatever the user's master-password
+  strength happens to be, and **write** access: an attacker can tombstone every token row, and sync replicates
+  that faithfully to the user's real devices. And per §9.1, an Android D2D transfer moved this file
+  **readably** — so the one credential surviving a device migration intact was the weakest-stored one.
+- **One-time migration, so nobody is signed out by the upgrade.** The session key is regenerated with
+  supabase_flutter's own formula (`sb-<host-first-label>-auth-token`) and the verifier migrates under whatever
+  key gotrue asks for, so an in-flight email confirmation survives. The prefs copy is deleted **only after**
+  the secure write succeeds → a crash mid-migration retries on the next launch instead of losing the session.
+- **The error policy is deliberately the opposite of §9.1's.** Key attributes are irreplaceable, so a storage
+  failure there must surface. A session is a replaceable **cache**: the user logs in again. Read/write
+  failures here are therefore swallowed and read as **"signed out"** — letting the exception escape
+  `Supabase.initialize` would be a black screen at boot with no recovery path, and losing a session is not
+  losing data.
+
+### 9.3 Zero-filling in the token store (P2-6)
+
+`EncryptedVaultRepository` was the only crypto call site not zero-filling its plaintext buffers, while it is
+the hottest one (every load, every save). Both the decrypt output on load and the encrypt input on save are
+now cleared in a `try/finally`, mirroring `BackupService.importDetailed` and the §3/§16.5 rule.
+**Limit (accepted):** the `String` that `utf8.decode` produces and the `secret` inside the resulting
+`OtpAccount` remain unwipeable — this clears one of the two copies, which is what is actually achievable
+(§18). Do it for consistency with the rest of the codebase, not because it closes the hole.
+
 ## 10. Test strategy
 
 - **Pure-Dart (`test/`, plain `flutter test`):** `EncryptedBlob`, `KeyAttributes`
@@ -234,6 +363,19 @@ strong-availability → `local_auth.getAvailableBiometrics().contains(strong)`
 **Lifecycle:** the biometric system prompt can briefly produce `inactive`; while `_biometricPromptInFlight`
 is true, `inactive` is exempt from the abort (a successful unlock is not interrupted), while `paused` (a real background)
 still triggers a definite abort. Identical to `_abortToBackground` + ownership `unlock()`.
+**The flag is cleared in a single `finally` (Phase 7 review, P2-2)** — it used to be reset inside each of the
+five typed `catch` clauses and on the success path, so anything `retrieve()` threw *outside* those types left
+it stuck `true` for the rest of the cubit's life. That is reachable: `MissingPluginException` does not extend
+`PlatformException`, so `BiometricServiceImpl` never maps it, and `UnlockPage` catches nothing. From then on
+`onAppBackgrounded(paused: false)` returned early and `inactive` — the app switcher, the notification shade,
+an incoming call — **no longer locked an unlocked vault** (`paused` still did, so it narrowed the protection
+rather than removing it). The typed failures are handled *after* the `finally`, so the `BiometricKeyMissing`
+branch's `await` no longer runs with the flag still set. Never add another assignment to that flag.
+
+**Storage options:** the biometric key deliberately does **not** use the shared instance of §9.1 — it has its
+own namespace and OS-gated options, and there the plugin's auto-delete on error is *acceptable*, because
+`BiometricKeyMissing` is a handled, recoverable state (fall back to the password, clear `bmk`, re-enrol). Its
+prefs files are nevertheless excluded from cloud backup and device transfer alongside the vault's (§9.1).
 
 **Reset/disable:** the `bmk` OS key lives in a separate namespace → `resetVault` + `disableBiometric`
 explicitly call `BiometricService.disable()` (the default `_deleteKeys` is not enough).
@@ -514,7 +656,33 @@ directly. A weak backup password is refused **before** any Argon2id work.
   the export and the import path.
 - **Limit (accepted):** the intermediate `String` produced by `jsonEncode`/`utf8.decode` cannot be
   wiped — Dart offers no way to pin or clear a `String`. The window is short and the buffer we can
-  reach is cleared; a heap dump of a live process remains outside this threat model.
+  reach is cleared; a heap dump of a live process remains outside this threat model. **This is not special to
+  the backup path** — it is equally true of the master password, the 24 mnemonic words and every
+  `OtpAccount.secret`; the full list is §18.
+- **The clipboard is hardened where the OS allows it, and not overstated where it does not (Phase 7 review,
+  P2-4).** `Clipboard.setData` writes to the bare system pasteboard: on iOS that is `UIPasteboard.general`
+  with no options, so the item joins **Universal Clipboard** and a copied recovery key can travel over the air
+  to every other device on the same iCloud account within seconds; on Android the primary clip is rendered in
+  the Android 13+ clipboard preview bubble because Flutter never sets `ClipDescription.EXTRA_IS_SENSITIVE`.
+  `SensitiveClipboard` (`lib/core/platform/sensitive_clipboard.dart`) is a small platform channel next to
+  `SecureScreen`'s:
+  - **iOS** — `setItems(_:options:)` with `.localOnly` (the item stays on this device) and `.expirationDate`
+    (the OS drops it itself, which **still holds when the process is killed** and the Dart timer never runs).
+  - **Android** — `ClipData` plus, gated on API 33+, `description.extras = PersistableBundle{EXTRA_IS_SENSITIVE:
+    true}` so the preview does not render the value. Android has **no OS-level clipboard expiry**, so the
+    expiry argument is ignored there.
+  - When the channel is absent (host VM test, web, desktop) — or the native side rejects the call — it falls
+    back to `Clipboard.setData`, so copying never regresses on any platform. Silently copying *nothing* would
+    be a worse surprise than copying unhardened.
+  The **existing conditional Dart timers are unchanged and remain the primary cleanup** (60 s for the recovery
+  mnemonic, 30 s for an OTP code); they are conditional so they never clobber something the user copied
+  meanwhile, which an OS expiry cannot distinguish. The OTP card therefore asks the OS for a *longer* 45 s
+  expiry — the backstop must not win the ordinary race. The recovery snackbar now says the copy is
+  device-local and expires, instead of implying more containment than a 60 s timer can deliver.
+  **Scope, honestly:** this does not make the clipboard safe. The foreground app can still read the primary
+  clip on Android, pasting is still free on iOS, and the pasteboard's own storage is outside the process
+  ("OS copies", §18). What is bought is closing the **off-device** path and the **preview** leak, plus an
+  expiry that survives a process kill.
 - **Limit (accepted): the isolate copy.** `ImportService.preview` runs parse+dedupe inside
   `Isolate.run` so a large file cannot jank the UI. Isolates do not share memory, so the file text
   goes in as a **copy** and the parsed `OtpAccount`s (secrets included) come back as another one.
@@ -640,8 +808,11 @@ The pair, in all three cases:
 - on resume `main.dart` repeats the check via `systemFileFlowExpired` and **locks immediately** when
   the budget was exceeded, so an app parked in the background does not stay open indefinitely.
 
-**What the exemption does NOT cover:** `onAuthSignedOut` (the identity gate closing) and an
-interactive `lock()` still take effect during a flow.
+**What the exemption does NOT cover:** `onAuthSignedOut` (the identity gate closing — which, since the
+Phase 7 review, means **every** transition out of `signedIn`, not only the sign-out button; §3) and an
+interactive `lock()` still take effect during a flow. Anything added later that locks on its own — a
+foreground idle auto-lock is the open PLAN item — must respect this exemption for the same reason it exists:
+the picker runs in another process, so the app is `paused` while the user is legitimately choosing a file.
 
 **What is actually given up:** during a window of at most 2 minutes — or, across a renewed chain, at
 most 10 — an attacker with physical access
@@ -653,3 +824,43 @@ Covered by `test/features/auth/vault_lock_cubit_test.dart` (exemption honoured, 
 renewal, the absolute cap and its reset by `endSystemFileFlow`, the `finally` pairing) and by the
 import/export widget tests plus `test/features/scan/scan_page_image_test.dart`, which assert the
 begin/end call counts (exactly one each, on the cancel, success and failure paths alike).
+
+## 18. Dart/Flutter limits — what "wiping" can and cannot mean here
+
+Written after the Phase 7 key-lifecycle review and kept separate from the fixable items above **so the two are
+never confused**. Everything in §3, §9.3 and §16.5 that talks about clearing memory is about *shrinking and
+unrooting* the resident copies of a secret. None of it erases them. Treating it as more than that would be
+theatre.
+
+1. **A `String` cannot be wiped or pinned.** The master password (the `TextEditingController.text` and every
+   substring the framework makes of it), the backup password, the 24 mnemonic words, each `OtpAccount.secret`,
+   and the JSON produced by `jsonEncode`/`utf8.decode` are all immutable heap objects with **no zeroing API**.
+   `controller.clear()` drops a *reference*; it does not erase the characters. Every `fillRange(0)` in this
+   codebase operates on a `Uint8List`/`Int8List` — never on the `String` beside it.
+2. **The GC copies, and does not scrub.** Dart's generational collector relocates live objects during
+   scavenges, so one secret may exist at several addresses at once, and reclaimed memory is not zeroed. Even a
+   perfectly disciplined `fillRange` only clears the copy you are holding.
+3. **The isolate hop deep-copies the password.** `SodiumCryptoService.deriveKek` passes a closure to
+   `Isolate.run` that captures the password `String`, so it is copied into the worker's heap; the `Int8List`
+   derived from it *inside* the isolate is correctly zeroed, but the copied `String` cannot be, and the
+   worker's heap is freed without scrubbing when the isolate shuts down (§2). The same applies to
+   `ImportService.preview` (§16.5).
+4. **Platform-channel values are `String`s.** `flutter_secure_storage`'s API is `String`-only, so the
+   biometric key transits as base64 through Dart, the channel codec and the platform side with no wipeable
+   representation at any hop. Unavoidable short of a custom FFI keystore binding.
+5. **No control over OS-level copies.** Keyboard/IME buffers, the pasteboard's own storage, swap, hibernation
+   images and OS crash dumps are all outside the process. `enableSuggestions: false`/`autocorrect: false`,
+   `FLAG_SECURE` (§15) and the sensitive-clipboard flags (§16.5) narrow this; they do not close it.
+6. **iOS cannot block screenshots** — see §15, where it is already documented and caveated.
+7. **A heap dump of the live process defeats all of the above**, and is explicitly outside the threat model
+   (§16.5).
+
+**What *is* achieved, and is worth having.** The master key itself is genuinely hardened: `SecureKeyFFI`
+allocates through `sodium_malloc` (guard pages + canary + `mlock`), holds `sodium_mprotect_noaccess` at rest,
+unlocks only inside `runUnlockedNative`, and `sodium_free`s — which zeroes — on dispose; `runIsolated` returns
+the derived KEK as a native handle, so key bytes never touch the Dart heap. Around that, the disciplines above
+mean the *plaintext* secrets stop being **rooted** in the object graph the moment the key is disposed (§3),
+exist in **fewer** copies (§9.3, and the OTP card decoding its Base32 seed once per card instead of once per
+tick per card), and are never printed (`stringify => false` on both `OtpAccount` and `VaultLockState` — the
+latter's props include the recovery mnemonic, which `equatable` would otherwise print in any assert-enabled
+build: a widget-tree dump, an assertion message, a `bloc_test` failure in CI, DevTools).

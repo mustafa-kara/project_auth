@@ -18,6 +18,7 @@ import '../../../../core/ui/widgets/auth_scaffold.dart';
 import '../../../../core/ui/widgets/password_strength_bar.dart';
 import '../../domain/key_manager.dart';
 import '../bloc/vault_lock_cubit.dart';
+import '../setup_error_messages.dart';
 
 class SetupPasswordPage extends StatefulWidget {
   const SetupPasswordPage({super.key});
@@ -68,7 +69,7 @@ class _SetupPasswordPageState extends State<SetupPasswordPage> {
     } on WeakPasswordException catch (e) {
       if (mounted) setState(() => _error = e.message);
     } catch (e) {
-      if (mounted) setState(() => _error = 'Kurulum başarısız: $e');
+      if (mounted) setState(() => _error = setupErrorMessage(e));
     } finally {
       if (mounted) setState(() => _busy = false);
     }

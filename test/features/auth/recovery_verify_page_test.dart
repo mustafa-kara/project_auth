@@ -176,6 +176,28 @@ void main() {
     expect(km.issued.single.disposed, isTrue); // pending key dispose edildi
   });
 
+  testWidgets(
+    'mnemonic boşken (arka planda cancelSetup) doğrulama RangeError ATMAZ '
+    '(P3-6)',
+    (tester) async {
+      await cubit.beginSetup('parola123');
+      await pump(tester);
+      await enterWords(tester, ['word2', 'word9', 'word17']);
+
+      // Sayfa hâlâ monteli ama state setupPending'den çıktı → mnemonic const [].
+      cubit.onAppBackgrounded(paused: true);
+      await tester.pump();
+      expect(cubit.state.mnemonic, isEmpty);
+
+      await tester.tap(find.text('Kurulumu tamamla'));
+      await tester.pump();
+
+      // Eskiden mnemonic[17] RangeError fırlatırdı; şimdi güvenli iptal.
+      expect(tester.takeException(), isNull);
+      expect(cubit.state.status, VaultLockStatus.uninitialized);
+    },
+  );
+
   testWidgets('doğru kelimeler → commitSetup → unlocked', (tester) async {
     await cubit.beginSetup('parola123');
     await pump(tester);

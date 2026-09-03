@@ -181,11 +181,22 @@ void main() {
   // leave it in the clipboard indefinitely. Tap copies the code; after the
   // window it is wiped only if the clipboard still holds our value. ---
   group('OTP copy clipboard hygiene', () {
+    // Review [P2-4]: the copy goes through the hardened channel (iOS localOnly
+    // + expirationDate, Android EXTRA_IS_SENSITIVE), NOT plain
+    // `Clipboard.setData`. Standing in for the native side here keeps the wipe
+    // assertions below meaningful and pins that the card still uses it.
+    const sensitive = MethodChannel(
+      'dev.mustafakara.project_auth/sensitive_clipboard',
+    );
     late String? clipboard;
+    late int? expiresInMs;
     setUp(() {
       clipboard = null;
+      expiresInMs = null;
       TestWidgetsFlutterBinding.ensureInitialized().defaultBinaryMessenger
           .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+            // The conditional wipe still uses Clipboard.getData/setData — it
+            // must never clobber a value the user copied in the meantime.
             if (call.method == 'Clipboard.setData') {
               clipboard = (call.arguments as Map)['text'] as String?;
             } else if (call.method == 'Clipboard.getData') {
@@ -193,10 +204,20 @@ void main() {
             }
             return null;
           });
+      TestWidgetsFlutterBinding.ensureInitialized().defaultBinaryMessenger
+          .setMockMethodCallHandler(sensitive, (call) async {
+            if (call.method == 'setText') {
+              final args = call.arguments as Map;
+              clipboard = args['text'] as String?;
+              expiresInMs = args['expiresInMs'] as int?;
+            }
+            return null;
+          });
     });
     tearDown(() {
       TestWidgetsFlutterBinding.ensureInitialized().defaultBinaryMessenger
-          .setMockMethodCallHandler(SystemChannels.platform, null);
+        ..setMockMethodCallHandler(SystemChannels.platform, null)
+        ..setMockMethodCallHandler(sensitive, null);
     });
 
     testWidgets('tap copies the code, then clears it after the window', (
@@ -209,6 +230,10 @@ void main() {
       await tester.pump();
       expect(clipboard, isNotNull);
       expect(clipboard, isNotEmpty, reason: 'code copied to clipboard');
+      // OS expiry is deliberately LONGER than the 30s Dart window: the
+      // conditional wipe should normally win (it spares a value the user copied
+      // meanwhile); OS expiry is the backstop for a killed process.
+      expect(expiresInMs, 45000);
       final copied = clipboard;
 
       // Advance past the clear window (30s) — clipboard still holds our value

@@ -115,10 +115,29 @@ class _ImportPageState extends State<ImportPage> {
   /// `context.read` GÜVENLİ DEĞİL (review takibi).
   VaultLockCubit? _lock;
 
+  /// [VaultLockCubit.registerPlaintextHolder] kaydını geri alan fonksiyon (P2-1).
+  VoidCallback? _unregisterWipe;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _lock = context.read<VaultLockCubit>();
+    final lock = context.read<VaultLockCubit>();
+    if (identical(lock, _lock)) return;
+    _lock = lock;
+    // Güvenlik denetimi P2-1 — `_raw` içe aktarılan dosyanın TÜM düz metnidir
+    // (her tohum içinde). Şimdiye kadar yalnız `dispose`'ta, yani bir frame'e
+    // bağlı olarak bırakılıyordu; masterKey dispose edilirken (arka plan kilidi,
+    // signOut, reset) SENKRON bırakılması gerekir — vault'un geri kalanıyla aynı an.
+    _unregisterWipe?.call();
+    _unregisterWipe = lock.registerPlaintextHolder(_forgetRaw);
+  }
+
+  /// Kayıtlı plaintext temizleyicisi (P2-1). Senkron + fırlatmaz; `setState`
+  /// KULLANMAZ (dispose sonrası da çağrılabilir, ayrıca bu bir güvenlik temizliği
+  /// — ekranın yeniden çizilmesi kilit redirect'i ile zaten gelir).
+  void _forgetRaw() {
+    _raw = null;
+    _preview = null;
   }
 
   @override
@@ -127,12 +146,14 @@ class _ImportPageState extends State<ImportPage> {
     // kilit). O durumda `_pickFile`'ın `finally`'si henüz çalışmamıştır ve muafiyet
     // bütçesi dolana kadar açık kalırdı → burada kapatılır. `endSystemFileFlow`
     // idempotent (docs/CRYPTO.md §17 "screen dispose").
+    // P2-1 kaydını geri al (kilit cubit'i sökülmüş state'e referans TUTMASIN).
+    _unregisterWipe?.call();
     final lock = _lock;
     if (lock != null && lock.systemFileFlowActive) lock.endSystemFileFlow();
     _passwordCtrl
       ..clear()
       ..dispose();
-    _raw = null; // düz metni referanssız bırak (secret taşıyordu)
+    _forgetRaw(); // düz metni referanssız bırak (secret taşıyordu)
     super.dispose();
   }
 

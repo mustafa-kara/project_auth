@@ -32,6 +32,37 @@ import UIKit
           result(FlutterMethodNotImplemented)
         }
       }
+
+      // Hassas pano yazımı (SensitiveClipboard, review [P2-4]). Flutter'ın
+      // `Clipboard.setData`'sı UIPasteboard.general'a seçeneksiz yazar → öge
+      // Universal Clipboard ile aynı iCloud hesabındaki diğer cihazlara HAVADAN
+      // geçer. `.localOnly` bunu kapatır; `.expirationDate` OS'un ögeyi kendi
+      // düşürmesini sağlar (süreç öldürülse bile geçerli — Dart timer'ının tam
+      // olarak kaçırdığı durum).
+      let clipboard = FlutterMethodChannel(
+        name: "dev.mustafakara.project_auth/sensitive_clipboard",
+        binaryMessenger: controller.binaryMessenger)
+      clipboard.setMethodCallHandler { call, result in
+        switch call.method {
+        case "setText":
+          guard let args = call.arguments as? [String: Any],
+            let text = args["text"] as? String
+          else {
+            result(FlutterError(code: "bad_args", message: "text is required", details: nil))
+            return
+          }
+          var options: [UIPasteboard.OptionsKey: Any] = [.localOnly: true]
+          if let expiresInMs = args["expiresInMs"] as? Int {
+            options[.expirationDate] = Date(
+              timeIntervalSinceNow: TimeInterval(expiresInMs) / 1000.0)
+          }
+          UIPasteboard.general.setItems(
+            [[UIPasteboard.typeAutomatic: text]], options: options)
+          result(nil)
+        default:
+          result(FlutterMethodNotImplemented)
+        }
+      }
     }
 
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)

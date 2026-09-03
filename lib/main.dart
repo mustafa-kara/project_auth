@@ -5,6 +5,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'core/config/secure_gotrue_storage.dart';
 import 'core/config/supabase_config.dart';
 import 'core/crypto/crypto_service.dart';
 import 'core/di/locator.dart';
@@ -51,11 +52,22 @@ Future<void> main() async {
     return;
   }
   // Faz 3 Patch 1: kimlik katmanı. PKCE → e-posta onay deep-link'ini güvenli tamamlar.
+  //
+  // `localStorage`/`pkceAsyncStorage` AÇIKÇA geçilir: varsayılanları
+  // SharedPreferences'tır, yani uzun ömürlü refresh token ve PKCE verifier düz
+  // metin dosyada dururken uygulamanın geri kalanı Keychain/Keystore kullanır
+  // (review [P2-5]). Adaptörler mevcut kullanıcıları çıkış yaptırmamak için
+  // eski prefs kaydını ilk açılışta göçürür. NOT: bunlar DI'dan ÖNCE kurulur —
+  // `configureDependencies()` aşağıda — bu yüzden locator'a değil, kendi
+  // `FlutterSecureStorage` örneklerine bağlıdırlar (bkz. secure_gotrue_storage.dart).
+  final persistSessionKey = supabasePersistSessionKeyFor(SupabaseConfig.url);
   await Supabase.initialize(
     url: SupabaseConfig.url,
     publishableKey: SupabaseConfig.publishableKey,
-    authOptions: const FlutterAuthClientOptions(
+    authOptions: FlutterAuthClientOptions(
       authFlowType: AuthFlowType.pkce,
+      localStorage: SecureLocalStorage(persistSessionKey: persistSessionKey),
+      pkceAsyncStorage: SecureGotrueAsyncStorage(),
     ),
   );
   await configureDependencies();
@@ -185,7 +197,19 @@ class _AuthenticatorAppState extends State<AuthenticatorApp>
   /// fail ederse kullanıcı YİNE doğru uid namespace'inde kalır (legacy `''` stack'inde
   /// sessizce KALMAZ — yanlış vault sızıntısı önlenir); persist sonraki event'te yeniden denenir.
   Future<void> _onSession(SessionState s) async {
-    if (s.status != SessionStatus.signedIn || s.linkRequired) return;
+    // Güvenlik denetimi P1-1 — SINIRDA zorlama: kimlik kapısı kapandığı ANDA
+    // (hangi yoldan olursa olsun: buton, gotrue refresh hatası, sunucu iptali,
+    // başka cihazdan global çıkış) E2E kapısı da kapanır. `SessionCubit` bunu
+    // zaten çağırır; burası tek çağrı yerine bağımlılığı ortadan kaldırır
+    // (`onAuthSignedOut` idempotent → çift çağrı zararsız). Aksi halde bu erken
+    // `return` masterKey'i bellekte canlı bırakır ve aynı uid ile yeniden giriş
+    // (prefix değişmediği için stack yeniden kurulmaz) master parola SORULMADAN
+    // açık vault'a düşerdi.
+    if (s.status != SessionStatus.signedIn) {
+      _lock.onAuthSignedOut();
+      return;
+    }
+    if (s.linkRequired) return;
     final uid = _session.currentUid;
     if (uid == null) return;
 

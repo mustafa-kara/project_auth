@@ -66,7 +66,89 @@ class _FakeRepo implements VaultRepository {
   }
 }
 
+/// Çözülmüş plaintext'i bellekte tutan depo (gerçek [PlaintextCache] gibi) —
+/// `wipe()`'ın gerçekten önbelleği bıraktığını gözlemlenebilir kılar.
+class _FakeCachingRepo extends _FakeRepo implements PlaintextCache {
+  _FakeCachingRepo([super.stored = const []]);
+
+  /// `load()`'ın doldurduğu "çözülmüş kayıt" önbelleği (gerçekte `_lastById`).
+  final List<OtpAccount> cache = [];
+  int forgetCount = 0;
+
+  @override
+  Future<VaultLoadResult> load() async {
+    final result = await super.load();
+    cache
+      ..clear()
+      ..addAll(result.accounts);
+    return result;
+  }
+
+  @override
+  void forgetPlaintext() {
+    forgetCount++;
+    cache.clear();
+  }
+}
+
 void main() {
+  // Güvenlik denetimi P2-1 — plaintext'i anahtarla AYNI anda bırak.
+  group('wipe (P2-1)', () {
+    test('state\'i boşaltır ve depo önbelleğini bıraktırır', () async {
+      final repo = _FakeCachingRepo([_acc('a'), _acc('b')]);
+      final cubit = VaultCubit(repo);
+      await cubit.load();
+      expect(cubit.state.accounts, hasLength(2));
+      expect(repo.cache, hasLength(2));
+
+      cubit.wipe();
+
+      expect(cubit.state, const VaultState()); // loaded:false + accounts boş
+      expect(cubit.state.accounts, isEmpty);
+      expect(repo.forgetCount, 1);
+      expect(repo.cache, isEmpty);
+    });
+
+    test('SENKRON çalışır (frame/await beklemez)', () async {
+      final repo = _FakeCachingRepo([_acc('a')]);
+      final cubit = VaultCubit(repo);
+      await cubit.load();
+      cubit.wipe(); // await YOK
+      expect(cubit.state.accounts, isEmpty);
+      expect(repo.cache, isEmpty);
+    });
+
+    test(
+      'PlaintextCache OLMAYAN depoda da state boşalır (no-op cache)',
+      () async {
+        final cubit = VaultCubit(_FakeRepo([_acc('a')]));
+        await cubit.load();
+        cubit.wipe();
+        expect(cubit.state.accounts, isEmpty);
+      },
+    );
+
+    test('kapalı cubit\'te emit ETMEZ ama depoyu YİNE unutturur', () async {
+      final repo = _FakeCachingRepo([_acc('a')]);
+      final cubit = VaultCubit(repo);
+      await cubit.load();
+      await cubit.close();
+      cubit.wipe(); // emit_after_close fırlatmamalı
+      expect(repo.forgetCount, 1);
+    });
+
+    test('idempotent (çift çağrı güvenli)', () async {
+      final repo = _FakeCachingRepo([_acc('a')]);
+      final cubit = VaultCubit(repo);
+      await cubit.load();
+      cubit
+        ..wipe()
+        ..wipe();
+      expect(repo.forgetCount, 2);
+      expect(cubit.state.accounts, isEmpty);
+    });
+  });
+
   group('VaultCubit', () {
     test('load depodaki token\'ları yükler ve loaded=true yapar', () async {
       final a = _acc('a');
