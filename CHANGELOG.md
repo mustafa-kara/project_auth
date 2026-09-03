@@ -314,6 +314,15 @@ değil" badge, and the dialog shows a warning and keeps **Save disabled until th
 Test count: **admin 231/231 across 13 files** (was 153/10), all still pure — no network, no real Supabase
 client. Flutter host suite untouched.
 
+### Follow-ups (2026-09-02)
+
+Closing two of the limitations listed above: `/announcements`, `/catalog` and `/flags` now page like `/audit`
+(50 rows via `?page=`, `count: 'exact'` + `.range()`, a deterministic tiebreaker in every ordering, shared
+`lib/paging.ts` + `components/table-pagination.tsx`), and `admin-ci.yml` gained `npm audit --omit=dev
+--audit-level=high` after `npm ci` — production dependencies only, so a dev-only advisory cannot train anyone
+to ignore the step (0 vulnerabilities on the committed lockfile as of 2026-09-03; **admin 256/256 across 14
+files**).
+
 
 ## 2026-09-02 (chore: repo-wide `dart format` + CI format gate + repository/DI tests)
 

@@ -242,7 +242,17 @@ export function mapFlagRow(row): FeatureFlag | null                 // + payload
 export function formatPayload(payload): string
 export function flagAuditTarget(key, operation): string             // 'token_sync_enabled:disable'
 
-// src/lib/audit-query.ts        (saf; /audit arama parametreleri)
+// src/lib/paging.ts             (saf; her sayfalı tablonun ortak aritmetiği)
+export const DEFAULT_PAGE_SIZE = 50, MAX_PAGE = 10_000
+export type SearchParamValue = string | string[] | undefined
+export function firstSearchParamValue(value): string | undefined
+export function parsePage(value, maxPage?): number                  // [1, maxPage]'e kırpar
+export function pageRange(page, pageSize?): { from: number; to: number }   // .range() sınırları
+export function pageCount(total, pageSize?): number                 // her zaman >= 1
+export function hasNextPage(page, total, rowCount, pageSize?, maxPage?): boolean
+export function pageHref(basePath, page): string                    // sayfa 1 sorgusuz
+
+// src/lib/audit-query.ts        (saf; /audit'e özgü arama parametreleri — paging.ts üzerine kurulu)
 export const AUDIT_PAGE_SIZE = 50, AUDIT_SEARCH_MAX_LENGTH = 100, AUDIT_MAX_PAGE = 10_000
 export function parseAuditQuery(params): AuditQuery                 // action beyaz listeli
 export function auditRange(page, pageSize?): { from: number; to: number }
@@ -280,11 +290,32 @@ Next mesajı ve stack'i siler ama hatanın **zaten taşıdığı** digest'i koru
 (`next/dist/server/app-render/create-error-handler.js:79-91`). Hata nesnesinden
 hiçbir şey ekrana basılmaz — `message` sürücü/kısıt ayrıntısı taşıyabilir.
 
-`/users` sayfalıdır (`?page=`, 50 satır/sayfa) ve `/audit` de öyle (50 satır/sayfa, `?action=`/`?q=` süzgeçli).
-`/announcements`, `/catalog` ve `/flags` **sayfalama yapmaz** — tabloyu bütün olarak çeker (bugünkü satır
-sayılarında sorun değil; büyürlerse `.range()` gerekir). `/users` araması **sayfa-yereldir**:
-`auth.admin.listUsers` yalnızca `page`/`perPage` alır, sunucu tarafı e-posta süzgeci yoktur ve arayüz bunu
-açıkça yazar.
+**Sayfalama.** `/users` dışındaki her tablo `src/lib/paging.ts` üzerine kuruludur: `?page=`, 50 satır/sayfa,
+`count: 'exact'` + `.range()`, ve ortak `src/components/table-pagination.tsx` altbilgisi. Her sıralama
+**belirleyici bir eşitlik bozucu** taşır — yoksa aynı `created_at`/`name` değerini paylaşan satırlar iki
+sayfada birden görünebilir ya da ikisinin arasına düşüp hiç görünmez:
+
+| Rota | Sıralama | Süzgeç |
+|---|---|---|
+| `/audit` | `created_at desc, id desc` | `?action=` (beyaz listeli), `?q=` (`ilike`) |
+| `/announcements` | `created_at desc, id desc` | — |
+| `/catalog` | `name asc, id asc` | — |
+| `/flags` | `key asc` (`key` birincil anahtar; eşitlik bozucu gerekmez) | — |
+
+"Sonraki sayfa var mı" **ham satır sayısından** hesaplanır, eşlenmiş satırlardan değil: `mapAnnouncementRow` /
+`mapCatalogRow` / `mapFlagRow` karantinaya aldığı bozuk bir satır da sayfada bir yer kaplar, eşlenmiş sayıya
+bakmak tablonun kalanını tek bozuk satırın arkasına saklardı. Aralık dışı bir `?page=` (ör. elle yazılmış
+`?page=99`) "Bu sayfada kayıt yok" + ilk sayfaya bağlantı gösterir — "tablo boş" metni orada yalan olurdu.
+
+Server action'lar **taban yolu** revalidate etmeye devam eder (`revalidatePath('/catalog')`): Next oraya bir
+URL değil bir *rota dosya yapısı* yolu ister, sorgu dizesi bunun parçası değildir — taban yol zaten her
+`?page=` sayfasını kapsar, `'/catalog?page=2'` ise var olmayan bir rotayı adlandırıp hiçbir şeyi
+tazelemezdi.
+
+`/users` bu modülü **kullanmaz**: `auth.admin.listUsers` PostgREST `.range()`'i değil Auth admin API'sinin
+`page`/`perPage`'ini kullanır, bu yüzden kendi yardımcıları `lib/users.ts` içinde kalır. `/users` araması da
+**sayfa-yereldir**: `auth.admin.listUsers` yalnızca `page`/`perPage` alır, sunucu tarafı e-posta süzgeci
+yoktur ve arayüz bunu açıkça yazar.
 
 ---
 
@@ -298,12 +329,21 @@ açıkça yazar.
 | `npm run test` | Vitest (jsdom + Testing Library) |
 | `npm run build` | `next build` — gerçek sır gerektirmez |
 
-`npm run test` bugün **231 test / 13 dosya** çalıştırır ve hepsi saftır (ağ yok, gerçek Supabase istemcisi
+`npm run test` bugün **256 test / 14 dosya** çalıştırır ve hepsi saftır (ağ yok, gerçek Supabase istemcisi
 yok — server action testleri istemciyi modül sınırında `vi.mock`'lar; `test/postgrest-mock.ts` postgrest-js
 zincirinin sadece kullanılan kısmını taklit eder).
-CI aynı sırayı `.github/workflows/admin-ci.yml` içinde koşar (`npm ci` → lint → typecheck → test → build),
-yalnızca `admin/**` değişikliklerinde tetiklenir ve **hiçbir Supabase sırrı verilmez** — gerçek kimlik bilgisi
-istemeye başlayan bir build bu adımda düşer.
+CI aynı sırayı `.github/workflows/admin-ci.yml` içinde koşar (`npm ci` → **audit** → lint → typecheck →
+test → build), yalnızca `admin/**` değişikliklerinde tetiklenir ve **hiçbir Supabase sırrı verilmez** —
+gerçek kimlik bilgisi istemeye başlayan bir build bu adımda düşer.
+
+Denetim adımı `npm audit --omit=dev --audit-level=high`'dır ve **kapsamı bilinçlidir**: yalnızca çalışan
+panelde gerçekten yer alan bağımlılıklar boruyu durdurabilir. Yalnız-geliştirme bir uyarı (eslint, vitest, bir
+geçişli derleme aracı) gerçek bir iştir ama üretim maruziyeti değildir; onun boruyu düşürmesi herkesi bu adımı
+görmezden gelmeye alıştırırdı — oysa adımın tek işi, bilinen açığı olan bir **çalışma zamanı** bağımlılığını
+durdurmaktır. `--audit-level=high` aynı nedenle: high + critical düşürür, low/moderate yalnızca raporlanır.
+Bağımlılıklar tam sürüme sabitli ve `package-lock.json` commit'li olduğu için denetlenen ağaç, `npm ci`'nin
+az önce kurduğu ağacın tam olarak kendisidir. Bugün (2026-09-03) sonuç: **0 açık** (geliştirme bağımlılıkları
+dahil edildiğinde de 0).
 
 ---
 
@@ -493,7 +533,7 @@ kırılma bulunamadı.
 
 ## 7. Elle duman testi (manual smoke checklist)
 
-Birim testler saf mantığı kapsar (**231 test / 13 dosya**, `npm run test`); aşağıdaki akışlar **kapsanmaz** —
+Birim testler saf mantığı kapsar (**256 test / 14 dosya**, `npm run test`); aşağıdaki akışlar **kapsanmaz** —
 henüz Playwright/e2e yoktur. Gerçek Supabase'e karşı, `admin_app` rolü ve `public.admin_users`'ta en az bir
 satır varken bir kez geçilmesi beklenir.
 
@@ -511,6 +551,10 @@ satır varken bir kez geçilmesi beklenir.
 - [ ] `/users` — 50 satır/sayfa, `?page=` ileri/geri; arama kutusu **yalnızca ekrandaki sayfayı** süzer ve bunu
       söyler; kendi satırınızda ve diğer yönetici satırlarında işlem menüsü kapalı.
 - [ ] `/announcements`, `/catalog`, `/flags`, `/audit` menüden açılır; boş tablo boş-durum metni gösterir.
+- [ ] `/announcements`, `/catalog`, `/flags` — 50 satır/sayfa, `?page=` ileri/geri; `?page=99` gibi aralık dışı
+      bir sayfa "Bu sayfada kayıt yok" + ilk sayfa bağlantısı gösterir (boş tablo metnini değil).
+- [ ] 2. sayfadayken bir kayıt oluştur/güncelle/sil → liste tazelenir (taban yol revalidate'i sayfalı URL'de de
+      çalışır) ve sayfada kalınır.
 
 **İşlemler (her biri sonrasında `/audit`'te yeni satır aranır)**
 - [ ] Ban → satır "Yasaklı" olur; ilgili kullanıcı uygulamada oturum açamaz. `/audit` → `user.ban`.
@@ -621,17 +665,24 @@ curl -X POST "https://<PROJECT_REF>.supabase.co/auth/v1/admin/users/<uuid>/logou
 
 Bilerek açık bırakılan, kaydedilmiş maddeler:
 
-1. **`/audit` sorgu maliyeti (P3-7).** Her sayfa yüklemesinde `count: 'exact'`
-   çalışır; mevcut indeks yalnızca `(created_at)`
+1. **Sayımlı sayfalamanın sorgu maliyeti (P3-7).** Sayfalı her tablo (`/audit`,
+   `/announcements`, `/catalog`, `/flags`) her yüklemede `count: 'exact'` çalıştırır;
+   `audit_logs` üzerindeki mevcut indeks yalnızca `(created_at)`
    (`20260606152227_init_authenticator.sql:231`) ve `ilike('target', '%…%')`
    indekssizdir. Bugünkü hacimde sorun değil. Büyürse:
    `create index on public.audit_logs (created_at desc, id desc);` ve
-   `count: 'planned'` (ya da sayımı tamamen bırakıp `auditHasNextPage`'in
-   "dolu sayfa" sezgisine geçmek — altyapısı hazır).
-2. **CI'da bağımlılık denetimi yok (P3-8a).** `.github/workflows/admin-ci.yml`
-   `npm audit --audit-level=high` / `dependency-review-action` çalıştırmıyor, yani
-   bilinen açıklı bir geçişli bağımlılık lockfile commit'li olmasına rağmen sessizce
-   girebilir.
+   `count: 'planned'` (ya da sayımı tamamen bırakıp `hasNextPage`'in
+   "dolu sayfa" sezgisine geçmek — `total === null` yolu zaten yazılı ve testli).
+2. **Bağımlılık denetimi yalnızca üretim ağacını kapsar (P3-8a, kapatıldı — kalan
+   sınır kapsamdır).** `.github/workflows/admin-ci.yml` artık `npm ci`'den hemen
+   sonra `npm audit --omit=dev --audit-level=high` koşuyor, yani bilinen açığı olan
+   bir **çalışma zamanı** bağımlılığı sessizce giremez. Kapsanmayan iki şey var ve
+   ikisi de bilinçli: **yalnız-geliştirme** uyarıları (eslint/vitest/derleme araçları)
+   boruyu düşürmez — üretim maruziyeti değiller ve düşürselerdi adım gürültüye
+   dönüşürdü — ve **low/moderate** dereceler yalnızca raporlanır. Gerçek bir
+   geliştirme-zinciri açığı bu yüzden elle (`npm audit`, tam ağaç) yakalanmalıdır.
+   `dependency-review-action` hâlâ yok: PR diff'i üzerinden çalışır ve ayrı bir izin
+   ister, `npm audit` ise `npm ci`'nin az önce kurduğu ağacın tam kendisini denetler.
 3. **`admin-ci.yml` zorunlu (required) kontrol yapılamaz (P3-8b).** Her iki tetik de
    `paths: ['admin/**', …]` taşıdığı için `admin/` dokunmayan PR'larda job hiç rapor
    etmez. Zorunlu kontrol yapmadan önce ya her zaman koşan bir eş job eklenmeli ya da
