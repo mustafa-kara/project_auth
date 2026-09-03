@@ -23,12 +23,16 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 /// Bellek içi sahte — `test/features/auth/key_attributes_store_test.dart`
 /// ile aynı kalıp (`implements` + `noSuchMethod`).
 class FakeSecureStorage implements FlutterSecureStorage {
-  FakeSecureStorage({this.failWith});
+  FakeSecureStorage({this.failWith, this.failContainsKeyWith});
 
   final Map<String, String> data = {};
 
   /// Doluysa her çağrı bununla patlar (Keystore/Keychain reddi taklidi).
   final PlatformException? failWith;
+
+  /// Doluysa YALNIZ `containsKey` patlar — göç "bilinmeyen ≠ yok" davranışını
+  /// ölçmek için okuma/yazma çalışır durumda kalmalı (doğrulama NEW-6).
+  final PlatformException? failContainsKeyWith;
 
   @override
   Future<String?> read({
@@ -54,6 +58,7 @@ class FakeSecureStorage implements FlutterSecureStorage {
     dynamic mOptions,
     dynamic wOptions,
   }) async {
+    if (failContainsKeyWith != null) throw failContainsKeyWith!;
     if (failWith != null) throw failWith!;
     return data.containsKey(key);
   }
@@ -223,6 +228,36 @@ void main() {
         await sut.initialize();
         expect(storage.data, isEmpty);
       });
+
+      test(
+        'containsKey patlarsa göç İPTAL: canlı secure oturum EZİLMEZ (NEW-6)',
+        () async {
+          // "Bilinmeyen"i "yok" saymak, bayat prefs oturumunun canlı olanın
+          // üzerine yazılması demekti (bozuk refresh token → gereksiz çıkış).
+          const fresh = '{"refresh_token":"rt-fresh"}';
+          const staleValue = '{"refresh_token":"rt-old"}';
+          final flaky = FakeSecureStorage(
+            failContainsKeyWith: PlatformException(code: 'keystore'),
+          );
+          flaky.data[key] = fresh;
+          SharedPreferences.setMockInitialValues({key: staleValue});
+
+          final sut = build(override: flaky);
+          await sut.initialize(); // patlamamalı
+
+          expect(
+            flaky.data[key],
+            fresh,
+            reason: 'canlı oturum bayat kopyayla EZİLMEMELİ',
+          );
+          final prefs = await SharedPreferences.getInstance();
+          expect(
+            prefs.getString(key),
+            staleValue,
+            reason: 'göç yapılmadıysa prefs kopyası da SİLİNMEZ (retry)',
+          );
+        },
+      );
 
       test(
         'secure yazma reddedilirse prefs kaydı SİLİNMEZ (göç yeniden denenir)',
