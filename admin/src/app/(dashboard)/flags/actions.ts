@@ -93,6 +93,13 @@ export async function createFlagAction(
     return failure('create', cause, 'Bayrak oluşturulamadı.')
   }
 
+  /**
+   * The table is paged (`?page=`), but the argument stays the bare route path: Next
+   * takes a *route file structure* path here, not a URL — search params are not part
+   * of it (installed docs, `next/dist/docs/…/revalidatePath.md`, "Parameters"). One
+   * `revalidatePath('/flags')` therefore covers every page of the table; passing
+   * `'/flags?page=2'` would name a route that does not exist and revalidate nothing.
+   */
   revalidatePath('/flags')
   return auditThen(
     {

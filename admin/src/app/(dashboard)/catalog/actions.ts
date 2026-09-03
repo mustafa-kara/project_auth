@@ -89,6 +89,13 @@ export async function createCatalogServiceAction(
     return failure('create', cause, 'Servis eklenemedi.')
   }
 
+  /**
+   * The table is paged (`?page=`), but the argument stays the bare route path: Next
+   * takes a *route file structure* path here, not a URL — search params are not part
+   * of it (installed docs, `next/dist/docs/…/revalidatePath.md`, "Parameters"). One
+   * `revalidatePath('/catalog')` therefore covers every page of the table; passing
+   * `'/catalog?page=2'` would name a route that does not exist and revalidate nothing.
+   */
   revalidatePath('/catalog')
   return auditThen(
     { actor: admin.userId, action: 'catalog.create', target: createdId },
