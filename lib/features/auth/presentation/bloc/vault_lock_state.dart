@@ -102,4 +102,20 @@ class VaultLockState extends Equatable {
     biometricEnrolled,
     deviceBiometricAvailable,
   ];
+
+  /// SECURITY (güvenlik denetimi P2-3): `toString()` prop BASMAZ.
+  ///
+  /// `mnemonic` 24 kelimelik recovery key'dir — master-key EŞDEĞERİ ve KALICI
+  /// (döndürülemez; onu bilen vault'u sonsuza dek açar). `equatable`'ın
+  /// `EquatableConfig.stringify` varsayılanı assert'ler açıkken (debug + assert'li
+  /// profile) `true`'dur ve `Equatable.toString()` tüm props'u basar. Yani bu
+  /// override olmadan kilit state'inin herhangi bir interpolasyonu — widget ağacı
+  /// dökümü, bir assertion mesajı, CI'daki bir `bloc_test` başarısızlığı,
+  /// DevTools — recovery key'i düz metin olarak yazardı.
+  ///
+  /// `OtpAccount` aynı nedenle aynı korumaya sahiptir (`otp_account.dart`); test:
+  /// `test/features/auth/vault_lock_state_test.dart`. Eşitlik/hashCode
+  /// ETKİLENMEZ — `stringify` yalnız `toString`'i kapatır.
+  @override
+  bool get stringify => false;
 }

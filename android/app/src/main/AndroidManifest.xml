@@ -12,12 +12,19 @@
          var; release build'in ağa çıkabilmesi için ANA manifest'te de ZORUNLU. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Yedekleme/aktarım politikası (güvenlik denetimi P1-2):
+         allowBackup=false + fullBackupContent=false BULUT yedeğini kapatır; API 31+
+         cihazdan-cihaza (D2D) göçü bazı üreticilerde kapatılamadığı için ayrıca
+         dataExtractionRules ile secure_storage'ın SharedPreferences dosyaları hem
+         <cloud-backup> hem <device-transfer> dışında bırakılır (gerekçe + dosya
+         adlarının kaynağı: res/xml/data_extraction_rules.xml). -->
     <application
         android:label="project_auth"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:allowBackup="false"
-        android:fullBackupContent="false">
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules">
         <activity
             android:name=".MainActivity"
             android:exported="true"

@@ -15,6 +15,7 @@ import '../../../../core/ui/widgets/app_text_field.dart';
 import '../../../../core/ui/widgets/auth_bits.dart';
 import '../../../../core/ui/widgets/auth_scaffold.dart';
 import '../bloc/vault_lock_cubit.dart';
+import '../setup_error_messages.dart';
 
 class RecoveryVerifyPage extends StatefulWidget {
   const RecoveryVerifyPage({super.key});
@@ -48,9 +49,22 @@ class _RecoveryVerifyPageState extends State<RecoveryVerifyPage> {
     super.dispose();
   }
 
+  /// Sorulan konumların HEPSİ mnemonic'te var mı? (güvenlik denetimi P3-6)
+  ///
+  /// Sayfa hâlâ montelidir ama state `setupPending`'den ÇIKMIŞ olabilir — arka
+  /// plana geçiş `cancelSetup()` çağırır ve `mnemonic` `const []`'e döner. O anda
+  /// `mnemonic[17]` bir `RangeError` fırlatırdı. Doğrulanacak bir şey yoksa
+  /// yapılacak doğru iş kurulumu iptal etmektir (router zaten `/setup`'a alır).
+  bool _mnemonicUsable(List<String> mnemonic) =>
+      mnemonic.length > _positions.last;
+
   Future<void> _verify() async {
     final cubit = context.read<VaultLockCubit>();
     final mnemonic = cubit.state.mnemonic;
+    if (!_mnemonicUsable(mnemonic)) {
+      cubit.cancelSetup(); // pending yok/temizlenmiş → doğrulanacak bir şey yok
+      return;
+    }
     final ok = _positions.every(
       (p) => _controllers[p]!.text.trim().toLowerCase() == mnemonic[p],
     );
@@ -80,7 +94,7 @@ class _RecoveryVerifyPageState extends State<RecoveryVerifyPage> {
       if (mounted) {
         setState(() {
           _busy = false;
-          _error = 'Kurulum tamamlanamadı: $e';
+          _error = setupErrorMessage(e);
         });
       }
     }

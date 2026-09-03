@@ -36,6 +36,13 @@ class _FakeLock extends Cubit<VaultLockState> implements VaultLockCubit {
           deviceBiometricAvailable: false,
         ),
       );
+
+  /// ShellRoute'un plaintext temizleyici scope'u (güvenlik denetimi P2-1)
+  /// mount olurken bunu çağırır; dönüş tipi `VoidCallback` olduğu için
+  /// `noSuchMethod`'un null'ı yetmez.
+  @override
+  VoidCallback registerPlaintextHolder(void Function() wipe) => () {};
+
   @override
   noSuchMethod(Invocation i) {}
 }

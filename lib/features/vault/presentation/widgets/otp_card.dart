@@ -86,11 +86,25 @@ class _OtpCardState extends State<OtpCard> {
   Timer? _clearTimer;
   String? _copiedValue;
 
+  /// Base32 tohumun ÇÖZÜLMÜŞ hâli — kart başına BİR KEZ (güvenlik denetimi P3-3).
+  ///
+  /// `OtpAccount.secretBytes` bir getter'dır ve her çağrıda `Base32.decode`
+  /// çalıştırıp hem büyüyebilir bir `List<int>` hem de bir `Uint8List` kopyası
+  /// üretir — hiçbiri sıfırlanmadan. `_recompute` saniyede bir tetiklendiği için
+  /// 20 token'lık açık bir vault on dakikada ham TOTP tohumlarının ~24.000
+  /// temizlenmemiş kopyasını genç kuşağa saçıyordu. Burada bir kez çözülür,
+  /// hesap değişince yenilenir ve `dispose`'ta sıfırlanır.
+  ///
+  /// **Dürüst sınır:** `OtpAccount.secret` `String`'i oturum boyunca zaten
+  /// bellektedir; bu, tohumu kaldırmaz — ÇOĞALMASINI durdurur.
+  Uint8List? _secretBytes;
+
   bool get _isTimeBased => widget.account.type != OtpType.hotp;
 
   @override
   void initState() {
     super.initState();
+    _decodeSecret();
     _recompute();
     _syncTimer();
   }
@@ -99,9 +113,24 @@ class _OtpCardState extends State<OtpCard> {
   void didUpdateWidget(covariant OtpCard old) {
     super.didUpdateWidget(old);
     if (old.account != widget.account) {
+      _decodeSecret(); // yeni hesap → eski tampon sıfırlanır, yenisi çözülür
       _recompute();
       _syncTimer();
     }
+  }
+
+  /// Önceki tamponu sıfırlayıp güncel hesabın tohumunu çözer.
+  void _decodeSecret() {
+    _zeroSecret();
+    // Geçersiz Base32 burada fırlatır — eskiden `_recompute` içinde, yani AYNI
+    // çağrı ağacında (initState/didUpdateWidget) fırlıyordu; davranış değişmez.
+    _secretBytes = widget.account.secretBytes;
+  }
+
+  void _zeroSecret() {
+    final b = _secretBytes;
+    if (b != null) b.fillRange(0, b.length, 0);
+    _secretBytes = null;
   }
 
   void _syncTimer() {
@@ -119,21 +148,24 @@ class _OtpCardState extends State<OtpCard> {
   void _recompute() {
     final a = widget.account;
     final now = DateTime.now();
+    // initState/didUpdateWidget `_decodeSecret`'i HER ZAMAN `_recompute`'tan önce
+    // çağırır; timer da yalnız o ikisinden sonra kurulur (P3-3).
+    final secret = _secretBytes!;
     String code;
     switch (a.type) {
       case OtpType.totp:
         code = _gen.totp(
-          secret: a.secretBytes,
+          secret: secret,
           time: now,
           period: a.period,
           digits: a.digits,
           algorithm: a.algorithm,
         );
       case OtpType.steam:
-        code = _gen.steam(secret: a.secretBytes, time: now, period: a.period);
+        code = _gen.steam(secret: secret, time: now, period: a.period);
       case OtpType.hotp:
         code = _gen.hotp(
-          secret: a.secretBytes,
+          secret: secret,
           counter: a.counter,
           digits: a.digits,
           algorithm: a.algorithm,
@@ -195,6 +227,7 @@ class _OtpCardState extends State<OtpCard> {
   @override
   void dispose() {
     _timer?.cancel();
+    _zeroSecret(); // çözülmüş tohum tamponunu sıfırla (P3-3)
     // NOTE: _clearTimer is intentionally NOT cancelled here — the conditional
     // clipboard wipe must still fire after the card is disposed (e.g. scrolled
     // out of view). Its callback is disposed-safe (no context/setState).

@@ -46,6 +46,7 @@ import '../../features/vault/data/view_mode_store.dart';
 import '../../features/vault/domain/catalog_repository.dart';
 import '../../features/vault/domain/issuer_catalog_holder.dart';
 import '../../features/vault/domain/remote_token_repository.dart';
+import '../config/secure_gotrue_storage.dart';
 import '../crypto/crypto_service.dart';
 import '../crypto/sodium_crypto_service.dart';
 import '../otp/otp_generator.dart';
@@ -57,8 +58,30 @@ Future<void> configureDependencies() async {
   locator.registerLazySingleton<OtpGenerator>(() => const OtpGenerator());
 
   // Tüm vault/auth depoları aynı secure_storage instance'ını paylaşır.
+  //
+  // **Options AÇIKÇA verilir — plugin varsayılanları vault verisi için YANLIŞ
+  // (güvenlik denetimi P1-2 / P3-1).** Gerekçelerin tamamı ve TEK TANIMI
+  // [secureStorageOptions]'tadır (`core/config/secure_gotrue_storage.dart`);
+  // burada kopyalanmaz, çünkü Supabase oturum/PKCE adaptörleri DI'dan ÖNCE
+  // kurulduğu için kendi örneklerini aynı fabrikadan alır — iki taraf ayrışırsa
+  // aynı Keystore'da farklı davranan iki depo doğardı.
+  //
+  // Özet: `resetOnError: false` (Keystore hatası artık sessizce `null` dönüp
+  // `vault_key_attributes_v1`'i SİLMEZ → `keyAttributesCorrupted`),
+  // `migrateWithBackup: true` (v9→v10 göçü çökmeye dayanıklı),
+  // `accessibility: unlocked_this_device` (öge şifreli cihaz yedeğiyle YENİ
+  // CİHAZA taşınmaz; accessibility YAZMA anında uygulanır → mevcut item'lar bir
+  // sonraki yazımda göç eder, eski kullanıcı mahsur KALMAZ).
+  //
+  // Biyometrik anahtar bu instance'ı KULLANMAZ — `BiometricServiceImpl` kendi
+  // namespace'i + OS-geçitli options'ıyla çalışır (orada auto-delete kabul
+  // edilebilir: `BiometricKeyMissing` ele alınan, kurtarılabilir bir durumdur).
+  final storageOptions = secureStorageOptions();
   locator.registerLazySingleton<FlutterSecureStorage>(
-    () => const FlutterSecureStorage(),
+    () => FlutterSecureStorage(
+      aOptions: storageOptions.android,
+      iOptions: storageOptions.ios,
+    ),
   );
 
   // E2E kripto servisi (libsodium/sumo). init() native binary'yi yükler — app

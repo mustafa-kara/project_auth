@@ -238,4 +238,48 @@ void main() {
       expect(locator<SupabaseClient>(), same(Supabase.instance.client));
     });
   });
+
+  // Güvenlik denetimi P1-2 / P3-1 — iki SESSİZ plugin varsayılanını sabitler.
+  // Bunlar kod okunarak fark edilmez (options hiç geçilmiyordu) ve bir paket
+  // yükseltmesi altımızdan değiştirebilir; test tam da bu yüzden var.
+  // Beklenen map anahtarları kurulu paketten alınmıştır:
+  // flutter_secure_storage-10.3.1/lib/options/android_options.dart (`toMap`) ve
+  // .../options/apple_options.dart (`toMap`).
+  group('secure storage options (P1-2 / P3-1)', () {
+    test('Android: resetOnError KAPALI (sessiz veri silme yok)', () {
+      final storage = locator<FlutterSecureStorage>();
+      expect(
+        storage.aOptions.toMap()['resetOnError'],
+        'false',
+        reason:
+            'true olursa Keystore hatası vault_key_attributes_v1\'i SİLER ve '
+            'bootstrap sessizce "uninitialized" görüp setup ekranı açar',
+      );
+    });
+
+    test(
+      'Android: migrateWithBackup AÇIK (algoritma göçü çökme-dayanıklı)',
+      () {
+        expect(
+          locator<FlutterSecureStorage>().aOptions.toMap()['migrateWithBackup'],
+          'true',
+        );
+      },
+    );
+
+    test('iOS: accessibility unlocked_this_device (yedekle göç etmez)', () {
+      final storage = locator<FlutterSecureStorage>();
+      expect(
+        storage.iOptions.toMap()['accessibility'],
+        'unlocked_this_device',
+        reason:
+            'varsayılan `unlocked` cihaza bağlı DEĞİL → şifreli iTunes/Finder '
+            'yedeğiyle yeni cihaza taşınır (CRYPTO.md §12: yeni cihaz sunucudan '
+            'restore eder, keychain göçüyle değil)',
+      );
+      // iCloud Keychain senkronu zaten kapalı olmalı (paket varsayılanı) —
+      // birlikte "yalnız bu cihaz" garantisini verirler.
+      expect(storage.iOptions.toMap()['synchronizable'], 'false');
+    });
+  });
 }

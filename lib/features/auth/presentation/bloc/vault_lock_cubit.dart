@@ -21,6 +21,7 @@ library;
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter/widgets.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -112,6 +113,10 @@ class VaultLockCubit extends Cubit<VaultLockState> {
   /// Sistem biyometri prompt'u açılırken app kısa süre `inactive` üretebilir; bu flag
   /// true iken `inactive` abort'tan MUAF tutulur (başarılı unlock yarıda kesilmesin).
   /// `paused` (gerçek arka plan) YİNE kesin abort eder. `_commitInFlight` simetriği.
+  ///
+  /// **Yalnız [biometricUnlock] içinde, `try`/`finally` ile yönetilir (P2-2):**
+  /// dağınık sıfırlamalar bir mandala dönüşüp `retrieve()`'in eşlenmemiş bir
+  /// istisnasında bayrağı kalıcı `true` bırakıyordu. Buraya yeni bir atama EKLEME.
   bool _biometricPromptInFlight = false;
 
   /// Oturum içi masterKey — yalnız `unlocked`/`setupPending`/`locking` state'lerinde
@@ -223,7 +228,17 @@ class VaultLockCubit extends Cubit<VaultLockState> {
     return k;
   }
 
-  /// Açılış: attrs var mı? Parse hatası → keyAttributesCorrupted.
+  /// Açılış: attrs var mı? Parse hatası **veya platform depo hatası** →
+  /// keyAttributesCorrupted.
+  ///
+  /// **Platform hatası (güvenlik denetimi P1-2):** `resetOnError: false`
+  /// (bkz. `locator.dart`) ile Keystore/Keychain unwrap hatası artık sessiz bir
+  /// `null` yerine `PlatformException` olarak yüzeye çıkar. Bu istisna
+  /// yakalanmazsa `bootstrap` future'ından kabarır (unhandled async error) ve
+  /// state `uninitialized`'da asılı kalır — router `/setup`'a düşer, yani tam da
+  /// önlemek istediğimiz "var olan vault ilk kurulum sanılır" durumu. Bu yüzden
+  /// `FormatException` ile AYNI muamele: `keyAttributesCorrupted` →
+  /// `/auth-integrity` ekranı ("Yeniden dene" [retryBootstrap] + son çare reset).
   ///
   /// Not (iOS Keychain): `flutter_secure_storage` veriyi Keychain'e yazar ve
   /// Keychain item'ları uygulama silinince OS tarafından SİLİNMEZ (Apple'ın
@@ -249,6 +264,9 @@ class VaultLockCubit extends Cubit<VaultLockState> {
       }
       await _restoreFromRemote();
     } on FormatException {
+      emit(const VaultLockState.keyAttributesCorrupted());
+    } on PlatformException {
+      // Keystore/Keychain okuma hatası (P1-2) — asla sessiz `uninitialized`.
       emit(const VaultLockState.keyAttributesCorrupted());
     }
   }
@@ -776,7 +794,22 @@ class VaultLockCubit extends Cubit<VaultLockState> {
   /// [VaultStorageKeys.all] → setup'a döner. plaintext + marker dahil silinir →
   /// reset sonrası eski plaintext yeniden migrate EDİLMEZ (yarım durum kalmaz).
   Future<void> resetVault() async {
-    _disposeKey();
+    // **Durum makinesinden GEÇ (güvenlik denetimi P3-2).** `_disposeKey()`'i
+    // doğrudan çağırmak, `unlocked` subtree'si HÂLÂ MONTELİ iken anahtarı serbest
+    // bırakıyordu: aşağıdaki `await`'ler (remote tombstone, `biometric.disable`,
+    // `_deleteKeys`) boyunca `EncryptedVaultRepository` aynı `KeyHandle`'a
+    // referans tutar ve eşzamanlı bir `encrypt`/`decrypt` `sodium_free`'lenmiş bir
+    // pointer'ı dereference ederdi (`SecureKeyFFI.runUnlockedNative` →
+    // `sodium_mprotect_readonly`). Sınıf doc'undaki `locking` → dispose sırası tam
+    // olarak bunu önlemek için var; buradan ona ULAŞMAK yerine ondan GEÇİLİR.
+    //
+    // Bugün ERİŞİLEBİLİR DEĞİL (tek in-vault çağıran `_IntegrityErrorView` ve o
+    // yalnız `load()` fırlattığında görünür — sequencer boşta, Realtime yok), ama
+    // gelecekteki bir çağıran için gizli tuzak olmasın.
+    if (state.status == VaultLockStatus.unlocked) {
+      lock(immediate: true); // locking → senkron dispose (+ plaintext) → locked
+    }
+    _disposeKey(); // diğer durumlar (setupPending/locking) + idempotent güvence
     _pendingAttrs = null;
 
     // Security review finding 1 — discard the SERVER token rows too (signed-in
@@ -906,64 +939,87 @@ class VaultLockCubit extends Cubit<VaultLockState> {
     final attrs = await _readAttrsOrThrow();
     await _refreshBiometricState(attrs);
 
+    // **Bayrak `finally` ile TEK noktada sıfırlanır (güvenlik denetimi P2-2).**
+    // Eskiden her tipli `catch` kendi içinde sıfırlıyordu; `retrieve()` bu beş
+    // tipin DIŞINDA bir şey fırlatırsa (ör. `MissingPluginException` —
+    // `PlatformException`'dan TÜREMEZ, dolayısıyla `BiometricServiceImpl`'in
+    // eşlemesine takılmaz) bayrak sonsuza dek `true` kalıyordu. `UnlockPage`
+    // hiçbir şey yakalamadığı için bu sessizce olurdu ve cubit'in KALAN ÖMRÜ
+    // boyunca `onAppBackgrounded(paused: false)` erken dönerdi → `inactive`
+    // (app switcher, bildirim gölgesi, gelen çağrı) AÇIK vault'u artık kilitlemezdi.
+    //
+    // Tipli hata `finally`'den SONRA işlenir: `BiometricKeyMissing` dalı bir
+    // `await` içerir; işleme try'ın içinde kalsaydı bayrak o await boyunca yine
+    // `true` kalırdı (eski davranış, istenmiyor).
     Uint8List? bytes;
+    Object? promptFailure;
     _biometricPromptInFlight = true;
     try {
       bytes = await _biometric.retrieve(); // OS biyometri prompt + gated read
-    } on BiometricCanceled {
+    } on BiometricCanceled catch (e) {
+      promptFailure = e;
+    } on BiometricLockout catch (e) {
+      promptFailure = e;
+    } on BiometricKeyMissing catch (e) {
+      promptFailure = e;
+    } on BiometricUnavailable catch (e) {
+      promptFailure = e;
+    } on BiometricStorageError catch (e) {
+      promptFailure = e;
+    } finally {
       _biometricPromptInFlight = false;
-      emit(_locked()); // sessizce parolaya düş
-      return;
-    } on BiometricLockout {
-      _biometricPromptInFlight = false;
-      emit(_locked(error: VaultLockError.biometricLockout));
-      return;
-    } on BiometricKeyMissing {
-      _biometricPromptInFlight = false;
-      // Enrollment kaybolmuş (biyometri seti değişti vb.) → bmk'yı PERSIST temizle
-      // ki sonraki bootstrap tekrar enrolled görüp bozuk-bmk döngüsüne girmesin
-      // (reviewer 3.tur [P2]). Write FAIL ederse: disk hâlâ bmk'lı ama UI'da kapalı
-      // göster (deviceAvail=false + biometricFailed) → döngü yok; parolayla açıp
-      // Settings'ten tekrar dener, sonraki başarılı disable/bootstrap temizler.
-      try {
-        await _attrsStore.write(attrs.copyWith(clearBiometric: true));
-        _biometricEnrolled = false;
-        emit(_locked());
-      } catch (_) {
-        _biometricEnrolled = true;
+    }
+
+    if (promptFailure != null) {
+      if (promptFailure is BiometricCanceled) {
+        emit(_locked()); // sessizce parolaya düş
+      } else if (promptFailure is BiometricLockout) {
+        emit(_locked(error: VaultLockError.biometricLockout));
+      } else if (promptFailure is BiometricKeyMissing) {
+        // Enrollment kaybolmuş (biyometri seti değişti vb.) → bmk'yı PERSIST temizle
+        // ki sonraki bootstrap tekrar enrolled görüp bozuk-bmk döngüsüne girmesin
+        // (reviewer 3.tur [P2]). Write FAIL ederse: disk hâlâ bmk'lı ama UI'da kapalı
+        // göster (deviceAvail=false + biometricFailed) → döngü yok; parolayla açıp
+        // Settings'ten tekrar dener, sonraki başarılı disable/bootstrap temizler.
+        try {
+          await _attrsStore.write(attrs.copyWith(clearBiometric: true));
+          _biometricEnrolled = false;
+          emit(_locked());
+        } catch (_) {
+          _biometricEnrolled = true;
+          _deviceBiometricAvailable = false;
+          emit(_locked(error: VaultLockError.biometricFailed));
+        }
+      } else if (promptFailure is BiometricUnavailable) {
         _deviceBiometricAvailable = false;
+        emit(_locked());
+      } else {
+        // BiometricStorageError (yukarıdaki `on` listesindeki son tip).
         emit(_locked(error: VaultLockError.biometricFailed));
       }
       return;
-    } on BiometricUnavailable {
-      _biometricPromptInFlight = false;
-      _deviceBiometricAvailable = false;
-      emit(_locked());
-      return;
-    } on BiometricStorageError {
-      _biometricPromptInFlight = false;
-      emit(_locked(error: VaultLockError.biometricFailed));
-      return;
     }
-    _biometricPromptInFlight = false;
+
+    // `promptFailure == null` ⇒ `retrieve()` değer döndürdü.
+    final keyBytes = bytes!;
 
     // Prompt bittikten sonra arka-plan yarışı: paused olduysa unlocked'a GEÇME.
     if (_abortToBackground) {
       _abortToBackground = false;
-      bytes.fillRange(0, bytes.length, 0);
+      keyBytes.fillRange(0, keyBytes.length, 0);
       emit(_locked());
       return;
     }
 
     final KeyHandle key;
     try {
-      key = _keyManager.biometricUnlock(attrs, bytes);
+      key = _keyManager.biometricUnlock(attrs, keyBytes);
     } on BiometricUnwrapException {
-      bytes.fillRange(0, bytes.length, 0);
+      keyBytes.fillRange(0, keyBytes.length, 0);
       emit(_locked(error: VaultLockError.biometricFailed));
       return;
     } finally {
-      bytes.fillRange(0, bytes.length, 0); // zero-fill (idempotent)
+      keyBytes.fillRange(0, keyBytes.length, 0); // zero-fill (idempotent)
     }
 
     var owned = false;
@@ -996,7 +1052,42 @@ class VaultLockCubit extends Cubit<VaultLockState> {
     return attrs;
   }
 
+  // --- Plaintext tutucuları (güvenlik denetimi P2-1) ---
+
+  /// masterKey dispose edilirken TEMİZLENECEK plaintext tutucularının kaydı.
+  /// Bkz. [registerPlaintextHolder].
+  final List<void Function()> _plaintextHolders = [];
+
+  /// masterKey dispose edilirken (kilit/arka plan/signOut/reset/close) SENKRON
+  /// çağrılacak bir temizleyici kaydeder; kaydı geri alan fonksiyonu döner.
+  ///
+  /// **Neden var (P2-1):** `lock(immediate: true)` anahtarı senkron dispose eder
+  /// çünkü arka planda bir frame GARANTİ DEĞİLDİR (`lock` doc'u). Ama çözülmüş
+  /// TOTP tohumlarının düşmesi tam da o frame'e bağlıydı: `emit(_locked())` →
+  /// router redirect → subtree teardown → `VaultCubit.close()`. Arka planda frame
+  /// gelmezse anahtar gidiyor, korumakla görevli olduğu plaintext (her
+  /// `OtpAccount.secret`, repo'nun `_lastById`'si) arka plan boyunca canlı
+  /// kalıyordu. Bu kanca temizliği anahtarın dispose'uyla AYNI ana bağlar.
+  ///
+  /// Bağlantı yeri `app_router.dart`'ın ShellRoute'udur (VaultCubit'i orası
+  /// kurar); kayıt subtree dispose olurken geri alınır. Callback SENKRON olmalı
+  /// ve fırlatmamalıdır — bir tanesi fırlatsa bile diğerleri ve anahtarın
+  /// dispose'u YİNE çalışır.
+  VoidCallback registerPlaintextHolder(void Function() wipe) {
+    _plaintextHolders.add(wipe);
+    return () => _plaintextHolders.remove(wipe);
+  }
+
   void _disposeKey() {
+    // ÖNCE plaintext (anahtar serbest bırakılmadan), SONRA anahtar. Kopya
+    // üzerinde gezilir: bir callback kaydını kendisi geri alabilir.
+    for (final wipe in List<void Function()>.of(_plaintextHolders)) {
+      try {
+        wipe();
+      } catch (_) {
+        /* biri patlasa bile diğerleri + key dispose ÇALIŞMALI */
+      }
+    }
     _masterKey?.dispose(); // idempotent
     _masterKey = null;
   }

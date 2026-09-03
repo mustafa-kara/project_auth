@@ -167,7 +167,11 @@ AppRouterBundle createAppRouter(
               create: (_) => liveSyncStoreBuilder(),
               child: BlocProvider<VaultCubit>(
                 create: (_) => vaultCubitBuilder()..load(),
-                child: child,
+                // Güvenlik denetimi P2-1 — çözülmüş plaintext'i masterKey ile
+                // AYNI anda bırak: bu scope `VaultCubit.wipe`'ı kilit cubit'ine
+                // kaydeder ve subtree sökülürken kaydı geri alır. Teardown
+                // olduğu gibi kalır; artık mekanizma değil, temizlik.
+                child: _PlaintextWipeScope(lock: lock, child: child),
               ),
             ),
           );
@@ -245,6 +249,50 @@ AppRouterBundle createAppRouter(
   );
 
   return AppRouterBundle(router, [lockRefresh, sessionRefresh]);
+}
+
+/// Unlocked subtree'nin çözülmüş plaintext'ini masterKey'in dispose'una BAĞLAYAN
+/// scope (güvenlik denetimi P2-1).
+///
+/// `BlocProvider<VaultCubit>`'in ALTINDA durur: `initState`'te cubit'in
+/// [VaultCubit.wipe]'ını [VaultLockCubit.registerPlaintextHolder] ile kaydeder,
+/// `dispose`'ta kaydı geri alır. Widget ağacı çocukları ebeveynden ÖNCE unmount
+/// ettiği için kayıt, `BlocProvider` cubit'i kapatmadan önce silinir; ayrıca
+/// `wipe()` kendi `isClosed` guard'ını taşır → iki yönlü güvenli.
+///
+/// Neden `create:` içinde yapılmıyor: `BlocProvider` cubit'i dispose ederken bize
+/// bir kanca vermez, kaydın MUTLAKA geri alınması gerekir (aksi halde kilit
+/// cubit'i sökülmüş bir cubit'e referans tutardı).
+class _PlaintextWipeScope extends StatefulWidget {
+  const _PlaintextWipeScope({required this.lock, required this.child});
+
+  final VaultLockCubit lock;
+  final Widget child;
+
+  @override
+  State<_PlaintextWipeScope> createState() => _PlaintextWipeScopeState();
+}
+
+class _PlaintextWipeScopeState extends State<_PlaintextWipeScope> {
+  VoidCallback? _unregister;
+
+  @override
+  void initState() {
+    super.initState();
+    // `context.read` initState'te güvenlidir (listen: false).
+    _unregister = widget.lock.registerPlaintextHolder(
+      context.read<VaultCubit>().wipe,
+    );
+  }
+
+  @override
+  void dispose() {
+    _unregister?.call();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 /// Birleşik guard (Faz 3 Patch 1): kimlik kapısı (Supabase oturum) EN DIŞTA, vault
