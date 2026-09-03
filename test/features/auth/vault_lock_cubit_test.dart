@@ -9,6 +9,7 @@ library;
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:project_auth/core/crypto/crypto_exceptions.dart';
@@ -41,6 +42,10 @@ class FakeSecureStorage implements FlutterSecureStorage {
   /// kesişim testi: write askıdayken `onAppBackgrounded(paused: true)` tetikle, sonra throw.
   Future<void>? writeGate;
 
+  /// Verilirse `read` bunu FIRLATIR (P1-2: `resetOnError: false` ile Keystore/
+  /// Keychain hatası artık sessiz null yerine `PlatformException` olarak gelir).
+  Object? readError;
+
   @override
   Future<String?> read({
     required String key,
@@ -50,7 +55,11 @@ class FakeSecureStorage implements FlutterSecureStorage {
     dynamic webOptions,
     dynamic mOptions,
     dynamic wOptions,
-  }) async => data[key];
+  }) async {
+    if (readError != null) throw readError!;
+    return data[key];
+  }
+
   @override
   Future<void> write({
     required String key,
@@ -390,6 +399,29 @@ void main() {
       final cubit = _build(FakeKeyManager(), store);
       await cubit.bootstrap();
       expect(cubit.state.status, VaultLockStatus.keyAttributesCorrupted);
+    });
+
+    test('attrs okuması PlatformException atarsa → keyAttributesCorrupted '
+        '(ASLA sessiz uninitialized — P1-2)', () async {
+      // `resetOnError: false` (locator.dart) ile Keystore unwrap hatası artık
+      // silme + null yerine bu istisnayı üretir. Yakalanmazsa bootstrap
+      // future'ından kabarır ve kullanıcı SETUP ekranı görürdü.
+      storage.readError = PlatformException(code: 'Keystore', message: 'test');
+      final cubit = _build(FakeKeyManager(), store);
+      await cubit.bootstrap();
+      expect(cubit.state.status, VaultLockStatus.keyAttributesCorrupted);
+      expect(cubit.state.status, isNot(VaultLockStatus.uninitialized));
+    });
+
+    test('retryBootstrap: platform hatası geçince locked\'a döner', () async {
+      await store.write(_fakeAttrs());
+      storage.readError = PlatformException(code: 'Keystore', message: 'test');
+      final cubit = _build(FakeKeyManager(), store);
+      await cubit.bootstrap();
+      expect(cubit.state.status, VaultLockStatus.keyAttributesCorrupted);
+      storage.readError = null; // geçici hataydı
+      await cubit.retryBootstrap();
+      expect(cubit.state.status, VaultLockStatus.locked);
     });
   });
 

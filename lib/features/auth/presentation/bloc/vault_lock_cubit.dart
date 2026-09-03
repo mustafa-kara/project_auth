@@ -21,6 +21,7 @@ library;
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter/widgets.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -223,7 +224,17 @@ class VaultLockCubit extends Cubit<VaultLockState> {
     return k;
   }
 
-  /// Açılış: attrs var mı? Parse hatası → keyAttributesCorrupted.
+  /// Açılış: attrs var mı? Parse hatası **veya platform depo hatası** →
+  /// keyAttributesCorrupted.
+  ///
+  /// **Platform hatası (güvenlik denetimi P1-2):** `resetOnError: false`
+  /// (bkz. `locator.dart`) ile Keystore/Keychain unwrap hatası artık sessiz bir
+  /// `null` yerine `PlatformException` olarak yüzeye çıkar. Bu istisna
+  /// yakalanmazsa `bootstrap` future'ından kabarır (unhandled async error) ve
+  /// state `uninitialized`'da asılı kalır — router `/setup`'a düşer, yani tam da
+  /// önlemek istediğimiz "var olan vault ilk kurulum sanılır" durumu. Bu yüzden
+  /// `FormatException` ile AYNI muamele: `keyAttributesCorrupted` →
+  /// `/auth-integrity` ekranı ("Yeniden dene" [retryBootstrap] + son çare reset).
   ///
   /// Not (iOS Keychain): `flutter_secure_storage` veriyi Keychain'e yazar ve
   /// Keychain item'ları uygulama silinince OS tarafından SİLİNMEZ (Apple'ın
@@ -249,6 +260,9 @@ class VaultLockCubit extends Cubit<VaultLockState> {
       }
       await _restoreFromRemote();
     } on FormatException {
+      emit(const VaultLockState.keyAttributesCorrupted());
+    } on PlatformException {
+      // Keystore/Keychain okuma hatası (P1-2) — asla sessiz `uninitialized`.
       emit(const VaultLockState.keyAttributesCorrupted());
     }
   }
