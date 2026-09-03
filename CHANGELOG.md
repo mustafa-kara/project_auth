@@ -14,7 +14,7 @@ ARCHITECTURE §§2.2–2.4/§5/§7. Package behaviour was verified against the *
 `local_auth` 3.0.2, `equatable` 2.1.0, `supabase_flutter` 2.17.2), not from memory, and the one Android
 platform claim against the official manifest documentation.
 
-**Two P1s, six P2s and six P3s — all fixed here.** host **1188/1188 → 1254/1254**, integration unchanged
+**Two P1s, six P2s and six P3s — all fixed here.** host **1188/1188 → 1268/1268**, integration unchanged
 (**50**, not run on a device this round), `dart format` and `flutter analyze --fatal-infos` clean. **No Supabase
 schema change, no AAD or record-version change, no backup-envelope change** — an existing vault, an existing
 backup file and an existing server row all open exactly as before. Design details:
@@ -182,7 +182,8 @@ doc comments as much as in the docs.
 
 ### Tests, dependencies, formatting
 
-- **1188 → 1254 host tests.** New files: `test/features/auth/aad_encoding_test.dart` (the encoding switch is
+- **1188 → 1268 host tests** (1254 for the review's own fixes, +14 for the verification follow-ups below).
+  New files: `test/features/auth/aad_encoding_test.dart` (the encoding switch is
   byte-identical, with a counter-example so it cannot pass vacuously),
   `test/features/auth/vault_lock_state_test.dart` (no mnemonic in `toString()`),
   `test/features/vault/otp_card_secret_test.dart` (decode once, zeroed on dispose),
@@ -201,6 +202,34 @@ doc comments as much as in the docs.
 - **A note for test authors:** a fake implementing `VaultLockCubit` must now implement
   `registerPlaintextHolder` — `noSuchMethod`'s `null` cannot satisfy its `VoidCallback` return.
 - `dart format --output=none --set-exit-if-changed .` and `flutter analyze --fatal-infos` both clean.
+
+### Verification follow-ups (same day)
+
+An adversarial re-review of the fixes above confirmed all fourteen findings closed and raised six new P3s,
+all fixed here. No schema, AAD, record-version or backup-format change.
+
+- **NEW-1 — `forgetPlaintext()` cleared two caches that hold no plaintext and that `save()` needs.**
+  `_tombstones` holds ciphertext blobs and `_corruptedRaw` opaque raw JSON that already failed to decrypt;
+  `_writeRecords` re-emits both, so a post-wipe `save()` would have dropped every pending tombstone and every
+  preserved unreadable record from disk. Narrowed to `_lastById`, the only field holding decrypted accounts.
+- **NEW-2 — a storage `PlatformException` on the unlock paths reached nobody.** `bootstrap()` was hardened by
+  P1-2; `unlock`, `recoverWithNewPassword`, `biometricUnlock` and their migration marker reads were not, so
+  with `resetOnError: false` the exception became an unhandled async error: no state change, no message, a
+  button that appeared to do nothing. All four now route to `keyAttributesCorrupted` → `/auth-integrity`.
+- **NEW-3 — `retryBootstrap()` gave no feedback when the failure persisted**, because bloc drops an emit equal
+  to the current state. `VaultLockState` gained an `attempt` counter (in `props`); the integrity page shows a
+  spinner while the retry runs and "Hâlâ okunamıyor" when the count grows.
+- **NEW-4 — the P2-1 wiring itself was untested and a test helper was dead.** A new router test mounts the real
+  shell and asserts `VaultCubit.state.accounts` is empty after `lock(immediate: true)` **without pumping a
+  frame** (the guarantee P2-1 actually claims), plus the post-frame path, the unregistration and `cancelSetup`;
+  `import_page_test` now calls the previously unused `_FakeLock.firePlaintextWipe()`.
+- **NEW-5 (cosmetic, documented not changed) — a reset from an unlocked vault flashes through `/unlock`** for
+  the duration of the remote tombstone + `biometric.disable()` + `_deleteKeys` awaits, and the integrity screen
+  disappears because `wipe()` clears `state.error`. That is the deliberate cost of P3-2's safe ordering; noted
+  in `resetVault`'s doc and docs/CRYPTO.md §3, with a `resetting` status as the fix if it ever confuses.
+- **NEW-6 — a throwing `containsKey` let a stale prefs session overwrite a live secure one.** The session
+  migration treated the error as "absent"; it now returns instead, leaving both copies untouched so the
+  migration retries next launch. `hasAccessToken()` keeps returning false — there the cost is one sign-in.
 
 ## 2026-09-02 (Phase 6 — admin panel MVP)
 

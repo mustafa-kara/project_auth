@@ -820,6 +820,16 @@ class VaultLockCubit extends Cubit<VaultLockState> {
   /// Tüm vault verisini siler (çift onaylı UI aksiyonu sonrası çağrılır).
   /// [VaultStorageKeys.all] → setup'a döner. plaintext + marker dahil silinir →
   /// reset sonrası eski plaintext yeniden migrate EDİLMEZ (yarım durum kalmaz).
+  ///
+  /// **Görsel not — `/unlock` üzerinden geçiş (doğrulama NEW-5, kozmetik):**
+  /// `unlocked` bir vault'tan çağrıldığında state `locking → locked` olur ve
+  /// `uninitialized` ancak en sonda emit edilir, yani router uzaktaki tombstone
+  /// + `biometric.disable()` + `_deleteKeys` await'leri boyunca `/unlock`
+  /// gösterir, sonra `/setup`'a geçer; ayrıca `VaultCubit.wipe()` `state.error`'ı
+  /// temizlediği için `_IntegrityErrorView` reset ortasında kaybolur. Bu, P3-2'nin
+  /// güvenli sıralamasının BİLİNÇLİ bedelidir (anahtar, tüketicisi sökülmeden
+  /// serbest bırakılmaz); reset her durumda tamamlanır. Yavaş ağda kafa
+  /// karıştırırsa çözüm ayrı bir `resetting` statüsüdür — bkz. docs/CRYPTO.md §11.
   Future<void> resetVault() async {
     // **Durum makinesinden GEÇ (güvenlik denetimi P3-2).** `_disposeKey()`'i
     // doğrudan çağırmak, `unlocked` subtree'si HÂLÂ MONTELİ iken anahtarı serbest

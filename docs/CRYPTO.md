@@ -94,7 +94,11 @@ implicit are now enforced in code:
   past the machine to `_disposeKey()` and then `await`ing the remote tombstone, `biometric.disable()` and
   `_deleteKeys()` with the unlocked subtree still mounted around a freed `KeyHandle`. That window was a latent
   use-after-free (`sodium_mprotect_readonly` on freed memory), unreachable through today's only in-vault
-  caller but exactly what the `locking` → dispose ordering exists to prevent.
+  caller but exactly what the `locking` → dispose ordering exists to prevent. The deliberate cosmetic cost:
+  a reset from an unlocked vault now flashes through `/unlock` for the duration of those awaits (and the
+  integrity screen disappears, since `VaultCubit.wipe()` clears `state.error`) before landing on `/setup` —
+  the reset itself always completes, and a dedicated `resetting` status is the fix should the flash ever
+  confuse anyone on a slow network.
 
 ## 4. AAD (Additional Authenticated Data) scheme
 
@@ -259,7 +263,12 @@ Two consequences follow, and both are implemented:
   `keyAttributesCorrupted` exactly as it already mapped `FormatException` → `/auth-integrity`, which offers
   **"Yeniden dene"** (`retryBootstrap`) and, as a last resort, reset. Unmapped, the exception would have
   escaped the `bootstrap` future as an unhandled async error and left the state at `uninitialized` — i.e. the
-  router would still have shown setup, which is precisely the outcome being defended against.
+  router would still have shown setup, which is precisely the outcome being defended against. The same
+  mapping now covers the unlock family (`unlock`, `recoverWithNewPassword`, `biometricUnlock` and the
+  migration marker reads they run), where the exception used to become an unhandled async error — no state
+  change, no message, a button that appeared to do nothing; and the corrupted state carries an `attempt`
+  counter so a repeated failure is a *new* state, letting `/auth-integrity` show a spinner and "Hâlâ
+  okunamıyor" instead of bloc silently dropping an emit equal to the current one.
 - **The ciphertext must not travel without its wrapping key.** `android:allowBackup="false"` +
   `fullBackupContent="false"` reliably disable only **cloud** backup; per the Android manifest documentation,
   apps targeting API 31+ cannot always disable **device-to-device** migration. A D2D transfer would move the
