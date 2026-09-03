@@ -1,7 +1,9 @@
 import type { Metadata } from 'next'
+import Link from 'next/link'
 
 import { AnnouncementFormDialog } from '@/components/announcements/announcement-form-dialog'
 import { DeleteAnnouncementDialog } from '@/components/announcements/delete-announcement-dialog'
+import { TablePagination } from '@/components/table-pagination'
 import { Badge } from '@/components/ui/badge'
 import {
   Table,
@@ -18,6 +20,14 @@ import {
   mapAnnouncementRows,
 } from '@/lib/announcements'
 import { requireAdmin } from '@/lib/auth'
+import {
+  hasNextPage,
+  pageCount,
+  pageHref,
+  pageRange,
+  parsePage,
+  type SearchParamValue,
+} from '@/lib/paging'
 import { createClient } from '@/lib/supabase/server'
 
 export const metadata: Metadata = { title: 'Duyurular — Yönetim Paneli' }
@@ -27,16 +37,33 @@ export const metadata: Metadata = { title: 'Duyurular — Yönetim Paneli' }
  * SELECT to anon+authenticated, so the secret key is not needed to list; it is
  * used only by the write actions in `./actions.ts`.
  */
-export default async function AnnouncementsPage() {
+export default async function AnnouncementsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: SearchParamValue }>
+}) {
   await requireAdmin()
 
+  const page = parsePage((await searchParams).page)
+  const { from, to } = pageRange(page)
+
   const supabase = await createClient()
-  const { data, error } = await supabase
+  const { data, count, error } = await supabase
     .from('announcements')
-    .select('id,title,body,audience,created_at')
+    .select('id,title,body,audience,created_at', { count: 'exact' })
+    // Newest first. `id` is the tiebreaker so rows sharing a `created_at` cannot
+    // reappear on, or vanish between, two pages.
     .order('created_at', { ascending: false })
+    .order('id', { ascending: false })
+    .range(from, to)
 
   const announcements = mapAnnouncementRows(data)
+  const total = typeof count === 'number' ? count : null
+  // Row counts come from the raw response, not from `announcements`: a row that
+  // `mapAnnouncementRows` quarantines still occupies a slot in the page.
+  const rowCount = (data ?? []).length
+  const totalPages = pageCount(total ?? rowCount)
+  const hasNext = hasNextPage(page, total, rowCount)
 
   return (
     <div className="flex flex-col gap-6">
@@ -54,6 +81,15 @@ export default async function AnnouncementsPage() {
         <p role="alert" className="text-destructive text-sm">
           Duyurular yüklenemedi. Lütfen sayfayı yenileyin.
         </p>
+      ) : rowCount === 0 && page > 1 ? (
+        <div className="rounded-lg border border-dashed p-10 text-center">
+          <p className="text-sm font-medium">Bu sayfada kayıt yok</p>
+          <p className="text-muted-foreground mt-1 text-sm">
+            <Link href={pageHref('/announcements', 1)} className="underline underline-offset-4">
+              İlk sayfaya dön
+            </Link>
+          </p>
+        </div>
       ) : announcements.length === 0 ? (
         <div className="rounded-lg border border-dashed p-10 text-center">
           <p className="text-sm font-medium">Henüz duyuru yok</p>
@@ -105,6 +141,16 @@ export default async function AnnouncementsPage() {
             </TableBody>
           </Table>
         </div>
+      )}
+
+      {error ? null : (
+        <TablePagination
+          page={page}
+          total={total}
+          pageCount={totalPages}
+          hasNext={hasNext}
+          hrefForPage={(target) => pageHref('/announcements', target)}
+        />
       )}
     </div>
   )

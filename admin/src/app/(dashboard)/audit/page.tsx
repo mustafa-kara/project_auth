@@ -1,11 +1,12 @@
 import { AuditFilters } from '@/components/audit/audit-filters'
-import { AuditPagination } from '@/components/audit/audit-pagination'
 import { AuditTable, type AuditLogRow } from '@/components/audit/audit-table'
+import { TablePagination } from '@/components/table-pagination'
 import { requireAdmin } from '@/lib/auth'
 import {
   auditHasNextPage,
   auditPageCount,
   auditRange,
+  buildAuditHref,
   escapeLikePattern,
   parseAuditQuery,
   type AuditSearchParams,
@@ -89,7 +90,14 @@ export default async function AuditPage({
       ) : (
         <>
           <AuditTable rows={rows} />
-          <AuditPagination query={query} total={total} pageCount={pageCount} hasNext={hasNext} />
+          <TablePagination
+            page={query.page}
+            total={total}
+            pageCount={pageCount}
+            hasNext={hasNext}
+            // Filters ride along in the href, so paging never silently widens the query.
+            hrefForPage={(page) => buildAuditHref({ ...query, page })}
+          />
         </>
       )}
     </div>

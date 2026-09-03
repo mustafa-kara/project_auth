@@ -1,4 +1,15 @@
 import { AUDIT_ACTIONS, type AuditAction } from '@/lib/audit'
+import {
+  DEFAULT_PAGE_SIZE,
+  MAX_PAGE,
+  firstSearchParamValue,
+  hasNextPage,
+  pageCount,
+  pageRange,
+  parsePage,
+  type PageRange,
+  type SearchParamValue,
+} from '@/lib/paging'
 
 /**
  * Pure search-param parsing for `/audit`.
@@ -7,10 +18,14 @@ import { AUDIT_ACTIONS, type AuditAction } from '@/lib/audit'
  * server component, but every decision it makes about *what* to query (page
  * clamping, action whitelisting, search sanitising, `.range()` bounds) lives
  * here so it can be unit-tested without a database or a request.
+ *
+ * The page arithmetic itself is shared with the other paged tables in
+ * `lib/paging.ts`; what stays here is the part only `/audit` has — the action
+ * whitelist, the `ilike` needle and the filter-preserving href.
  */
 
 /** Rows per page. `.range()` is inclusive, so a page spans `from … from + 49`. */
-export const AUDIT_PAGE_SIZE = 50
+export const AUDIT_PAGE_SIZE = DEFAULT_PAGE_SIZE
 
 /**
  * Upper bound on `?q=`. `audit_logs.target` is a uuid / flag key / announcement
@@ -19,8 +34,7 @@ export const AUDIT_PAGE_SIZE = 50
  */
 export const AUDIT_SEARCH_MAX_LENGTH = 100
 
-/** A single value of a Next.js `searchParams` entry. */
-export type SearchParamValue = string | string[] | undefined
+export type { SearchParamValue }
 
 export interface AuditSearchParams {
   page?: SearchParamValue
@@ -38,10 +52,7 @@ export interface AuditQuery {
 }
 
 /** Inclusive bounds for `PostgrestTransformBuilder.range(from, to)`. */
-export interface AuditRange {
-  from: number
-  to: number
-}
+export type AuditRange = PageRange
 
 /** Turkish labels for the action filter and the table badge. */
 export const AUDIT_ACTION_LABELS: Readonly<Record<AuditAction, string>> = {
@@ -80,40 +91,12 @@ export function auditActionLabel(action: string): string {
   return AUDIT_ACTION_LABELS[action as AuditAction] ?? action
 }
 
-/** First value of a repeated search param (`?page=2&page=9` → `'2'`). */
-function firstValue(value: SearchParamValue): string | undefined {
-  if (Array.isArray(value)) return value[0]
-  return value
-}
+/** Hard ceiling on `?page=` — see {@link MAX_PAGE}. */
+export const AUDIT_MAX_PAGE = MAX_PAGE
 
-/**
- * Hard ceiling on `?page=`.
- *
- * Unbounded page numbers turn into an unbounded `offset` in the PostgREST query
- * string (`?page=1e21` → `offset=5e22`), which the database answers with a 5xx
- * rather than an empty page. 10 000 pages × 50 rows = 500 000 audit rows, far past
- * anything worth paging through in a browser.
- */
-export const AUDIT_MAX_PAGE = 10_000
-
-/**
- * `?page=` → a 1-based page number.
- *
- * Anything that is not a finite integer ≥ 1 (missing, `0`, `-3`, `1.5`, `abc`,
- * `Infinity`) collapses to page 1 rather than erroring: a hand-edited URL should
- * show the first page, not a 500. Anything above {@link AUDIT_MAX_PAGE} is clamped
- * down to it for the same reason.
- */
+/** `?page=` → a 1-based page number, clamped to `[1, AUDIT_MAX_PAGE]`. */
 export function parseAuditPage(value: SearchParamValue): number {
-  const raw = firstValue(value)
-  if (typeof raw !== 'string' || raw.trim() === '') return 1
-
-  const parsed = Number(raw)
-  if (!Number.isFinite(parsed)) return 1
-
-  const page = Math.floor(parsed)
-  if (page < 1) return 1
-  return page > AUDIT_MAX_PAGE ? AUDIT_MAX_PAGE : page
+  return parsePage(value, AUDIT_MAX_PAGE)
 }
 
 /**
@@ -123,7 +106,7 @@ export function parseAuditPage(value: SearchParamValue): number {
  * to `.eq('action', …)` can never be attacker-chosen.
  */
 export function parseAuditAction(value: SearchParamValue): AuditAction | undefined {
-  const raw = firstValue(value)
+  const raw = firstSearchParamValue(value)
   if (typeof raw !== 'string') return undefined
 
   return (AUDIT_ACTIONS as readonly string[]).includes(raw) ? (raw as AuditAction) : undefined
@@ -131,7 +114,7 @@ export function parseAuditAction(value: SearchParamValue): AuditAction | undefin
 
 /** `?q=` → a trimmed, length-capped needle, or `undefined` when it is empty. */
 export function parseAuditSearch(value: SearchParamValue): string | undefined {
-  const raw = firstValue(value)
+  const raw = firstSearchParamValue(value)
   if (typeof raw !== 'string') return undefined
 
   const trimmed = raw.trim()
@@ -149,43 +132,24 @@ export function parseAuditQuery(params: AuditSearchParams = {}): AuditQuery {
   }
 }
 
-/**
- * Page number → inclusive `.range()` bounds.
- *
- * Verified against `@supabase/postgrest-js@2.114.0`
- * (`src/PostgrestTransformBuilder.ts`): `range(from, to)` sets `offset=from` and
- * `limit=to - from + 1`, i.e. `to` is inclusive.
- */
+/** Page number → inclusive `.range()` bounds — see {@link pageRange}. */
 export function auditRange(page: number, pageSize: number = AUDIT_PAGE_SIZE): AuditRange {
-  const safePage = page < 1 ? 1 : Math.floor(page)
-  const from = (safePage - 1) * pageSize
-  return { from, to: from + pageSize - 1 }
+  return pageRange(page, pageSize)
 }
 
 /** Total page count for `count: 'exact'`; always ≥ 1 so the footer reads "1 / 1". */
 export function auditPageCount(total: number, pageSize: number = AUDIT_PAGE_SIZE): number {
-  if (!Number.isFinite(total) || total <= 0) return 1
-  return Math.max(1, Math.ceil(total / pageSize))
+  return pageCount(total, pageSize)
 }
 
-/**
- * Is there a page after this one?
- *
- * With an exact `count` the page count answers it. Without one — PostgREST can omit
- * the total from `content-range` — `pageCount` collapses to 1 and "Sonraki" would
- * be disabled even though more rows exist. In that case a **full** page is the
- * signal: exactly `pageSize` rows means there is probably another page (a
- * false positive costs one empty page, a false negative hides the rest of the log).
- */
+/** Is there a page after this one? See {@link hasNextPage} for the `total === null` case. */
 export function auditHasNextPage(
   page: number,
   total: number | null,
   rowCount: number,
   pageSize: number = AUDIT_PAGE_SIZE,
 ): boolean {
-  if (page >= AUDIT_MAX_PAGE) return false
-  if (total === null) return rowCount === pageSize
-  return page < auditPageCount(total, pageSize)
+  return hasNextPage(page, total, rowCount, pageSize, AUDIT_MAX_PAGE)
 }
 
 /**
