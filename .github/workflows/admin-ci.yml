@@ -26,7 +26,7 @@ concurrency:
 
 jobs:
   lint-typecheck-test-build:
-    name: Lint, typecheck, test & build
+    name: Audit, lint, typecheck, test & build
     runs-on: ubuntu-latest
     timeout-minutes: 15
     # Applies to `run` steps only; `uses` steps are unaffected, which is why
@@ -53,6 +53,18 @@ jobs:
         # `npm ci` (not `npm install`): CI must build the EXACT resolution in
         # package-lock.json and fails if the lockfile and package.json disagree.
         run: npm ci
+
+      # `--omit=dev` on purpose: only the dependencies that actually ship in the
+      # running panel can block the pipeline. A dev-only advisory (eslint, vitest,
+      # a transitive build tool) is real work but not a production exposure, and
+      # letting it fail the build would train everyone to ignore this step — the
+      # one place a known-vulnerable *runtime* dependency is supposed to stop.
+      # `--audit-level=high` for the same reason: high + critical fail, low and
+      # moderate are reported without failing. Exit code 0 = nothing at or above
+      # the level. Dependencies are pinned exactly and package-lock.json is
+      # committed, so this audits the exact tree `npm ci` just installed.
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
 
       - name: Lint
         run: npm run lint
