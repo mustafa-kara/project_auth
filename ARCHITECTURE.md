@@ -81,7 +81,11 @@ Master Password (set by the user — SEPARATE from the login password)
 > the OS access-control on `flutter_secure_storage.read`). Details + threat model: [docs/CRYPTO.md §11](docs/CRYPTO.md).
 
 - The `KEK` and the plaintext `masterKey` **are NOT kept in plaintext on disk.**
-- During the session the `masterKey` is held in memory; it is cleared when the app goes to the background/lock.
+- During the session the `masterKey` is held in memory; it is cleared when the app goes to the background/lock,
+  **and with it every decrypted secret** — since the Phase 7 review the registered *plaintext holders*
+  (`VaultCubit`/`EncryptedVaultRepository`, `ImportPage`) are cleared synchronously inside `_disposeKey()`,
+  before the key is freed, rather than waiting for the widget teardown that a backgrounded app may never run.
+  This makes the secrets unreachable, **not** erased ([docs/CRYPTO.md §3, §18](docs/CRYPTO.md)).
 - **Fast-unlock mechanism (clarification):** the master key is stored wrapped by an **access-controlled** key in the OS keystore:
   - iOS: Keychain item `kSecAttrAccessControl` + `.biometryCurrentSet` (backed by the Secure Enclave).
   - Android: a key in the Keystore with `setUserAuthenticationRequired(true)`; StrongBox is used when available.
@@ -92,6 +96,9 @@ Master Password (set by the user — SEPARATE from the login password)
   **3 distinct character classes** (upper/lower/digit/symbol) — raised from "min 8" on 2026-06-19.
 - **Android Auto Backup is disabled** (`allowBackup=false`, `fullBackupContent=false`): `flutter_secure_storage`'s
   `EncryptedSharedPreferences` must not be backed up (privacy + a new-device Keystore mismatch would corrupt the vault).
+  Since 2026-09-02 this is backed by `android:dataExtractionRules`, which also excludes those prefs from
+  **device-to-device transfer** — API 31+ cannot always disable D2D, and moving the ciphertext without its
+  Keystore key is exactly the mismatch above ([docs/CRYPTO.md §9.1](docs/CRYPTO.md)).
 
 ### 2.4 Encryption primitives
 | Purpose | Primitive |
@@ -274,6 +281,8 @@ could only do with a live camera now has a second route in, and imported groups 
   `VaultPage`, and now the home of the **pasted migration link**: a `otpauth-migration://` paste goes to a
   `MigrationScanController` owned by the sheet, an incomplete batch shows the progress band, a complete one opens
   `ImportPreviewView` inside the sheet. The clipboard is never read programmatically — the user pastes.
+  Writes go through `SensitiveClipboard` (iOS `localOnly` + `expirationDate`, Android `EXTRA_IS_SENSITIVE`),
+  never plain `Clipboard.setData` ([docs/CRYPTO.md §16.5](docs/CRYPTO.md)).
 - **`features/scan/presentation/scan_page.dart`** — an AppBar "Görüntüden oku" action, independent of camera
   state. Every decoded string re-enters the existing `_handleRaw`, so both single-token and migration mode work
   from an image. Wrapped in the same budgeted lock exemption as the file flows
@@ -498,6 +507,16 @@ SessionStatus (identity)             VaultLockStatus (E2E)
 - **`onAuthStateChange` `onError` is MANDATORY** (gotrue surfaces a network error as a stream error → without it the app crashes).
 - **signOut** clears the local vault (masterKey/mnemonic) BEFORE the network signOut (at every stage);
   even on a network error, `signedOut` is reached (gotrue deletes the local token first).
+  **Since the Phase 7 review this holds for EVERY transition out of `signedIn`, not only the button** — the
+  `authStateChanges` stream's `signedOut` (refresh-token failure, server-side revocation, expiry, a global
+  sign-out from another device), `cancelPendingConfirmation()` and `bootstrap()`'s non-`signedIn` branches all
+  call `onAuthSignedOut()`, and `main.dart._onSession` repeats it at the boundary. Otherwise the master key
+  stayed resident and a re-login as the same uid re-entered the **unlocked** vault on the account password
+  alone — the identity gate is above the E2E gate, so it cannot close without closing it too.
+- **The session itself lives in Keychain/Keystore, not SharedPreferences** (2026-09-02): the refresh token and
+  the PKCE verifier go through `SecureLocalStorage`/`SecureGotrueAsyncStorage`, with a one-time migration of
+  the old plaintext record. Deliberate policy difference from vault data: a storage error there is a screen,
+  here it reads as "signed out" ([docs/CRYPTO.md §9.2](docs/CRYPTO.md)).
 - **Multi-vault per uid:** a SEPARATE local vault namespace (`'<uid>/'`) for each Supabase uid. On the first
   login, if a uid-less Phase 2 vault exists, an explicit **account-linking** confirmation (`/auth/link`): link
   (migrate + clear/re-enroll `bmk`) / new empty vault. A per-uid decision marker → no guard loop.
