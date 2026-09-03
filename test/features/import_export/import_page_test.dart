@@ -802,4 +802,51 @@ void main() {
     expect(find.text('1 token içe aktarılacak'), findsNothing);
     expect(find.text('Yedek dosyası seç'), findsOneWidget);
   });
+
+  testWidgets('masterKey dispose → yüklü yedeğin düz metni bırakılır (NEW-4b)', (
+    tester,
+  ) async {
+    // `_raw` içe aktarılan dosyanın TAMAMIDIR (her tohum içinde). Kilit
+    // kapandığında (arka plan, signOut, reset) masterKey ile AYNI anda düşmeli;
+    // bir frame'e (dispose'a) bağlı kalmamalı — bkz. P2-1.
+    final service = _FakeImportService(
+      result: ImportPreview(source: ImportSource.aegis, toAdd: [_acc('a')]),
+    );
+    final documents = _FakeDocuments(document: _doc());
+    final vault = VaultCubit(_FakeRepo());
+    await vault.load();
+    addTearDown(vault.close);
+    // Ağaç iki kez pump edilir: temizleyici bilinçli olarak `setState`
+    // ÇAĞIRMAZ (dispose sonrası da gelebilir), bu yüzden yeniden çizimi test
+    // tetikler — gerçekte kilit redirect'i getirir.
+    Widget tree() => MultiBlocProvider(
+      providers: [
+        BlocProvider<VaultLockCubit>.value(value: lock),
+        BlocProvider<VaultCubit>.value(value: vault),
+      ],
+      child: MaterialApp(
+        home: ImportPage(service: service, documents: documents),
+      ),
+    );
+
+    await tester.pumpWidget(tree());
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Dosya seç'));
+    await tester.pumpAndSettle();
+    expect(find.text('1 token içe aktarılacak'), findsOneWidget);
+    expect(
+      lock.plaintextHolders,
+      hasLength(1),
+      reason: 'sayfa temizleyicisini kaydetmiş olmalı',
+    );
+
+    lock.firePlaintextWipe(); // = VaultLockCubit._disposeKey()
+
+    await tester.pumpWidget(tree());
+    await tester.pumpAndSettle();
+    // `_preview` null'landığı için sayfa dosya seçme adımına düşer — düz metnin
+    // (`_raw`, her tohumu içeren TÜM yedek dosyası) gerçekten bırakıldığı budur.
+    expect(find.text('1 token içe aktarılacak'), findsNothing);
+    expect(find.text('Yedek dosyası seç'), findsOneWidget);
+  });
 }
