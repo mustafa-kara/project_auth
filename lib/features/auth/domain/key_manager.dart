@@ -11,7 +11,10 @@
 /// (kek, recoveryKey) ve ham byte buffer'ları her zaman `finally`'de temizlenir.
 library;
 
+import 'dart:convert';
 import 'dart:typed_data';
+
+import 'package:flutter/foundation.dart' show visibleForTesting;
 
 import '../../../core/crypto/bip39.dart';
 import '../../../core/crypto/crypto_exceptions.dart';
@@ -99,7 +102,23 @@ class KeyManager {
 
   KeyManager(this._crypto);
 
-  Uint8List _aad(String s) => Uint8List.fromList(s.codeUnits);
+  /// Bu sınıfın ürettiği TÜM AAD dizgeleri (güvenlik denetimi P3-6 testi için).
+  /// Hepsi ASCII'dir → [_aad]'in `utf8.encode`'u `codeUnits` ile BAYT-BİREBİR
+  /// aynıdır; test: `test/features/auth/aad_encoding_test.dart`.
+  @visibleForTesting
+  static const aadStrings = [
+    _aadMasterKek,
+    _aadMasterRecovery,
+    _aadMasterBiometric,
+  ];
+
+  /// AAD baytları. `utf8.encode` — `String.codeUnits` DEĞİL (güvenlik denetimi
+  /// P3-6): codeUnits UTF-16 birimlerini 8 bite kırpar, yani ASCII olmayan tek
+  /// bir karakter sessizce YANLIŞ bir AAD üretirdi. Buradaki tüm AAD'ler bugün
+  /// ASCII olduğu için iki kodlama bayt-birebir aynıdır (bkz. [aadStrings] ve
+  /// `aad_encoding_test.dart`) → mevcut blob'lar etkilenmez; değişiklik yalnız
+  /// örtük değişmezi ORTADAN KALDIRIR.
+  Uint8List _aad(String s) => utf8.encode(s);
 
   /// Boş/çok kısa parola domain'de reddedilir (Argon2id'e gitmeden).
   /// Tek kaynak [enforcePolicy]'dir — burası yalnız ona delege eder.
@@ -281,9 +300,16 @@ class KeyManager {
         attrs: attrs.copyWith(biometricEncryptedMasterKey: blob),
         biometricKeyBytes: biometricKeyBytes,
       );
+    } catch (_) {
+      // HATA YOLU (güvenlik denetimi P3-6): `keyFromBytes`/`wrapKey` fırlatırsa
+      // byte'lar KİMSEYE taşınmaz — sahipliği devralacak çağıran yok, dolayısıyla
+      // onları silecek de yok. Burada sil, sonra yükselt.
+      biometricKeyBytes.fillRange(0, biometricKeyBytes.length, 0);
+      rethrow;
     } finally {
-      // NB: biometricKeyBytes zero-fill EDİLMEZ — çağırana taşınır (enroll sonrası
-      // çağıran siler). Yalnız ara KeyHandle dispose edilir.
+      // NB: BAŞARI yolunda biometricKeyBytes zero-fill EDİLMEZ — çağırana taşınır
+      // (enroll sonrası çağıran siler: vault_lock_cubit.enableBiometric `finally`).
+      // Yalnız ara KeyHandle dispose edilir.
       biometricKey?.dispose();
     }
   }

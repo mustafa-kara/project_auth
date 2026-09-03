@@ -72,6 +72,25 @@ class _FakeLock extends Cubit<VaultLockState> implements VaultLockCubit {
     _active = false;
   }
 
+  /// Kayıtlı plaintext temizleyicileri (güvenlik denetimi P2-1). Sayfa
+  /// `didChangeDependencies`'te kaydolur, `dispose`'ta kaydı geri alır;
+  /// `noSuchMethod` null döndüğü için burada GERÇEKLENMESİ ZORUNLU (dönüş tipi
+  /// `VoidCallback`).
+  final List<void Function()> plaintextHolders = [];
+
+  @override
+  VoidCallback registerPlaintextHolder(void Function() wipe) {
+    plaintextHolders.add(wipe);
+    return () => plaintextHolders.remove(wipe);
+  }
+
+  /// Testte "masterKey dispose edildi" anını taklit eder.
+  void firePlaintextWipe() {
+    for (final w in List<void Function()>.of(plaintextHolders)) {
+      w();
+    }
+  }
+
   @override
   noSuchMethod(Invocation i) {}
 }

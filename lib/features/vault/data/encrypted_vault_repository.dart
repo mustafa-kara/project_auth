@@ -85,7 +85,8 @@ class EncryptedVaultRepository
   static const vaultKey = 'vault_encrypted_v1';
 
   /// AAD prefix'i — record tipi + şema versiyonu. Tam AAD: `token|1|<id>`.
-  static const _aadPrefix = 'token|1|';
+  /// Public: `aad_encoding_test.dart` (güvenlik denetimi P3-6) bunu okur.
+  static const aadPrefix = 'token|1|';
 
   final KeyHandle _masterKey;
   final CryptoService _crypto;
@@ -116,7 +117,16 @@ class EncryptedVaultRepository
 
   int _nowMs() => DateTime.now().millisecondsSinceEpoch;
 
-  Uint8List _aad(String id) => Uint8List.fromList('$_aadPrefix$id'.codeUnits);
+  /// AAD baytları. `utf8.encode` — `String.codeUnits` DEĞİL (güvenlik denetimi
+  /// P3-6): codeUnits UTF-16 birimlerini 8 bite kırpar, yani ASCII olmayan tek bir
+  /// karakter sessizce YANLIŞ bir AAD üretirdi.
+  ///
+  /// **Mevcut blob'lar etkilenmez:** [id] her zaman uuid v4'tür — lokalde tek
+  /// üretici `OtpAccount`'un `Uuid().v4()` varsayılanıdır (import'lar Aegis/2FAS
+  /// uuid'lerini KASITLI olarak yeniden üretir), sunucu tarafında `tokens.id`
+  /// Postgres `uuid` sütunudur (ASCII olmayan bir id sync'ten geçemez). Prefix de
+  /// ASCII → iki kodlama bayt-birebir aynı; `aad_encoding_test.dart` bunu pinler.
+  Uint8List _aad(String id) => utf8.encode('$aadPrefix$id');
 
   @override
   Future<VaultLoadResult> load() async {

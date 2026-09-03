@@ -32,6 +32,11 @@ class _FakeLock extends Cubit<VaultLockState> implements VaultLockCubit {
   @override
   bool get systemFileFlowActive => false;
 
+  /// ImportPage plaintext temizleyicisini kaydeder (güvenlik denetimi P2-1);
+  /// dönüş tipi `VoidCallback` olduğu için `noSuchMethod`'un null'ı yetmez.
+  @override
+  VoidCallback registerPlaintextHolder(void Function() wipe) => () {};
+
   @override
   noSuchMethod(Invocation i) {}
 }
