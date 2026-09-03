@@ -47,6 +47,32 @@ void main() {
       ),
     );
 
+    // Review [P2-4]: the recovery key must NOT go out over the plain
+    // `Clipboard.setData` — it goes through the hardened channel (iOS
+    // localOnly + expirationDate, Android EXTRA_IS_SENSITIVE). Standing in for
+    // the native side here also pins that the page actually uses it: if the
+    // page regressed to `Clipboard.setData`, `expiresInMs` below would be null.
+    const sensitive = MethodChannel(
+      'dev.mustafakara.project_auth/sensitive_clipboard',
+    );
+    int? expiresInMs;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(sensitive, (
+      call,
+    ) async {
+      if (call.method == 'setText') {
+        final args = call.arguments as Map;
+        copied = args['text'] as String?;
+        expiresInMs = args['expiresInMs'] as int?;
+      }
+      return null;
+    });
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        sensitive,
+        null,
+      ),
+    );
+
     // Geniş viewport: 24-kelime grid + kopyala + checkbox + CTA hepsi sığsın
     // (default 800×600'de ListView içeriği fold altında kalıp overflow/clip olmaz).
     tester.view.physicalSize = const Size(1200, 2400);
@@ -76,6 +102,9 @@ void main() {
     // İlk ve son satır numaralı (düz join değil).
     expect(copied, startsWith('1. word0'));
     expect(copied, endsWith('24. word23'));
+    // OS düzeyinde süre sonu Dart timer'ıyla AYNI pencerede istenir — süreç
+    // öldürülürse timer hiç çalışmaz, bu yine de geçerlidir (review [P2-4]).
+    expect(expiresInMs, 60000);
 
     // Security review finding 2: the clear timer is intentionally NOT cancelled
     // on dispose, so it must still fire after the window even if the user leaves.
