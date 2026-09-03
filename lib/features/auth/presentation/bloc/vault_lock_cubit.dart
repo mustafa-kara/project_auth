@@ -113,6 +113,10 @@ class VaultLockCubit extends Cubit<VaultLockState> {
   /// Sistem biyometri prompt'u açılırken app kısa süre `inactive` üretebilir; bu flag
   /// true iken `inactive` abort'tan MUAF tutulur (başarılı unlock yarıda kesilmesin).
   /// `paused` (gerçek arka plan) YİNE kesin abort eder. `_commitInFlight` simetriği.
+  ///
+  /// **Yalnız [biometricUnlock] içinde, `try`/`finally` ile yönetilir (P2-2):**
+  /// dağınık sıfırlamalar bir mandala dönüşüp `retrieve()`'in eşlenmemiş bir
+  /// istisnasında bayrağı kalıcı `true` bırakıyordu. Buraya yeni bir atama EKLEME.
   bool _biometricPromptInFlight = false;
 
   /// Oturum içi masterKey — yalnız `unlocked`/`setupPending`/`locking` state'lerinde
@@ -920,64 +924,87 @@ class VaultLockCubit extends Cubit<VaultLockState> {
     final attrs = await _readAttrsOrThrow();
     await _refreshBiometricState(attrs);
 
+    // **Bayrak `finally` ile TEK noktada sıfırlanır (güvenlik denetimi P2-2).**
+    // Eskiden her tipli `catch` kendi içinde sıfırlıyordu; `retrieve()` bu beş
+    // tipin DIŞINDA bir şey fırlatırsa (ör. `MissingPluginException` —
+    // `PlatformException`'dan TÜREMEZ, dolayısıyla `BiometricServiceImpl`'in
+    // eşlemesine takılmaz) bayrak sonsuza dek `true` kalıyordu. `UnlockPage`
+    // hiçbir şey yakalamadığı için bu sessizce olurdu ve cubit'in KALAN ÖMRÜ
+    // boyunca `onAppBackgrounded(paused: false)` erken dönerdi → `inactive`
+    // (app switcher, bildirim gölgesi, gelen çağrı) AÇIK vault'u artık kilitlemezdi.
+    //
+    // Tipli hata `finally`'den SONRA işlenir: `BiometricKeyMissing` dalı bir
+    // `await` içerir; işleme try'ın içinde kalsaydı bayrak o await boyunca yine
+    // `true` kalırdı (eski davranış, istenmiyor).
     Uint8List? bytes;
+    Object? promptFailure;
     _biometricPromptInFlight = true;
     try {
       bytes = await _biometric.retrieve(); // OS biyometri prompt + gated read
-    } on BiometricCanceled {
+    } on BiometricCanceled catch (e) {
+      promptFailure = e;
+    } on BiometricLockout catch (e) {
+      promptFailure = e;
+    } on BiometricKeyMissing catch (e) {
+      promptFailure = e;
+    } on BiometricUnavailable catch (e) {
+      promptFailure = e;
+    } on BiometricStorageError catch (e) {
+      promptFailure = e;
+    } finally {
       _biometricPromptInFlight = false;
-      emit(_locked()); // sessizce parolaya düş
-      return;
-    } on BiometricLockout {
-      _biometricPromptInFlight = false;
-      emit(_locked(error: VaultLockError.biometricLockout));
-      return;
-    } on BiometricKeyMissing {
-      _biometricPromptInFlight = false;
-      // Enrollment kaybolmuş (biyometri seti değişti vb.) → bmk'yı PERSIST temizle
-      // ki sonraki bootstrap tekrar enrolled görüp bozuk-bmk döngüsüne girmesin
-      // (reviewer 3.tur [P2]). Write FAIL ederse: disk hâlâ bmk'lı ama UI'da kapalı
-      // göster (deviceAvail=false + biometricFailed) → döngü yok; parolayla açıp
-      // Settings'ten tekrar dener, sonraki başarılı disable/bootstrap temizler.
-      try {
-        await _attrsStore.write(attrs.copyWith(clearBiometric: true));
-        _biometricEnrolled = false;
-        emit(_locked());
-      } catch (_) {
-        _biometricEnrolled = true;
+    }
+
+    if (promptFailure != null) {
+      if (promptFailure is BiometricCanceled) {
+        emit(_locked()); // sessizce parolaya düş
+      } else if (promptFailure is BiometricLockout) {
+        emit(_locked(error: VaultLockError.biometricLockout));
+      } else if (promptFailure is BiometricKeyMissing) {
+        // Enrollment kaybolmuş (biyometri seti değişti vb.) → bmk'yı PERSIST temizle
+        // ki sonraki bootstrap tekrar enrolled görüp bozuk-bmk döngüsüne girmesin
+        // (reviewer 3.tur [P2]). Write FAIL ederse: disk hâlâ bmk'lı ama UI'da kapalı
+        // göster (deviceAvail=false + biometricFailed) → döngü yok; parolayla açıp
+        // Settings'ten tekrar dener, sonraki başarılı disable/bootstrap temizler.
+        try {
+          await _attrsStore.write(attrs.copyWith(clearBiometric: true));
+          _biometricEnrolled = false;
+          emit(_locked());
+        } catch (_) {
+          _biometricEnrolled = true;
+          _deviceBiometricAvailable = false;
+          emit(_locked(error: VaultLockError.biometricFailed));
+        }
+      } else if (promptFailure is BiometricUnavailable) {
         _deviceBiometricAvailable = false;
+        emit(_locked());
+      } else {
+        // BiometricStorageError (yukarıdaki `on` listesindeki son tip).
         emit(_locked(error: VaultLockError.biometricFailed));
       }
       return;
-    } on BiometricUnavailable {
-      _biometricPromptInFlight = false;
-      _deviceBiometricAvailable = false;
-      emit(_locked());
-      return;
-    } on BiometricStorageError {
-      _biometricPromptInFlight = false;
-      emit(_locked(error: VaultLockError.biometricFailed));
-      return;
     }
-    _biometricPromptInFlight = false;
+
+    // `promptFailure == null` ⇒ `retrieve()` değer döndürdü.
+    final keyBytes = bytes!;
 
     // Prompt bittikten sonra arka-plan yarışı: paused olduysa unlocked'a GEÇME.
     if (_abortToBackground) {
       _abortToBackground = false;
-      bytes.fillRange(0, bytes.length, 0);
+      keyBytes.fillRange(0, keyBytes.length, 0);
       emit(_locked());
       return;
     }
 
     final KeyHandle key;
     try {
-      key = _keyManager.biometricUnlock(attrs, bytes);
+      key = _keyManager.biometricUnlock(attrs, keyBytes);
     } on BiometricUnwrapException {
-      bytes.fillRange(0, bytes.length, 0);
+      keyBytes.fillRange(0, keyBytes.length, 0);
       emit(_locked(error: VaultLockError.biometricFailed));
       return;
     } finally {
-      bytes.fillRange(0, bytes.length, 0); // zero-fill (idempotent)
+      keyBytes.fillRange(0, keyBytes.length, 0); // zero-fill (idempotent)
     }
 
     var owned = false;

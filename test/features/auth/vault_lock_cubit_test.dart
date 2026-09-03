@@ -9,7 +9,8 @@ library;
 import 'dart:async';
 import 'dart:typed_data';
 
-import 'package:flutter/services.dart' show PlatformException;
+import 'package:flutter/services.dart'
+    show MissingPluginException, PlatformException;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:project_auth/core/crypto/crypto_exceptions.dart';
@@ -1214,6 +1215,32 @@ void main() {
       await cubit.biometricUnlock();
       expect(cubit.state.status, VaultLockStatus.locked);
       expect(cubit.state.error, VaultLockError.biometricFailed);
+    });
+
+    test('retrieve EŞLENMEMİŞ bir tip fırlatırsa prompt-in-flight bayrağı '
+        'ASILI KALMAZ → sonraki inactive YİNE kilitler (P2-2)', () async {
+      // `MissingPluginException` `PlatformException`'dan TÜREMEZ, dolayısıyla
+      // `BiometricServiceImpl.retrieve`'in eşlemesine takılmaz ve domain
+      // tiplerinden hiçbirine dönüşmeden yukarı çıkar. `UnlockPage` de
+      // yakalamaz → eskiden bayrak sonsuza dek true kalır, `inactive` kilidi
+      // cubit'in kalan ömrü boyunca devre dışı olurdu.
+      final cubit = await lockedEnrolled(
+        FakeBiometricService(
+          retrieveError: MissingPluginException('kanal yok (test)'),
+        ),
+      );
+      await expectLater(
+        cubit.biometricUnlock(),
+        throwsA(isA<MissingPluginException>()),
+      );
+
+      // Kullanıcı parolayla açar...
+      await cubit.unlock('parola123');
+      expect(cubit.state.status, VaultLockStatus.unlocked);
+
+      // ...ve `inactive` (app switcher / bildirim gölgesi) YİNE kilitlemeli.
+      cubit.onAppBackgrounded(paused: false);
+      expect(cubit.state.status, VaultLockStatus.locked);
     });
 
     test('biometricUnlock unwrap fail → locked + biometricFailed', () async {
