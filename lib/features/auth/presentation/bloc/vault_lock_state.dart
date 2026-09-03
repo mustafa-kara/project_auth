@@ -48,12 +48,20 @@ class VaultLockState extends Equatable {
   /// BAĞIMSIZ. Settings enable switch'inin etkin olup olmadığını belirler. Patch 5.
   final bool deviceBiometricAvailable;
 
+  /// Yalnız `keyAttributesCorrupted` iken anlamlı: kaçıncı BAŞARISIZ okuma
+  /// denemesi (doğrulama NEW-3). `props`'ta olduğu için ard arda iki başarısız
+  /// `retryBootstrap()` İKİ FARKLI state üretir — bloc eşit state'i düşürdüğü
+  /// için aksi halde "Yeniden dene" gözlemlenemez kalıyordu (kullanıcı butonun
+  /// çalışıp çalışmadığını anlayamıyordu). 0 = hiç denenmedi.
+  final int attempt;
+
   const VaultLockState._(
     this.status, {
     this.mnemonic = const [],
     this.error,
     this.biometricEnrolled = false,
     this.deviceBiometricAvailable = false,
+    this.attempt = 0,
   });
 
   const VaultLockState.uninitialized() : this._(VaultLockStatus.uninitialized);
@@ -83,8 +91,8 @@ class VaultLockState extends Equatable {
 
   const VaultLockState.locking() : this._(VaultLockStatus.locking);
 
-  const VaultLockState.keyAttributesCorrupted()
-    : this._(VaultLockStatus.keyAttributesCorrupted);
+  const VaultLockState.keyAttributesCorrupted({int attempt = 0})
+    : this._(VaultLockStatus.keyAttributesCorrupted, attempt: attempt);
 
   const VaultLockState.restoring() : this._(VaultLockStatus.restoring);
 
@@ -101,6 +109,7 @@ class VaultLockState extends Equatable {
     error,
     biometricEnrolled,
     deviceBiometricAvailable,
+    attempt,
   ];
 
   /// SECURITY (güvenlik denetimi P2-3): `toString()` prop BASMAZ.
