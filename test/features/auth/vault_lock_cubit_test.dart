@@ -826,6 +826,97 @@ void main() {
     });
   });
 
+  // Güvenlik denetimi P2-1 — plaintext tutucuları masterKey ile AYNI anda temizlenir.
+  group('registerPlaintextHolder (P2-1)', () {
+    Future<VaultLockCubit> unlocked(FakeKeyManager km) async {
+      await store.write(_fakeAttrs());
+      final cubit = _build(km, store);
+      await cubit.bootstrap();
+      await cubit.unlock('parola123');
+      expect(cubit.state.status, VaultLockStatus.unlocked);
+      return cubit;
+    }
+
+    test(
+      'lock(immediate: true) tutucuyu ANAHTAR DISPOSE EDİLMEDEN ÖNCE çalıştırır',
+      () async {
+        final km = FakeKeyManager();
+        final cubit = await unlocked(km);
+        bool? keyAliveAtWipe;
+        var calls = 0;
+        cubit.registerPlaintextHolder(() {
+          calls++;
+          // Sıra kanıtı: temizlik çalışırken anahtar HÂLÂ canlı olmalı.
+          keyAliveAtWipe = !km.issued.single.disposed;
+        });
+
+        cubit.lock(immediate: true); // arka plan yolu: frame BEKLENMEZ
+
+        expect(calls, 1);
+        expect(keyAliveAtWipe, isTrue);
+        expect(km.issued.single.disposed, isTrue); // sonra anahtar gitti
+        expect(cubit.state.status, VaultLockStatus.locked);
+      },
+    );
+
+    test('arka plana geçiş (paused) tutucuyu çalıştırır', () async {
+      final cubit = await unlocked(FakeKeyManager());
+      var calls = 0;
+      cubit.registerPlaintextHolder(() => calls++);
+      cubit.onAppBackgrounded(paused: true);
+      expect(calls, 1);
+    });
+
+    test('onAuthSignedOut tutucuyu çalıştırır', () async {
+      final cubit = await unlocked(FakeKeyManager());
+      var calls = 0;
+      cubit.registerPlaintextHolder(() => calls++);
+      cubit.onAuthSignedOut();
+      expect(calls, 1);
+    });
+
+    test('resetVault tutucuyu çalıştırır', () async {
+      final cubit = await unlocked(FakeKeyManager());
+      var calls = 0;
+      cubit.registerPlaintextHolder(() => calls++);
+      await cubit.resetVault();
+      expect(calls, greaterThanOrEqualTo(1));
+    });
+
+    test('close() tutucuyu çalıştırır', () async {
+      final cubit = await unlocked(FakeKeyManager());
+      var calls = 0;
+      cubit.registerPlaintextHolder(() => calls++);
+      await cubit.close();
+      expect(calls, 1);
+    });
+
+    test('kayıt geri alınınca ARTIK çağrılmaz', () async {
+      final cubit = await unlocked(FakeKeyManager());
+      var calls = 0;
+      final unregister = cubit.registerPlaintextHolder(() => calls++);
+      unregister();
+      cubit.lock(immediate: true);
+      expect(calls, 0);
+    });
+
+    test(
+      'bir tutucu FIRLATIRSA diğerleri + key dispose YİNE çalışır',
+      () async {
+        final km = FakeKeyManager();
+        final cubit = await unlocked(km);
+        var second = 0;
+        cubit
+          ..registerPlaintextHolder(() => throw StateError('tutucu patladı'))
+          ..registerPlaintextHolder(() => second++);
+        cubit.lock(immediate: true);
+        expect(second, 1);
+        expect(km.issued.single.disposed, isTrue);
+        expect(cubit.state.status, VaultLockStatus.locked);
+      },
+    );
+  });
+
   group('reset', () {
     test('resetVault → tüm anahtarlar silinir, biometric.disable çağrılır, '
         'uninitialized', () async {

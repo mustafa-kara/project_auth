@@ -1037,7 +1037,42 @@ class VaultLockCubit extends Cubit<VaultLockState> {
     return attrs;
   }
 
+  // --- Plaintext tutucuları (güvenlik denetimi P2-1) ---
+
+  /// masterKey dispose edilirken TEMİZLENECEK plaintext tutucularının kaydı.
+  /// Bkz. [registerPlaintextHolder].
+  final List<void Function()> _plaintextHolders = [];
+
+  /// masterKey dispose edilirken (kilit/arka plan/signOut/reset/close) SENKRON
+  /// çağrılacak bir temizleyici kaydeder; kaydı geri alan fonksiyonu döner.
+  ///
+  /// **Neden var (P2-1):** `lock(immediate: true)` anahtarı senkron dispose eder
+  /// çünkü arka planda bir frame GARANTİ DEĞİLDİR (`lock` doc'u). Ama çözülmüş
+  /// TOTP tohumlarının düşmesi tam da o frame'e bağlıydı: `emit(_locked())` →
+  /// router redirect → subtree teardown → `VaultCubit.close()`. Arka planda frame
+  /// gelmezse anahtar gidiyor, korumakla görevli olduğu plaintext (her
+  /// `OtpAccount.secret`, repo'nun `_lastById`'si) arka plan boyunca canlı
+  /// kalıyordu. Bu kanca temizliği anahtarın dispose'uyla AYNI ana bağlar.
+  ///
+  /// Bağlantı yeri `app_router.dart`'ın ShellRoute'udur (VaultCubit'i orası
+  /// kurar); kayıt subtree dispose olurken geri alınır. Callback SENKRON olmalı
+  /// ve fırlatmamalıdır — bir tanesi fırlatsa bile diğerleri ve anahtarın
+  /// dispose'u YİNE çalışır.
+  VoidCallback registerPlaintextHolder(void Function() wipe) {
+    _plaintextHolders.add(wipe);
+    return () => _plaintextHolders.remove(wipe);
+  }
+
   void _disposeKey() {
+    // ÖNCE plaintext (anahtar serbest bırakılmadan), SONRA anahtar. Kopya
+    // üzerinde gezilir: bir callback kaydını kendisi geri alabilir.
+    for (final wipe in List<void Function()>.of(_plaintextHolders)) {
+      try {
+        wipe();
+      } catch (_) {
+        /* biri patlasa bile diğerleri + key dispose ÇALIŞMALI */
+      }
+    }
     _masterKey?.dispose(); // idempotent
     _masterKey = null;
   }

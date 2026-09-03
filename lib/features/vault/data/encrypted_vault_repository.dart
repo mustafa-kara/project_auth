@@ -79,7 +79,8 @@ class _TokenRecord {
   );
 }
 
-class EncryptedVaultRepository implements VaultRepository, RawTokenStore {
+class EncryptedVaultRepository
+    implements VaultRepository, RawTokenStore, PlaintextCache {
   /// Token-bazlı şifreli kayıt dizisinin tutulduğu depo anahtarı (taban).
   static const vaultKey = 'vault_encrypted_v1';
 
@@ -171,17 +172,26 @@ class EncryptedVaultRepository implements VaultRepository, RawTokenStore {
           key: _masterKey,
           aad: _aad(id),
         );
-        final account = OtpAccount.fromJson(
-          _coerceStringKeys(jsonDecode(utf8.decode(plaintext)) as Map),
-        );
-        accounts.add(account);
-        _lastById[id] = _LoadedRecord(
-          account: account,
-          blob: parsed.blob,
-          version: parsed.version,
-          updatedAt: parsed.updatedAt,
-          serverUpdatedAtIso: parsed.serverUpdatedAtIso,
-        );
+        // Zero-fill (güvenlik denetimi P2-6): çözülen tampon ham JSON'dur, yani
+        // Base32 TOTP tohumunu içerir. `BackupService.importDetailed` ile aynı
+        // `try/finally` kalıbı + CRYPTO.md §3/§16.5 kuralı. SINIR (kabul edilen):
+        // `utf8.decode`'un ürettiği `String` ve `OtpAccount.secret` silinemez —
+        // bu yalnız iki kopyadan ULAŞILABİLİR olanını temizler.
+        try {
+          final account = OtpAccount.fromJson(
+            _coerceStringKeys(jsonDecode(utf8.decode(plaintext)) as Map),
+          );
+          accounts.add(account);
+          _lastById[id] = _LoadedRecord(
+            account: account,
+            blob: parsed.blob,
+            version: parsed.version,
+            updatedAt: parsed.updatedAt,
+            serverUpdatedAtIso: parsed.serverUpdatedAtIso,
+          );
+        } finally {
+          plaintext.fillRange(0, plaintext.length, 0);
+        }
       } catch (_) {
         // decrypt fail (tamper/yanlış key) VEYA çözülen plaintext bozuk →
         // raw'ı koru (silme!), say.
@@ -248,11 +258,18 @@ class EncryptedVaultRepository implements VaultRepository, RawTokenStore {
         final plaintext = Uint8List.fromList(
           utf8.encode(jsonEncode(account.toJson())),
         );
-        final blob = _crypto.encrypt(
-          plaintext: plaintext,
-          key: _masterKey,
-          aad: _aad(account.id),
-        );
+        // Zero-fill (P2-6) — `_crypto.encrypt` girdiyi kopyalar (ciphertext ayrı
+        // tampondur), tutmaz → şifreledikten hemen sonra silmek güvenli.
+        final EncryptedBlob blob;
+        try {
+          blob = _crypto.encrypt(
+            plaintext: plaintext,
+            key: _masterKey,
+            aad: _aad(account.id),
+          );
+        } finally {
+          plaintext.fillRange(0, plaintext.length, 0);
+        }
         final updatedAt = _nowMs();
         records.add(
           _TokenRecord(
@@ -297,6 +314,32 @@ class EncryptedVaultRepository implements VaultRepository, RawTokenStore {
     _lastById.removeWhere((id, _) => !presentIds.contains(id));
 
     await _storage.write(key: _vaultStorageKey, value: jsonEncode(records));
+  }
+
+  /// Bellekteki tüm çözülmüş/ham kayıt önbelleğini bırakır (güvenlik denetimi
+  /// P2-1). **Diske DOKUNMAZ** — yalnız referansları düşürür.
+  ///
+  /// `VaultLockCubit._disposeKey()` bunu masterKey serbest bırakılmadan HEMEN
+  /// ÖNCE çağırır. Gerekçe: `lock(immediate: true)` anahtarı senkron dispose eder
+  /// çünkü arka planda bir frame GARANTİ DEĞİLDİR — ama plaintext'in düşmesi
+  /// (subtree teardown → `VaultCubit.close()`) tam da o frame'e bağlıydı. Yani
+  /// anahtar gidiyordu, korumakla görevli olduğu Base32 tohumlar arka plan
+  /// boyunca canlı kalıyordu.
+  ///
+  /// **Dürüst sınır:** bu, string'leri ULAŞILAMAZ yapar, SİLMEZ. Dart bir
+  /// `String`'i sıfırlayamaz ve GC geri kazandığı sayfaları temizlemez. Kazanç,
+  /// sırların artık nesne grafiğinde KÖKLÜ olmaması — "saldırgan cubit'ten
+  /// yürüyerek bulur" ile "serbest bırakılmış yığını taramak zorunda" farkı.
+  ///
+  /// Sonrasında bu instance ile yazma güvenlidir: `save()` her kaydı yeniden
+  /// şifrelemeye çalışır (dispose edilmiş key → istisna, TEK bir `_storage.write`
+  /// hepsinden SONRA geldiği için yarım yazma yok), `markDeleted` no-op'a düşer,
+  /// `importRemote`/`exportRaw`/`purgeCorrupted` zaten diskten okur.
+  @override
+  void forgetPlaintext() {
+    _lastById.clear();
+    _tombstones.clear();
+    _corruptedRaw.clear();
   }
 
   @override
