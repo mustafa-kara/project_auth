@@ -264,12 +264,25 @@ class VaultLockCubit extends Cubit<VaultLockState> {
       }
       await _restoreFromRemote();
     } on FormatException {
-      emit(const VaultLockState.keyAttributesCorrupted());
+      emit(_corrupted());
     } on PlatformException {
       // Keystore/Keychain okuma hatası (P1-2) — asla sessiz `uninitialized`.
-      emit(const VaultLockState.keyAttributesCorrupted());
+      emit(_corrupted());
     }
   }
+
+  /// `keyAttributesCorrupted` emit'i, deneme sayacını İLERLETEREK (doğrulama NEW-3).
+  ///
+  /// `retryBootstrap()` sabit bir `const VaultLockState.keyAttributesCorrupted()`
+  /// emit etseydi bloc onu mevcut state'e EŞİT görüp düşürürdü → "Yeniden dene"
+  /// hiçbir gözlemlenebilir değişiklik üretmezdi. Sayaç `props`'ta olduğu için her
+  /// başarısız deneme AYRI bir state olur; ekran "Hâlâ okunamıyor" gösterebilir.
+  /// Başka bir state'ten ilk düşüşte 1'den başlar.
+  VaultLockState _corrupted() => VaultLockState.keyAttributesCorrupted(
+    attempt: state.status == VaultLockStatus.keyAttributesCorrupted
+        ? state.attempt + 1
+        : 1,
+  );
 
   /// Faz 3 Patch 2 — yeni cihazda sunucudan `key_attributes` restore.
   ///
@@ -484,7 +497,8 @@ class VaultLockCubit extends Cubit<VaultLockState> {
   /// invariant'ı korunur (kabaran exception caller'a gider, `locked` kalırız).
   Future<void> unlock(String password) async {
     _abortToBackground = false; // hassas işlem başı (review P1)
-    final attrs = await _readAttrsOrThrow();
+    final attrs = await _readAttrsOrCorrupted();
+    if (attrs == null) return; // depo hatası → keyAttributesCorrupted (NEW-2)
     await _refreshBiometricState(
       attrs,
     ); // biyometri state'i (her emit'e taşınır)
@@ -497,9 +511,15 @@ class VaultLockCubit extends Cubit<VaultLockState> {
     }
     var owned = false;
     try {
-      await _migrate(
-        key,
-      ); // crash sonrası yarım migration unlock yolunda tamamlanır
+      try {
+        await _migrate(
+          key,
+        ); // crash sonrası yarım migration unlock yolunda tamamlanır
+      } on PlatformException {
+        // Migration marker'ları AYNI depoyu kullanır (NEW-2) → aynı ekran.
+        emit(_corrupted());
+        return; // finally key'i dispose eder (owned=false)
+      }
       // Arka-plan yarışı (review P1): Argon2/migration sürerken app background
       // olduysa key'i sahiplenme + unlocked emit ETME → arka planda kilitli kal.
       if (_abortToBackground) {
@@ -529,7 +549,8 @@ class VaultLockCubit extends Cubit<VaultLockState> {
     String newPassword,
   ) async {
     _abortToBackground = false; // hassas işlem başı (review P1)
-    final attrs = await _readAttrsOrThrow();
+    final attrs = await _readAttrsOrCorrupted();
+    if (attrs == null) return; // depo hatası → keyAttributesCorrupted (NEW-2)
     KeyHandle? key;
     var owned =
         false; // sahiplik _masterKey'e geçti mi (geçtiyse finally dispose etmez)
@@ -549,7 +570,13 @@ class VaultLockCubit extends Cubit<VaultLockState> {
       ); // bmk korunmuşsa enrolled true kalır
       // Migration BAŞARIYLA bitmeden sahiplenme (review P1): _migrate fırlatırsa
       // key finally'de dispose edilir, _masterKey null kalır (locked invariant'ı korunur).
-      await _migrate(key);
+      try {
+        await _migrate(key);
+      } on PlatformException {
+        // Migration marker'ları AYNI depoyu kullanır (NEW-2) → aynı ekran.
+        emit(_corrupted());
+        return; // finally key'i dispose eder (owned=false)
+      }
       // Arka-plan yarışı (review P1): işlem sürerken app background olduysa
       // unlocked'a GEÇME → arka planda kilitli kal (key finally'de dispose).
       if (_abortToBackground) {
@@ -793,6 +820,16 @@ class VaultLockCubit extends Cubit<VaultLockState> {
   /// Tüm vault verisini siler (çift onaylı UI aksiyonu sonrası çağrılır).
   /// [VaultStorageKeys.all] → setup'a döner. plaintext + marker dahil silinir →
   /// reset sonrası eski plaintext yeniden migrate EDİLMEZ (yarım durum kalmaz).
+  ///
+  /// **Görsel not — `/unlock` üzerinden geçiş (doğrulama NEW-5, kozmetik):**
+  /// `unlocked` bir vault'tan çağrıldığında state `locking → locked` olur ve
+  /// `uninitialized` ancak en sonda emit edilir, yani router uzaktaki tombstone
+  /// + `biometric.disable()` + `_deleteKeys` await'leri boyunca `/unlock`
+  /// gösterir, sonra `/setup`'a geçer; ayrıca `VaultCubit.wipe()` `state.error`'ı
+  /// temizlediği için `_IntegrityErrorView` reset ortasında kaybolur. Bu, P3-2'nin
+  /// güvenli sıralamasının BİLİNÇLİ bedelidir (anahtar, tüketicisi sökülmeden
+  /// serbest bırakılmaz); reset her durumda tamamlanır. Yavaş ağda kafa
+  /// karıştırırsa çözüm ayrı bir `resetting` statüsüdür — bkz. docs/CRYPTO.md §11.
   Future<void> resetVault() async {
     // **Durum makinesinden GEÇ (güvenlik denetimi P3-2).** `_disposeKey()`'i
     // doğrudan çağırmak, `unlocked` subtree'si HÂLÂ MONTELİ iken anahtarı serbest
@@ -936,7 +973,8 @@ class VaultLockCubit extends Cubit<VaultLockState> {
   /// true → sistem prompt'unun ürettiği `inactive` abort'tan muaf (reviewer 2.tur [P1]).
   Future<void> biometricUnlock() async {
     _abortToBackground = false; // hassas işlem başı
-    final attrs = await _readAttrsOrThrow();
+    final attrs = await _readAttrsOrCorrupted();
+    if (attrs == null) return; // depo hatası → keyAttributesCorrupted (NEW-2)
     await _refreshBiometricState(attrs);
 
     // **Bayrak `finally` ile TEK noktada sıfırlanır (güvenlik denetimi P2-2).**
@@ -1024,7 +1062,13 @@ class VaultLockCubit extends Cubit<VaultLockState> {
 
     var owned = false;
     try {
-      await _migrate(key);
+      try {
+        await _migrate(key);
+      } on PlatformException {
+        // Migration marker'ları AYNI depoyu kullanır (NEW-2) → aynı ekran.
+        emit(_corrupted());
+        return; // finally key'i dispose eder (owned=false)
+      }
       if (_abortToBackground) {
         _abortToBackground = false;
         emit(_locked());
@@ -1050,6 +1094,27 @@ class VaultLockCubit extends Cubit<VaultLockState> {
       throw StateError('unlock/recover: key attributes yok');
     }
     return attrs;
+  }
+
+  /// [_readAttrsOrThrow]'un platform depo hatasını `keyAttributesCorrupted`'a
+  /// çeviren sarmalayıcısı (doğrulama NEW-2). **null döndüyse state ZATEN emit
+  /// edildi → caller HEMEN `return` etmeli.**
+  ///
+  /// Gerekçe: `resetOnError: false` (bkz. `locator.dart`) ile bir Keystore/Keychain
+  /// unwrap hatası artık sessiz `null` yerine `PlatformException` olarak yüzeye
+  /// çıkıyor. `bootstrap()` bunu ele alıyordu; unlock ailesi almıyordu — okuma
+  /// `try` DIŞINDA await ediliyor, `UnlockPage` de yalnız `try/finally`
+  /// kullandığı için istisna işlenmemiş async hataya dönüşüyor, state DEĞİŞMİYOR
+  /// ve kullanıcı hiçbir şey yapmayan bir butonla kalıyordu. Artık P1-2'nin
+  /// hedeflediği kurtarılabilir ekrana (`/auth-integrity` + "Yeniden dene")
+  /// düşülür.
+  Future<KeyAttributes?> _readAttrsOrCorrupted() async {
+    try {
+      return await _readAttrsOrThrow();
+    } on PlatformException {
+      emit(_corrupted());
+      return null;
+    }
   }
 
   // --- Plaintext tutucuları (güvenlik denetimi P2-1) ---

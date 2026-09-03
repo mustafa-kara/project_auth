@@ -112,12 +112,24 @@ class SecureLocalStorage extends LocalStorage {
   ///
   /// Secure storage'da ZATEN bir kayıt varsa eski kopya sadece TEMİZLENİR — göç
   /// bitmiştir ve bayat prefs değeri güncel oturumu ezmemelidir.
+  ///
+  /// **`containsKey` fırlatırsa göç İPTAL edilir (doğrulama NEW-6):** hata
+  /// "kayıt yok" ile aynı sayılırsa (bkz. [_hasSecure]) bayat prefs oturumu
+  /// CANLI secure oturumun üzerine yazılabilirdi. Bilinmeyen ≠ yok; hiçbir şeye
+  /// dokunmadan dönülür (prefs kopyası da DURUR) ve göç bir sonraki açılışta
+  /// yeniden denenir.
   Future<void> _migrateFromPrefs() async {
     try {
       await _legacy.initialize();
       final stale = await _legacy.accessToken();
       if (stale == null) return;
-      if (!await _hasSecure()) {
+      final bool secureHas;
+      try {
+        secureHas = await _storage.containsKey(key: persistSessionKey);
+      } on PlatformException {
+        return; // bilinmeyen → ne yaz ne sil (bir sonraki açılışta yeniden dene)
+      }
+      if (!secureHas) {
         await _storage.write(key: persistSessionKey, value: stale);
       }
       // Yalnız secure kopya sağlama alındıktan SONRA sil: arada bir çökme
@@ -129,6 +141,10 @@ class SecureLocalStorage extends LocalStorage {
     }
   }
 
+  /// **YALNIZ [hasAccessToken] için** (doğrulama NEW-6). Burada hatayı "oturum
+  /// yok" saymak doğrudur: sonuç kullanıcının yeniden giriş yapmasıdır, veri
+  /// kaybı değil. Göç yolu bunu KULLANMAZ — orada aynı varsayım bayat bir
+  /// oturumun canlı olanı ezmesine yol açardı.
   Future<bool> _hasSecure() async {
     try {
       return await _storage.containsKey(key: persistSessionKey);

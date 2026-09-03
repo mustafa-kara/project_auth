@@ -254,6 +254,7 @@ VaultLockCubit _build(
   List<String>? migrated,
   List<String>? deletedSink,
   bool migrationFails = false,
+  Object? migrationError,
   Future<void>? migrateGate,
   BiometricService? biometric,
   KeyAttributesRepository? remoteRepo,
@@ -272,6 +273,7 @@ VaultLockCubit _build(
       // migrateGate verildiyse migration burada askıya alınır (P1 yarış testleri:
       // işlem _migrate'te beklerken onAppBackgrounded tetiklenir).
       if (migrateGate != null) await migrateGate;
+      if (migrationError != null) throw migrationError;
       if (migrationFails) throw StateError('migration patladı');
       mig.add('migrated');
     },
@@ -424,6 +426,97 @@ void main() {
       await cubit.retryBootstrap();
       expect(cubit.state.status, VaultLockStatus.locked);
     });
+
+    test(
+      'ard arda başarısız retryBootstrap → İKİ FARKLI state (NEW-3)',
+      () async {
+        // Bloc mevcut state'e EŞİT bir emit'i düşürür; sayaç olmadan "Yeniden dene"
+        // hiçbir gözlemlenebilir değişiklik üretmezdi (buton ölü görünürdü).
+        await store.write(_fakeAttrs());
+        storage.readError = PlatformException(
+          code: 'Keystore',
+          message: 'test',
+        );
+        final cubit = _build(FakeKeyManager(), store);
+        final seen = <VaultLockState>[];
+        final sub = cubit.stream.listen(seen.add);
+
+        await cubit.bootstrap();
+        await cubit.retryBootstrap();
+        await cubit.retryBootstrap();
+        await Future<void>.delayed(Duration.zero); // stream teslimi
+        await sub.cancel();
+
+        expect(seen, hasLength(3));
+        expect(
+          seen.map((s) => s.status),
+          everyElement(VaultLockStatus.keyAttributesCorrupted),
+        );
+        expect(seen.map((s) => s.attempt), [1, 2, 3]);
+        expect(seen[1], isNot(seen[0]), reason: 'her deneme ayırt edilebilir');
+      },
+    );
+  });
+
+  // --- Doğrulama NEW-2: unlock ailesinde depo hatası → integrity ekranı ---
+  group('unlock yolları: attrs okuması PlatformException (NEW-2)', () {
+    setUp(() async => store.write(_fakeAttrs()));
+
+    void failReads() => storage.readError = PlatformException(
+      code: 'Keystore',
+      message: 'test',
+    );
+
+    test(
+      'unlock → keyAttributesCorrupted (sessiz unhandled hata YOK)',
+      () async {
+        final cubit = _build(FakeKeyManager(), store);
+        await cubit.bootstrap();
+        failReads();
+        await cubit.unlock('parola123');
+        expect(cubit.state.status, VaultLockStatus.keyAttributesCorrupted);
+      },
+    );
+
+    test('recoverWithNewPassword → keyAttributesCorrupted', () async {
+      final cubit = _build(FakeKeyManager(), store);
+      await cubit.bootstrap();
+      failReads();
+      await cubit.recoverWithNewPassword(
+        List.generate(24, (i) => 'word$i'),
+        'yeniParola123',
+      );
+      expect(cubit.state.status, VaultLockStatus.keyAttributesCorrupted);
+    });
+
+    test('biometricUnlock → keyAttributesCorrupted', () async {
+      final cubit = _build(FakeKeyManager(), store);
+      await cubit.bootstrap();
+      failReads();
+      await cubit.biometricUnlock();
+      expect(cubit.state.status, VaultLockStatus.keyAttributesCorrupted);
+    });
+
+    test(
+      'migration marker okuması patlarsa → keyAttributesCorrupted + key sızmaz',
+      () async {
+        // VaultMigration marker'ları AYNI FlutterSecureStorage'ı kullanır.
+        final km = FakeKeyManager();
+        final cubit = _build(
+          km,
+          store,
+          migrationError: PlatformException(code: 'Keystore', message: 'test'),
+        );
+        await cubit.bootstrap();
+        await cubit.unlock('parola123');
+        expect(cubit.state.status, VaultLockStatus.keyAttributesCorrupted);
+        expect(
+          km.issued.single.disposed,
+          isTrue,
+          reason: 'sahiplenilmemiş key dispose edilir (locked invariant)',
+        );
+      },
+    );
   });
 
   group('setup commit (recovery doğrulanmadan persist YOK)', () {
