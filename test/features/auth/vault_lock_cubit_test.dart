@@ -941,6 +941,32 @@ void main() {
       expect(VaultStorageKeys.all, contains(VaultStorageKeys.biometricKey));
     });
 
+    test(
+      'unlocked iken reset ÖNCE lock(immediate) yolundan geçer (P3-2)',
+      () async {
+        await store.write(_fakeAttrs());
+        final km = FakeKeyManager();
+        final cubit = _build(km, store);
+        await cubit.bootstrap();
+        await cubit.unlock('parola123');
+        expect(cubit.state.status, VaultLockStatus.unlocked);
+
+        final seen = <VaultLockStatus>[];
+        final sub = cubit.stream.listen((s) => seen.add(s.status));
+        await cubit.resetVault();
+        await Future<void>.delayed(Duration.zero); // stream teslimi
+        await sub.cancel();
+
+        // Durum makinesi ATLANMADI: locking → locked → uninitialized.
+        expect(seen, [
+          VaultLockStatus.locking,
+          VaultLockStatus.locked,
+          VaultLockStatus.uninitialized,
+        ]);
+        expect(km.issued.single.disposed, isTrue);
+      },
+    );
+
     test('signed-in reset tombstones the server token rows', () async {
       final tokenRepo = FakeRemoteTokenRepository();
       final cubit = _build(

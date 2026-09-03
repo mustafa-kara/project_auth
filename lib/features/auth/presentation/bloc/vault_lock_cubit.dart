@@ -794,7 +794,22 @@ class VaultLockCubit extends Cubit<VaultLockState> {
   /// [VaultStorageKeys.all] → setup'a döner. plaintext + marker dahil silinir →
   /// reset sonrası eski plaintext yeniden migrate EDİLMEZ (yarım durum kalmaz).
   Future<void> resetVault() async {
-    _disposeKey();
+    // **Durum makinesinden GEÇ (güvenlik denetimi P3-2).** `_disposeKey()`'i
+    // doğrudan çağırmak, `unlocked` subtree'si HÂLÂ MONTELİ iken anahtarı serbest
+    // bırakıyordu: aşağıdaki `await`'ler (remote tombstone, `biometric.disable`,
+    // `_deleteKeys`) boyunca `EncryptedVaultRepository` aynı `KeyHandle`'a
+    // referans tutar ve eşzamanlı bir `encrypt`/`decrypt` `sodium_free`'lenmiş bir
+    // pointer'ı dereference ederdi (`SecureKeyFFI.runUnlockedNative` →
+    // `sodium_mprotect_readonly`). Sınıf doc'undaki `locking` → dispose sırası tam
+    // olarak bunu önlemek için var; buradan ona ULAŞMAK yerine ondan GEÇİLİR.
+    //
+    // Bugün ERİŞİLEBİLİR DEĞİL (tek in-vault çağıran `_IntegrityErrorView` ve o
+    // yalnız `load()` fırlattığında görünür — sequencer boşta, Realtime yok), ama
+    // gelecekteki bir çağıran için gizli tuzak olmasın.
+    if (state.status == VaultLockStatus.unlocked) {
+      lock(immediate: true); // locking → senkron dispose (+ plaintext) → locked
+    }
+    _disposeKey(); // diğer durumlar (setupPending/locking) + idempotent güvence
     _pendingAttrs = null;
 
     // Security review finding 1 — discard the SERVER token rows too (signed-in
