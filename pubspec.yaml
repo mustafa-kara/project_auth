@@ -104,6 +104,14 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
   mocktail: ^1.0.5
+  # YALNIZ TEST için doğrudan (uygulama kodunda import EDİLMEZ). Review [P2-5]:
+  # Supabase oturumu + PKCE verifier düz SharedPreferences'tan Keychain/Keystore'a
+  # göçürülüyor; göç testi eski kaydı `SharedPreferences.setMockInitialValues` ile
+  # kurar, yani gerçek prefs anahtar adını ve gerçek `SharedPreferencesLocalStorage`
+  # yolunu uçtan uca pinler (sahte bir "legacy" nesnesi bunu yapamazdı).
+  # supabase_flutter zaten transitive olarak buna bağlı; sürüm pubspec.lock'taki
+  # çözülmüş sürüme SABİTLENDİ ki dev bağımlılığı çözümü kaydırmasın.
+  shared_preferences: 2.5.5
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

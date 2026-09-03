@@ -5,6 +5,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'core/config/secure_gotrue_storage.dart';
 import 'core/config/supabase_config.dart';
 import 'core/crypto/crypto_service.dart';
 import 'core/di/locator.dart';
@@ -51,11 +52,22 @@ Future<void> main() async {
     return;
   }
   // Faz 3 Patch 1: kimlik katmanı. PKCE → e-posta onay deep-link'ini güvenli tamamlar.
+  //
+  // `localStorage`/`pkceAsyncStorage` AÇIKÇA geçilir: varsayılanları
+  // SharedPreferences'tır, yani uzun ömürlü refresh token ve PKCE verifier düz
+  // metin dosyada dururken uygulamanın geri kalanı Keychain/Keystore kullanır
+  // (review [P2-5]). Adaptörler mevcut kullanıcıları çıkış yaptırmamak için
+  // eski prefs kaydını ilk açılışta göçürür. NOT: bunlar DI'dan ÖNCE kurulur —
+  // `configureDependencies()` aşağıda — bu yüzden locator'a değil, kendi
+  // `FlutterSecureStorage` örneklerine bağlıdırlar (bkz. secure_gotrue_storage.dart).
+  final persistSessionKey = supabasePersistSessionKeyFor(SupabaseConfig.url);
   await Supabase.initialize(
     url: SupabaseConfig.url,
     publishableKey: SupabaseConfig.publishableKey,
-    authOptions: const FlutterAuthClientOptions(
+    authOptions: FlutterAuthClientOptions(
       authFlowType: AuthFlowType.pkce,
+      localStorage: SecureLocalStorage(persistSessionKey: persistSessionKey),
+      pkceAsyncStorage: SecureGotrueAsyncStorage(),
     ),
   );
   await configureDependencies();
