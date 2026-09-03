@@ -15,6 +15,7 @@ import 'package:flutter/services.dart';
 import '../../../../core/di/locator.dart';
 import '../../../../core/otp/otp_account.dart';
 import '../../../../core/otp/otp_generator.dart';
+import '../../../../core/platform/sensitive_clipboard.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/ui/tokens.dart';
 import '../../../../core/ui/widgets/countdown_ring.dart';
@@ -73,6 +74,15 @@ class _OtpCardState extends State<OtpCard> {
   /// OTP rotates with its period and the user pastes immediately.
   /// (Same pattern as recovery_show_page — there 60s; OTP is shorter-lived.)
   static const Duration _clearAfter = Duration(seconds: 30);
+
+  /// OS düzeyinde pano süre sonu (iOS `UIPasteboard.expirationDate`), review
+  /// [P2-4]. [_clearAfter]'dan KASITLI olarak uzun: normal akışta koşullu Dart
+  /// temizliği kazanmalı (kullanıcı arada başka bir şey kopyaladıysa panosuna
+  /// DOKUNMAZ — OS süre sonu bu ayrımı yapamaz, kendi ögesini düşürür). OS süre
+  /// sonu yalnız Dart timer'ının HİÇ çalışmadığı durumun (süreç öldürüldü /
+  /// donduruldu) emniyet ağıdır.
+  static const Duration _clipboardExpiry = Duration(seconds: 45);
+
   Timer? _clearTimer;
   String? _copiedValue;
 
@@ -148,7 +158,10 @@ class _OtpCardState extends State<OtpCard> {
 
   Future<void> _copy() async {
     final code = _code;
-    await Clipboard.setData(ClipboardData(text: code));
+    // Düz `Clipboard.setData` DEĞİL: kod cihaz-yerel kalsın (iOS Universal
+    // Clipboard ile diğer cihazlara geçmesin), Android 13+ pano önizlemesinde
+    // görünmesin ve OS'un kendi süre sonu emniyet ağı olsun (review [P2-4]).
+    await SensitiveClipboard.setText(code, expiresIn: _clipboardExpiry);
     _copiedValue = code;
     _clearTimer?.cancel();
     _clearTimer = Timer(_clearAfter, _clearClipboardIfUnchanged);
